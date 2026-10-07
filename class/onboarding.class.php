@@ -22,15 +22,43 @@ class OnboardingService
 	/** @var int|null Overrides the clock, for tests and the sandbox. */
 	public static $now = null;
 
-	/** Fields mirrored onto both the contact and the member card. */
-	const MIRRORED = array(
-		'onb_discord' => array('Discord username', 'varchar', 100),
-		'onb_notify_events' => array('Notify: events', 'boolean', ''),
-		'onb_notify_news' => array('Notify: news and updates', 'boolean', ''),
-		'onb_waiver_signed' => array('Waiver signed', 'boolean', ''),
-		'onb_agreement_signed' => array('Agreement signed', 'boolean', ''),
-		'onb_id_uploaded' => array('ID photo uploaded', 'boolean', ''),
-		'onb_payment_state' => array('Dues status', 'select', ''),
+	/**
+	 * Extra fields on the member card. The same schema is defined in
+	 * CGWManagement/dolibarr/scripts/bootstrap.py (MEMBER_EXTRAFIELDS); keep the
+	 * two identical. Fields the applicant table mirrors are also put on the
+	 * contact card (see CONTACT_FIELDS). Format: label, type, size, position, unique.
+	 */
+	const MEMBER_FIELDS = array(
+		'member_code' => array('Member code (badge label, e.g. CGW-13)', 'varchar', 16, 110, 1),
+		'credential_id' => array('Credential ID (fob serial, keypad slot, old key)', 'varchar', 64, 120, 0),
+		'access_enabled' => array('Door access enabled', 'boolean', '', 130, 0),
+		'waiver_date' => array('Waiver signed', 'date', '', 140, 0),
+		'agreement_date' => array('Membership agreement signed', 'date', '', 145, 0),
+		'id_verified' => array('Photo ID on file', 'boolean', '', 150, 0),
+		'discord_handle' => array('Discord handle', 'varchar', 64, 170, 0),
+		'payment_channel' => array('Recurring payment channel', 'select', '', 190, 0),
+		'payment_state' => array('Dues status', 'select', '', 200, 0),
+		'dues_waived_until' => array('Dues waived until', 'date', '', 210, 0),
+		'notify_events' => array('Notify: events', 'boolean', '', 220, 0),
+		'notify_news' => array('Notify: news and updates', 'boolean', '', 230, 0),
+	);
+
+	/** Fields mirrored from the applicant row onto both the contact and the member card. */
+	const CONTACT_FIELDS = array('discord_handle', 'waiver_date', 'agreement_date', 'id_verified', 'payment_state', 'notify_events', 'notify_news');
+
+	/** Field names used before the schema merge (October 2026), old => new. */
+	const RENAMED = array(
+		'onb_discord' => 'discord_handle',
+		'onb_notify_events' => 'notify_events',
+		'onb_notify_news' => 'notify_news',
+		'onb_waiver_signed' => 'waiver_date',
+		'onb_agreement_signed' => 'agreement_date',
+		'onb_id_uploaded' => 'id_verified',
+		'onb_payment_state' => 'payment_state',
+		'onb_badge_id' => 'member_code',
+		'onb_badge_access' => 'access_enabled',
+		'onb_dues_waived_until' => 'dues_waived_until',
+		'onb_payment_channel' => 'payment_channel',
 	);
 
 	const PAYMENT_STATES = array(
@@ -43,10 +71,12 @@ class OnboardingService
 
 	/** Only Givebutter dues are tracked automatically. The others are kept up by hand. */
 	const PAYMENT_CHANNELS = array(
-		'givebutter' => 'Givebutter',
-		'paypal' => 'PayPal',
-		'check' => 'Check',
-		'none' => 'Nothing (scholarship or waived)',
+		'Givebutter' => 'Givebutter',
+		'PayPal' => 'PayPal',
+		'Check' => 'Check',
+		'Cash' => 'Cash',
+		'Venmo' => 'Venmo',
+		'None' => 'None (scholarship or waived)',
 	);
 
 	/**
@@ -76,27 +106,85 @@ class OnboardingService
 	public static function installExtraFields($db)
 	{
 		$extrafields = new ExtraFields($db);
-		$pos = 500;
 		foreach (array('socpeople', 'adherent') as $element) {
 			$extrafields->fetch_name_optionals_label($element, true);
 			$have = isset($extrafields->attributes[$element]['label']) ? $extrafields->attributes[$element]['label'] : array();
-			$fields = self::MIRRORED;
-			if ($element == 'adherent') {
-				$fields['onb_badge_id'] = array('Badge ID', 'varchar', 64);
-				$fields['onb_badge_access'] = array('Badge access active', 'boolean', '');
-				$fields['onb_dues_waived_until'] = array('Dues waived until', 'date', '');
-				$fields['onb_payment_channel'] = array('Pays dues by', 'select', '');
+			$fields = self::MEMBER_FIELDS;
+			if ($element == 'socpeople') {
+				$fields = array_intersect_key($fields, array_flip(self::CONTACT_FIELDS));
 			}
 			foreach ($fields as $name => $def) {
-				$pos++;
-				if (isset($have[$name])) {
-					continue;
-				}
 				$param = '';
 				if ($def[1] == 'select') {
-					$param = array('options' => $name == 'onb_payment_channel' ? self::PAYMENT_CHANNELS : self::PAYMENT_STATES);
+					$param = array('options' => $name == 'payment_channel' ? self::PAYMENT_CHANNELS : self::PAYMENT_STATES);
 				}
-				$extrafields->addExtraField($name, $def[0], $def[1], $pos, $def[2], $element, 0, 0, '', $param, 1, '', '1');
+				if (isset($have[$name])) {
+					// Keep the choice lists current (the channel list grew in October 2026).
+					$current = isset($extrafields->attributes[$element]['param'][$name]['options']) ? $extrafields->attributes[$element]['param'][$name]['options'] : null;
+					if ($param !== '' && $current !== $param['options']) {
+						$extrafields->update($name, $def[0], $def[1], $def[2], $element, $def[4], 0, $def[3], $param, 1, '', '1');
+					}
+					continue;
+				}
+				$extrafields->addExtraField($name, $def[0], $def[1], $def[3], $def[2], $element, $def[4], 0, '', $param, 1, '', '1');
+			}
+			self::migrateExtraFields($db, $extrafields, $element, $have);
+		}
+	}
+
+	/**
+	 * Move data out of the onb_* fields an earlier version created, then drop them.
+	 * Runs once per install; a second run finds nothing to do.
+	 *
+	 * @param DoliDB $db Database handler
+	 * @param ExtraFields $extrafields Loaded for $element
+	 * @param string $element 'socpeople' or 'adherent'
+	 * @param array $have Field labels present before this install
+	 * @return void
+	 */
+	private static function migrateExtraFields($db, $extrafields, $element, $have)
+	{
+		$table = $db->prefix().$element."_extrafields";
+		$old = array_intersect_key(self::RENAMED, $have);
+		if (!$old) {
+			return;
+		}
+		foreach ($old as $from => $to) {
+			switch ($from) {
+				case 'onb_waiver_signed':
+				case 'onb_agreement_signed':
+					// Yes/no became a date; the applicant table has the date (resynced below).
+					break;
+				case 'onb_payment_channel':
+					$case = "CASE ".$from;
+					foreach (self::PAYMENT_CHANNELS as $key => $label) {
+						$case .= " WHEN '".$db->escape(strtolower($key))."' THEN '".$db->escape($key)."'";
+					}
+					$case .= " ELSE NULL END";
+					$db->query("UPDATE ".$table." SET ".$to." = ".$case." WHERE ".$to." IS NULL AND ".$from." IS NOT NULL");
+					break;
+				case 'onb_badge_id':
+					// member_code is unique: copy one at a time, skip a code already taken.
+					$res = $db->query("SELECT fk_object, ".$from." AS v FROM ".$table." WHERE ".$to." IS NULL AND ".$from." IS NOT NULL AND ".$from." <> '' ORDER BY fk_object");
+					while ($res && ($obj = $db->fetch_object($res))) {
+						$taken = $db->query("SELECT fk_object FROM ".$table." WHERE ".$to." = '".$db->escape($obj->v)."'");
+						if ($taken && $db->num_rows($taken) > 0) {
+							dol_syslog('Onboarding: badge '.$obj->v.' of member '.$obj->fk_object.' already used as member_code; not copied', LOG_WARNING);
+							continue;
+						}
+						$db->query("UPDATE ".$table." SET ".$to." = '".$db->escape($obj->v)."' WHERE fk_object = ".((int) $obj->fk_object));
+					}
+					break;
+				default:
+					$db->query("UPDATE ".$table." SET ".$to." = ".$from." WHERE ".$to." IS NULL AND ".$from." IS NOT NULL");
+			}
+			$extrafields->delete($from, $element);
+		}
+		if ($element == 'adherent') {
+			$svc = new self($db);
+			$res = $db->query("SELECT rowid FROM ".$db->prefix()."onboarding_applicant");
+			while ($res && ($obj = $db->fetch_object($res))) {
+				$svc->syncExtraFields($svc->fetch((int) $obj->rowid));
 			}
 		}
 	}
@@ -394,13 +482,13 @@ class OnboardingService
 	public function syncExtraFields($app)
 	{
 		$values = array(
-			'onb_discord' => (string) $app->discord,
-			'onb_notify_events' => (int) $app->notify_events,
-			'onb_notify_news' => (int) $app->notify_news,
-			'onb_waiver_signed' => empty($app->waiver_signed_at) ? 0 : 1,
-			'onb_agreement_signed' => empty($app->agreement_signed_at) ? 0 : 1,
-			'onb_id_uploaded' => empty($app->id_uploaded_at) ? 0 : 1,
-			'onb_payment_state' => (string) $app->payment_state,
+			'discord_handle' => substr((string) $app->discord, 0, 64),
+			'notify_events' => (int) $app->notify_events,
+			'notify_news' => (int) $app->notify_news,
+			'waiver_date' => empty($app->waiver_signed_at) ? '' : $this->db->jdate($app->waiver_signed_at),
+			'agreement_date' => empty($app->agreement_signed_at) ? '' : $this->db->jdate($app->agreement_signed_at),
+			'id_verified' => empty($app->id_uploaded_at) ? 0 : 1,
+			'payment_state' => (string) $app->payment_state,
 		);
 		$targets = array();
 		if ($app->fk_socpeople > 0) {
@@ -415,6 +503,11 @@ class OnboardingService
 				continue;
 			}
 			foreach ($values as $k => $v) {
+				// A date or handle entered by hand on the card (paper waiver, legacy
+				// member) is kept until the applicant row has its own value.
+				if (($v === '' || $v === 0) && in_array($k, array('discord_handle', 'waiver_date', 'agreement_date', 'id_verified')) && !empty($obj->array_options['options_'.$k])) {
+					continue;
+				}
 				$obj->array_options['options_'.$k] = $v;
 			}
 			$obj->insertExtraFields();
@@ -876,7 +969,7 @@ class OnboardingService
 		if ($typeid > 0 && $adh->typeid != $typeid && in_array((int) $adh->typeid, $managed)) {
 			$this->db->query("UPDATE ".$this->db->prefix()."adherent SET fk_adherent_type = ".((int) $typeid)." WHERE rowid = ".((int) $adh->id));
 		}
-		$adh->array_options['options_onb_payment_channel'] = 'givebutter';
+		$adh->array_options['options_payment_channel'] = 'Givebutter';
 		$adh->insertExtraFields();
 		if ($adh->statut != Adherent::STATUS_VALIDATED && $adh->statut != Adherent::STATUS_EXCLUDED) {
 			$adh->validate($actor);
@@ -1159,9 +1252,9 @@ class OnboardingService
 			$type = ucfirst(strtolower($get('member_type')));
 			$isMember = $type !== '' && $type != 'Onboarding';
 			$chanRaw = strtolower($get('payment_channel'));
-			$channel = 'none';
-			foreach (array('givebutter', 'paypal', 'check') as $c) {
-				if (strpos($chanRaw, $c) !== false) {
+			$channel = 'None';
+			foreach (array_keys(self::PAYMENT_CHANNELS) as $c) {
+				if (strpos($chanRaw, strtolower($c)) !== false) {
 					$channel = $c;
 				}
 			}
@@ -1169,7 +1262,20 @@ class OnboardingService
 			if (preg_match('/^(\\d{4})-(\\d{1,2})(?:-(\\d{1,2}))?/', $get('join_date'), $m)) {
 				$joined = dol_mktime(12, 0, 0, (int) $m[2], isset($m[3]) ? (int) $m[3] : 1, (int) $m[1]);
 			}
-			$badge = $get('access_code');
+			// "CGW-13" is a badge. A bare number is one of the old physical keys, and
+			// "has card from Dan" in the comment is a credential too; neither is a code.
+			$badge = strtoupper($get('access_code'));
+			$credential = '';
+			if (ctype_digit($badge)) {
+				$credential = 'old key '.$badge;
+				$badge = '';
+			} elseif ($badge !== '' && !preg_match('/^CGW-\\d+$/', $badge)) {
+				$credential = $get('access_code');
+				$badge = '';
+			}
+			if ($credential === '' && preg_match('/\\b(key|card|fob)\\b/i', $get('comment'))) {
+				$credential = $get('comment');
+			}
 			$hasId = in_array(strtolower($get('license')), array('yes', 'y', '1', 'true'));
 			$notes = array();
 			foreach (array('payment_channel' => 'Pays by', 'open_item' => 'Open item', 'comment' => 'Comment') as $k => $t) {
@@ -1180,11 +1286,13 @@ class OnboardingService
 			$warn = '';
 			if ($badge !== '') {
 				if (isset($seenBadges[$badge])) {
-					$warn = ' WARNING: badge '.$badge.' is also on '.$seenBadges[$badge].'.';
+					$warn = ' WARNING: badge '.$badge.' is also on '.$seenBadges[$badge].'; not written here.';
+					$badge = '';
+				} else {
+					$seenBadges[$badge] = $name;
 				}
-				$seenBadges[$badge] = $name;
 			}
-			$what = ($isMember ? 'member ('.$type.', pays by '.self::PAYMENT_CHANNELS[$channel].')' : 'non-member, signup in progress').($badge !== '' ? ', badge '.$badge : ', no badge').($hasId ? ', ID on file' : '');
+			$what = ($isMember ? 'member ('.$type.', pays by '.self::PAYMENT_CHANNELS[$channel].')' : 'non-member, signup in progress').($badge !== '' ? ', badge '.$badge : ($credential !== '' ? ', '.$credential : ', no badge')).($hasId ? ', ID on file' : '');
 			if ($dry) {
 				$report[] = $label.': would add as '.$what.'.'.$warn;
 				continue;
@@ -1219,9 +1327,28 @@ class OnboardingService
 			if ($isMember && $adh->statut != Adherent::STATUS_VALIDATED) {
 				$adh->validate($actor);
 			}
-			$adh->array_options['options_onb_badge_id'] = $badge;
-			$adh->array_options['options_onb_badge_access'] = ($badge !== '' && $isMember) ? 1 : 0;
-			$adh->array_options['options_onb_payment_channel'] = $channel;
+			// A member record that existed before (imported from the ledger by the
+			// CGWManagement scripts) keeps what is already on its card.
+			$existing = $adh->array_options;
+			if ($badge !== '' && empty($existing['options_member_code'])) {
+				$taken = $this->db->query("SELECT fk_object FROM ".$this->db->prefix()."adherent_extrafields WHERE member_code = '".$this->db->escape($badge)."' AND fk_object <> ".((int) $adh->id));
+				if ($taken && $this->db->num_rows($taken) > 0) {
+					$warn .= ' WARNING: badge '.$badge.' is already on another member; not written.';
+				} else {
+					$adh->array_options['options_member_code'] = $badge;
+				}
+			}
+			if ($credential !== '' && empty($existing['options_credential_id'])) {
+				$adh->array_options['options_credential_id'] = $credential;
+			}
+			$hasCredential = !empty($adh->array_options['options_member_code']) || !empty($adh->array_options['options_credential_id']);
+			$adh->array_options['options_access_enabled'] = ($hasCredential && $isMember) ? 1 : 0;
+			if (empty($existing['options_payment_channel'])) {
+				$adh->array_options['options_payment_channel'] = $channel;
+			}
+			if ($hasId) {
+				$adh->array_options['options_id_verified'] = 1;
+			}
 			$adh->insertExtraFields();
 			$this->refreshStage($app->rowid);
 			$report[] = $label.': added as '.$what.'.'.$warn;
@@ -1263,15 +1390,15 @@ class OnboardingService
 			if ($adh->fetch((int) $app->fk_adherent) <= 0) {
 				continue;
 			}
-			$waived = isset($adh->array_options['options_onb_dues_waived_until']) ? $adh->array_options['options_onb_dues_waived_until'] : '';
+			$waived = isset($adh->array_options['options_dues_waived_until']) ? $adh->array_options['options_dues_waived_until'] : '';
 			if ($waived !== '' && $waived !== null) {
 				$waivedTs = is_numeric($waived) ? (int) $waived : strtotime((string) $waived);
 				if ($waivedTs && $waivedTs >= $now) {
 					continue; // Scholarship or board-approved pause.
 				}
 			}
-			$channel = isset($adh->array_options['options_onb_payment_channel']) ? (string) $adh->array_options['options_onb_payment_channel'] : '';
-			if ($channel !== '' && $channel !== 'givebutter') {
+			$channel = isset($adh->array_options['options_payment_channel']) ? (string) $adh->array_options['options_payment_channel'] : '';
+			if ($channel !== '' && $channel !== 'Givebutter') {
 				continue; // PayPal, check and scholarship members are kept up by hand.
 			}
 			$paidUntil = (int) $adh->datefin;
@@ -1330,8 +1457,11 @@ class OnboardingService
 		}
 		$this->save($app->rowid, array('payment_state' => 'lapsed', 'problem_since' => null));
 		$app = $this->refreshStage($app->rowid);
-		$badge = isset($adh->array_options['options_onb_badge_id']) ? (string) $adh->array_options['options_onb_badge_id'] : '';
-		$access = !empty($adh->array_options['options_onb_badge_access']);
+		$badge = isset($adh->array_options['options_member_code']) ? (string) $adh->array_options['options_member_code'] : '';
+		if ($badge === '' && !empty($adh->array_options['options_credential_id'])) {
+			$badge = (string) $adh->array_options['options_credential_id'];
+		}
+		$access = !empty($adh->array_options['options_access_enabled']);
 		$this->mail($app->email, $this->template('ONBOARDING_MAIL_LAPSED_SUBJECT', 'Your {org} membership has ended', $app), $this->template('ONBOARDING_MAIL_LAPSED_BODY', "Hi {firstname},\n\nWe did not receive your dues, so your {org} membership has ended and your badge access will be turned off. You are welcome back any time:\n\n{payment_url}", $app));
 		$this->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), 'Membership ended: '.$app->firstname.' '.$app->lastname, $app->firstname.' '.$app->lastname.' <'.$app->email.'> is now non-paying.'.($badge !== '' ? ' Badge '.$badge.($access ? ' still has access and should be turned off.' : ' is already marked as having no access.') : ' No badge is recorded for them.'));
 	}

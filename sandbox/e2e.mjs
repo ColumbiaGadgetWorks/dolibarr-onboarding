@@ -77,8 +77,8 @@ assert.equal(again.token, undefined);
 assert.equal((await api('status', { token })).status, 404);
 const fresh = dump();
 assert.equal(fresh.applicant.firstname, 'Ada', 'a second signup must not overwrite the first');
-assert.equal(fresh.contact_fields.options_onb_discord, 'ada#1');
-assert.equal(String(fresh.contact_fields.options_onb_notify_events), '1');
+assert.equal(fresh.contact_fields.options_discord_handle, 'ada#1');
+assert.equal(String(fresh.contact_fields.options_notify_events), '1');
 
 step('resume link arrives by email');
 let subjects = await mailTo(email);
@@ -102,7 +102,7 @@ assert.equal(up.stage, 'payment');
 let d = dump();
 assert.ok(d.files.includes('waiver.pdf'), `signed PDF missing: ${d.files}`);
 assert.ok(d.files.includes('agreement.txt') && d.files.includes('id.png'), `files: ${d.files}`);
-assert.equal(String(d.contact_fields.options_onb_waiver_signed), '1');
+assert.ok(d.contact_fields.options_waiver_date, 'waiver date mirrored onto the contact');
 assert.ok(d.files.includes('waiver-signature.png'), `drawn signature missing: ${d.files}`);
 assert.equal(d.member.status, -1, 'ready to pay: a non-member (draft member), not yet a member');
 assert.equal(d.member.subscriptions, 0);
@@ -122,8 +122,9 @@ assert.equal(st.paid, true);
 d = dump();
 assert.equal(d.member.status, 1, 'member validated');
 assert.equal(d.member.subscriptions, 1);
-assert.equal(d.member.fields.options_onb_payment_state, 'active');
-assert.equal(String(d.member.fields.options_onb_agreement_signed), '1');
+assert.equal(d.member.fields.options_payment_state, 'active');
+assert.ok(d.member.fields.options_agreement_date, 'agreement date mirrored onto the member');
+assert.equal(d.member.fields.options_payment_channel, 'Givebutter');
 
 step('the same webhook delivered twice records dues once');
 assert.match((await mock('/control/resend')).status, /duplicate/);
@@ -152,7 +153,7 @@ console.log(tick('daily', '45'));
 d = dump();
 assert.equal(d.applicant.payment_state, 'lapsed');
 assert.equal(d.member.status, 0, 'member terminated');
-assert.equal(d.member.fields.options_onb_payment_state, 'lapsed');
+assert.equal(d.member.fields.options_payment_state, 'lapsed');
 assert.ok((await mailTo(email)).some((s) => s.includes('has ended')));
 assert.ok((await mailTo('membership-team@example.test')).some((s) => s.includes('Membership ended')));
 
@@ -195,28 +196,35 @@ const sheet = [
   `Gil Van Butter\t\tnull\tlegacy-gil-${stamp}@example.test\tgil\t\t\t\tStandard\tGIvebutter\t2024-06\t\t`,
   `Sam Scholar\t\tCGW-90\tlegacy-sam-${stamp}@example.test\t\tyes\t\t\tScholarship\tN/A\t2026-05\trevisit\t`,
   `Ona Boarding\t\t\tlegacy-ona-${stamp}@example.test\t\t\t\t\tOnboarding\tGivebutter\t2026-10\tneeds ID card\t`,
+  `Kay Keyholder\t\t07\tlegacy-kay-${stamp}@example.test\t\t\t\t\tStandard\tCheck (Yearly)\t2020-03\t\t`,
   `No Email\t\t\tnot-an-email\t\t\t\t\tLegacy\tPayPal\t2020-03\t\t`,
 ].join('\n');
 const dry = tickIn(sheet, 'import');
 console.log(dry);
-assert.equal((dry.match(/would add/g) || []).length, 4);
+assert.equal((dry.match(/would add/g) || []).length, 5);
 assert.match(dry, /SKIPPED/);
 assert.match(dry, /badge CGW-90 is also on Pat Paypal/);
 assert.equal(dumpOf(`legacy-pat-${stamp}@example.test`).applicant, null, 'a check changes nothing');
 console.log(tickIn(sheet, 'import', 'go'));
 const pat = dumpOf(`legacy-pat-${stamp}@example.test`);
 assert.equal(pat.member.status, 1);
-assert.equal(pat.member.fields.options_onb_badge_id, 'CGW-90');
-assert.equal(String(pat.member.fields.options_onb_badge_access), '1');
-assert.equal(pat.member.fields.options_onb_payment_channel, 'paypal');
-assert.equal(String(pat.member.fields.options_onb_id_uploaded), '1');
+assert.equal(pat.member.fields.options_member_code, 'CGW-90');
+assert.equal(String(pat.member.fields.options_access_enabled), '1');
+assert.equal(pat.member.fields.options_payment_channel, 'PayPal');
+assert.equal(String(pat.member.fields.options_id_verified), '1');
 assert.equal(pat.applicant.lastname, 'Paypal');
 const gil = dumpOf(`legacy-gil-${stamp}@example.test`);
 assert.equal(gil.applicant.firstname, 'Gil Van');
-assert.equal(gil.member.fields.options_onb_payment_channel, 'givebutter');
-assert.ok(!gil.member.fields.options_onb_badge_id, 'the word null is not a badge');
+assert.equal(gil.member.fields.options_payment_channel, 'Givebutter');
+assert.ok(!gil.member.fields.options_member_code, 'the word null is not a badge');
+const kay = dumpOf(`legacy-kay-${stamp}@example.test`);
+assert.ok(!kay.member.fields.options_member_code, 'an old key number is not a badge');
+assert.equal(kay.member.fields.options_credential_id, 'old key 07');
+assert.equal(String(kay.member.fields.options_access_enabled), '1', 'an old key still opens the door');
+assert.equal(dumpOf(`legacy-sam-${stamp}@example.test`).member.fields.options_payment_channel, 'None');
+assert.ok(!dumpOf(`legacy-sam-${stamp}@example.test`).member.fields.options_member_code, 'the duplicate badge was not written twice');
 assert.equal(dumpOf(`legacy-ona-${stamp}@example.test`).member.status, -1, 'Onboarding rows become non-members');
-assert.equal((tickIn(sheet, 'import', 'go').match(/already here/g) || []).length, 4, 'importing twice adds nobody twice');
+assert.equal((tickIn(sheet, 'import', 'go').match(/already here/g) || []).length, 5, 'importing twice adds nobody twice');
 
 step('imported members are not chased or lapsed by the reminder job');
 const before = (await mailTo(`legacy-pat-${stamp}@example.test`)).length + (await mailTo(`legacy-gil-${stamp}@example.test`)).length;

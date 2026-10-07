@@ -43,7 +43,7 @@ $filters = array(
 $canid = $user->hasRight('onboarding', 'idphoto', 'read');
 
 $ef = $db->prefix()."adherent_extrafields";
-$sql = "SELECT a.*, m.datefin, m.statut AS member_status, e.onb_badge_id, e.onb_badge_access, e.onb_payment_channel";
+$sql = "SELECT a.*, m.datefin, m.statut AS member_status, e.member_code, e.credential_id, e.access_enabled, e.payment_channel";
 $sql .= " FROM ".$db->prefix()."onboarding_applicant AS a";
 $sql .= " LEFT JOIN ".$db->prefix()."adherent AS m ON m.rowid = a.fk_adherent";
 $sql .= " LEFT JOIN ".$ef." AS e ON e.fk_object = a.fk_adherent";
@@ -53,9 +53,9 @@ if ($filter == 'open') {
 } elseif ($filter == 'problem') {
 	$sql .= " AND a.payment_state IN ('past_due', 'cancelled')";
 } elseif ($filter == 'nobadge') {
-	$sql .= " AND a.payment_state = 'active' AND (e.onb_badge_access IS NULL OR e.onb_badge_access = 0)";
+	$sql .= " AND a.payment_state = 'active' AND (e.access_enabled IS NULL OR e.access_enabled = 0)";
 } elseif ($filter == 'badgeon') {
-	$sql .= " AND a.payment_state IN ('lapsed', 'none') AND e.onb_badge_access = 1";
+	$sql .= " AND a.payment_state IN ('lapsed', 'none') AND e.access_enabled = 1";
 }
 $sql .= " ORDER BY a.datec DESC LIMIT 500";
 $resql = $db->query($sql);
@@ -106,12 +106,18 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 	if ($o->problem_since) {
 		$state .= ' <span class="opacitymedium small">since '.dol_print_date($db->jdate($o->problem_since), 'day').'</span>';
 	}
-	if ($o->onb_payment_channel && $o->onb_payment_channel != 'givebutter' && isset(OnboardingService::PAYMENT_CHANNELS[$o->onb_payment_channel])) {
-		$state = 'By hand <span class="opacitymedium small">'.dol_escape_htmltag(OnboardingService::PAYMENT_CHANNELS[$o->onb_payment_channel]).'</span>';
+	if ($o->payment_channel && $o->payment_channel != 'Givebutter' && isset(OnboardingService::PAYMENT_CHANNELS[$o->payment_channel])) {
+		$state = 'By hand <span class="opacitymedium small">'.dol_escape_htmltag(OnboardingService::PAYMENT_CHANNELS[$o->payment_channel]).'</span>';
 	}
 	print '<td>'.$state.'</td>';
 	print '<td>'.($o->datefin ? dol_print_date($db->jdate($o->datefin), 'day') : '').'</td>';
-	print '<td>'.dol_escape_htmltag((string) $o->onb_badge_id).($o->fk_adherent > 0 ? ' <span class="opacitymedium small">'.($o->onb_badge_access ? 'access on' : 'access off').'</span>' : '').'</td>';
+	$badge = (string) $o->member_code;
+	if ($badge === '' && $o->credential_id) {
+		$badge = '<span class="opacitymedium">'.dol_escape_htmltag((string) $o->credential_id).'</span>';
+	} else {
+		$badge = dol_escape_htmltag($badge);
+	}
+	print '<td>'.$badge.($o->fk_adherent > 0 ? ' <span class="opacitymedium small">'.($o->access_enabled ? 'access on' : 'access off').'</span>' : '').'</td>';
 	print '<td class="right">';
 	if ($o->stage != 'complete' && $user->hasRight('onboarding', 'applicant', 'write')) {
 		print '<a class="button smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=sendlink&id='.((int) $o->rowid).'&token='.newToken().'" title="Email this person a link to finish their paperwork online">Email link</a>';

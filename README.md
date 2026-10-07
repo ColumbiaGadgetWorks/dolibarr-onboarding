@@ -23,8 +23,9 @@ and the page at `/membership/join/`).
 4. **Missed dues.** If a plan is cancelled or fails, or dues simply run out, reminder emails go
    out on a schedule you set. After a grace period the member is terminated in Dolibarr
    (a non-member again) and the membership team is told to turn the badge off.
-5. **Badges.** The member card gains Badge ID, Badge access active, Pays dues by, and Dues
-   waived until. The module does not talk to the door system.
+5. **Badges.** The member card carries the member code (badge label), the credential, whether
+   door access is on, how dues are paid, and a dues-waived-until date. The module does not
+   talk to the door system.
 
 Members, Onboarding in the left menu lists everyone with their stage, with filters such as
 "Paying, no active badge" and "Not paying, badge still active", and an "Email link" button
@@ -55,8 +56,10 @@ This is a Dolibarr module, not a container. It lives inside the Dolibarr you alr
      be reachable from the internet for this. Without it the hourly sync still works.
    - The waiver and agreement start with placeholder wording. Replace them when the real
      text is ready; people who signed the old wording keep a copy of what they signed.
-4. **Import existing members** (button on the setup page): paste the old member spreadsheet,
-   press Check to preview, then Import.
+4. **Import existing members** (button on the setup page): paste the member roster, press
+   Check to preview, then Import. A person whose member record already exists (for example
+   one created by the CGWManagement import scripts) is linked, not duplicated, and whatever
+   is already on their card is kept.
 5. Give the membership team the three permissions under Users and Groups.
 6. On the website Worker, set the secrets `DOLIBARR_URL` (Dolibarr's public address) and
    `DOLIBARR_API_KEY` (the "Key for the website" on the setup page).
@@ -109,6 +112,32 @@ every push: signup, drawn signatures, payment, duplicate webhooks, a missed webh
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, and the legacy import. It also checks that the staff pages render
 and runs a signup through the real website.
+
+## Fields on the member card
+
+The module and the CGWManagement scripts (`dolibarr/scripts/bootstrap.py`) share one set of
+extra fields on members. The module creates the ones it uses when it is enabled; the scripts
+create those plus a few of their own (home zone, orientation date, storage bin). The names
+must stay identical in both places.
+
+| Field | Type | Set by |
+|---|---|---|
+| `member_code` | text, unique | import, staff. The badge label, e.g. CGW-13. |
+| `credential_id` | text | import, staff. A fob serial, keypad slot, or an old physical key. |
+| `access_enabled` | yes/no | import, staff. Mirrors the door system; the module only reports it. |
+| `waiver_date`, `agreement_date` | date | the module, when the applicant signs online; staff for a paper copy. |
+| `id_verified` | yes/no | the module on upload, or the import (`license` column). |
+| `discord_handle` | text | the module from the signup form. |
+| `payment_channel` | Givebutter / PayPal / Check / Cash / Venmo / None | the module (Givebutter) or staff. Only Givebutter members are chased for dues. |
+| `payment_state` | none / active / past_due / cancelled / lapsed | the module. |
+| `dues_waived_until` | date | staff. Scholarships and board-approved pauses. |
+| `notify_events`, `notify_news` | yes/no | the module from the signup form. |
+
+`discord_handle`, `waiver_date`, `agreement_date`, `id_verified`, `payment_state` and the two
+notify flags are also mirrored onto the contact the module creates at signup.
+
+Installs made before October 2026 had these as `onb_*` fields. Enabling the module (or
+re-enabling it) moves the data across and removes the old fields.
 
 ## How Givebutter is matched
 
