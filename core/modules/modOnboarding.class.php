@@ -27,14 +27,14 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.1.0';
+		$this->version = '0.2.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
 		$this->dirs = array('/onboarding/applicant');
 		$this->config_page_url = array('setup.php@onboarding');
 		$this->hidden = false;
-		$this->depends = array('modAdherent', 'modSociete');
+		$this->depends = array('modAdherent', 'modSociete', 'modCategorie');
 		$this->requiredby = array();
 		$this->conflictwith = array();
 		$this->langfiles = array('onboarding@onboarding');
@@ -50,6 +50,7 @@ class modOnboarding extends DolibarrModules
 			array('ONBOARDING_DUES_STANDARD', 'chaine', '50', 'Standard monthly dues', 0, 'current', 0),
 			array('ONBOARDING_DUES_SUPPORTER', 'chaine', '100', 'Supporter monthly dues', 0, 'current', 0),
 			array('ONBOARDING_GB_API_BASE', 'chaine', 'https://api.givebutter.com/v1', 'Givebutter API base URL', 0, 'current', 0),
+			array('ONBOARDING_UPDATES_TAG', 'chaine', 'Email updates', 'Contact tag for people who asked for email updates', 0, 'current', 0),
 		);
 
 		$this->tabs = array();

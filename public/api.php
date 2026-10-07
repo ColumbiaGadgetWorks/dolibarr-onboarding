@@ -10,7 +10,7 @@
  *   Header  X-Onboarding-Key: <key from the module setup page>
  *   Body    JSON
  *
- * Actions: docs, start, status, sign, id, givebutter
+ * Actions: docs, start, subscribe, status, sign, id, givebutter
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -95,6 +95,10 @@ if ($action == 'docs') {
 
 if ($action == 'start') {
 	onboarding_reply($svc->start($in));
+}
+
+if ($action == 'subscribe') {
+	onboarding_reply($svc->subscribe($in, true));
 }
 
 if ($action == 'givebutter') {

@@ -32,6 +32,28 @@ Members, Onboarding in the left menu lists everyone with their stage, with filte
 that sends someone a link to finish their paperwork online. Members, Onboarding, Unmatched
 payments lists dues payments made with an email nobody signed up with.
 
+## Email updates
+
+The website's "Get updates by email" box sends each address here. It becomes a Dolibarr
+**contact** tagged **Email updates** (the tag name is on the setup page), with both notify
+fields ticked; an existing contact with that address just gets the tag. Someone who ticks
+either notify box during the membership signup gets the tag too, and stays on the list even
+if they never finish joining. Signing up on the website again takes the address off
+Dolibarr's unsubscribe list, since it is a fresh request.
+
+To send an update: Tools, EMailing, New emailing. Write it, then under Recipients add
+**Contacts** with the contact tag filter set to **Email updates**. Put `__UNSUBSCRIBE__` in
+the message so people can opt out; Dolibarr skips unsubscribed addresses on every later
+emailing. Dolibarr needs an outgoing mail server (Setup, Emails) to send.
+
+**Import email list** on the setup page takes an old list: the website's subscriber CSV, or
+a subscriber export from an old site. Paste it, press Check to preview, then Import. Only an
+`email` column is needed; a name and a signup date are kept when present. Addresses that
+unsubscribed are skipped, and running it twice adds nobody twice.
+
+This needs the **Tags/Categories** module, which is now enabled along with this one. On an
+existing install, enable Tags/Categories by hand (and EMailing, to send).
+
 ## Install
 
 This is a Dolibarr module, not a container. It lives inside the Dolibarr you already run.

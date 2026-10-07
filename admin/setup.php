@@ -32,6 +32,7 @@ $sections = array(
 		'ONBOARDING_JOIN_URL' => array('Join page address', 'text', 'For example https://columbiagadgetworks.org/membership/join/ . Used for the "pick up where you left off" email.'),
 		'ONBOARDING_STAFF_EMAIL' => array('Membership team email', 'text', 'Told when someone becomes a paying member (needs a badge) or stops paying (badge off).'),
 		'ONBOARDING_MAIL_FROM' => array('Send emails from', 'text', 'Leave empty to use Dolibarr\'s default sender.'),
+		'ONBOARDING_UPDATES_TAG' => array('Email updates tag', 'text', 'Contacts who ask for email updates on the website get this tag. To send an update, create an emailing in Tools, EMailing and add recipients from Contacts filtered by this tag. If you rename it here, rename the tag in Tags/Categories too.'),
 	),
 	'Givebutter' => array(
 		'ONBOARDING_GB_API_KEY' => array('Givebutter API key', 'secret', 'Settings, Integrations, API Keys in Givebutter. Used for the hourly sync and for the Connect button below.'),
@@ -112,6 +113,7 @@ print '<div class="'.($connected ? 'ok' : 'warning').'">';
 print $connected ? 'Givebutter is connected: it reports payments and cancelled plans to <strong>'.dol_escape_htmltag($svc->webhookUrl()).'</strong>. ' : 'Givebutter is not connected yet, so payments are only noticed by the hourly sync. Save the API key below, then press Connect. ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=connect&token='.newToken().'">'.($connected ? 'Reconnect' : 'Connect Givebutter').'</a>';
 print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import.php', 1).'">Import existing members</a>';
+print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import-emails.php', 1).'">Import email list</a>';
 print '</div>';
 
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
