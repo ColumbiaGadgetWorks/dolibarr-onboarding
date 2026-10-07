@@ -1,0 +1,54 @@
+name: test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['7.4', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+      - run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dolibarr: ['latest', '19.0.4']
+    defaults:
+      run:
+        working-directory: sandbox
+    env:
+      DOLIBARR_VERSION: ${{ matrix.dolibarr }}
+      # The website is not part of this job, so webhooks go straight to Dolibarr.
+      MOCK_WEBHOOK_URL: http://dolibarr/custom/onboarding/public/api.php?action=givebutter
+      MOCK_DOLIBARR_KEY: sandbox-key-sandbox-key-sandbox-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: docker compose up -d db dolibarr givebutter mail
+      - name: Wait for Dolibarr to install and the module to be enabled
+        run: |
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-Onboarding-Key: sandbox-key-sandbox-key-sandbox-key' 'http://localhost:8080/custom/onboarding/public/api.php?action=docs' || true)
+            echo "attempt $i: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 5
+          done
+          exit 1
+      - run: node e2e.mjs
+      - name: Logs
+        if: always()
+        run: |
+          docker compose logs --no-color --tail 300 dolibarr givebutter
+          docker compose exec -T dolibarr sh -c 'tail -n 200 /var/www/documents/dolibarr.log 2>/dev/null; cat /var/www/documents/initdb.log 2>/dev/null | tail -n 60' || true
