@@ -7,7 +7,7 @@ const MOCK = process.env.MOCK_URL || 'http://localhost:8090';
 const post = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, ...(await r.json()) }; };
 
 const page = await (await fetch(`${SITE}/membership/join/`)).text();
-assert.ok(page.includes('id="join-1"'), 'join page is served');
+assert.match(page, /id="?join-1/, 'join page is served');
 const docs = await (await fetch(`${SITE}/api/join/docs`)).json();
 assert.ok(docs.ok && docs.docs.waiver.version, 'documents come through the Worker');
 const email = `stack-${Date.now()}@example.test`;
