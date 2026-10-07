@@ -45,8 +45,9 @@ services:
       DOLI_INIT_DEMO: 0
       DOLI_COMPANY_NAME: Sandbox Makerspace
       DOLI_COMPANY_COUNTRYCODE: US
-      DOLI_CRON: 1
-      DOLI_CRON_KEY: sandboxcronkey
+      # Scheduled jobs do not run by themselves here (the image's cron mode replaces
+      # the web server). Run them with sandbox/tick.php or the buttons on the setup page.
+      DOLI_CRON: 0
       ONBOARDING_SANDBOX: 1
       SANDBOX_HOST: ${SANDBOX_HOST:-localhost}
     ports:
