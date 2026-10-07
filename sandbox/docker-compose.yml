@@ -1,0 +1,96 @@
+# A complete throwaway copy of the whole signup system. Nothing here touches
+# the real Dolibarr, the real website or the real Givebutter.
+#
+#   docker compose up -d          start it (first start takes a few minutes)
+#   docker compose down -v        throw it all away
+#
+# Then open, replacing localhost with the machine's address if it is not this one:
+#   http://localhost:8787/membership/join/   the website's join page
+#   http://localhost:8080                    Dolibarr (admin / admin)
+#   http://localhost:8090                    fake Givebutter: charge, fail, cancel
+#   http://localhost:8025                    every email the system sent
+#
+# When running on another machine (for example Unraid), set SANDBOX_HOST to that
+# machine's address so links in emails and the pay button point at it.
+name: onboarding-sandbox
+
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: dolidb
+      MYSQL_USER: dolidbuser
+      MYSQL_PASSWORD: dolidbpass
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  dolibarr:
+    image: dolibarr/dolibarr:${DOLIBARR_VERSION:-latest}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DOLI_DB_HOST: db
+      DOLI_DB_NAME: dolidb
+      DOLI_DB_USER: dolidbuser
+      DOLI_DB_PASSWORD: dolidbpass
+      DOLI_URL_ROOT: "http://${SANDBOX_HOST:-localhost}:8080"
+      DOLI_ADMIN_LOGIN: admin
+      DOLI_ADMIN_PASSWORD: admin
+      DOLI_INSTALL_AUTO: 1
+      DOLI_INIT_DEMO: 0
+      DOLI_COMPANY_NAME: Sandbox Makerspace
+      DOLI_COMPANY_COUNTRYCODE: US
+      DOLI_CRON: 1
+      DOLI_CRON_KEY: sandboxcronkey
+      ONBOARDING_SANDBOX: 1
+      SANDBOX_HOST: ${SANDBOX_HOST:-localhost}
+    ports:
+      - "8080:80"
+    volumes:
+      - ..:/var/www/html/custom/onboarding:ro
+      - ./init:/var/www/scripts/docker-init.d:ro
+
+  givebutter:
+    image: node:22-alpine
+    command: ["node", "/app/mock-givebutter.js"]
+    environment:
+      WEBHOOK_URL: ${MOCK_WEBHOOK_URL:-http://website:8787/api/givebutter-webhook}
+      WEBHOOK_SIGNATURE: sandbox-signature
+      DOLIBARR_KEY: ${MOCK_DOLIBARR_KEY:-}
+      RETURN_URL: "http://${SANDBOX_HOST:-localhost}:8787/membership/join/"
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./mock-givebutter.js:/app/mock-givebutter.js:ro
+
+  mail:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+
+  # The real website, built from GitHub and run locally with test settings.
+  website:
+    image: node:22-bookworm
+    working_dir: /site
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        if [ ! -d .git ]; then git clone --depth 1 -b "$$WEBSITE_REF" https://github.com/ColumbiaGadgetWorks/website.git .; fi
+        npm ci
+        exec npx wrangler dev --ip 0.0.0.0 --port 8787 \
+          --var DOLIBARR_URL:http://dolibarr \
+          --var DOLIBARR_API_KEY:sandbox-key-sandbox-key-sandbox-key \
+          --var GIVEBUTTER_WEBHOOK_SECRET:sandbox-signature
+    environment:
+      WEBSITE_REF: ${WEBSITE_REF:-main}
+      CI: "1"
+      WRANGLER_SEND_METRICS: "false"
+    ports:
+      - "8787:8787"
