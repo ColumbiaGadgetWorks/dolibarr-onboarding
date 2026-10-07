@@ -301,6 +301,9 @@ assert.equal(ada.lastname, 'Lovelace');
 assert.match(ada.note, /2019-04-02.*sandbox import/);
 assert.equal(contactOf(`${imp}-gone@example.test`).id, 0, 'an unsubscribe is never undone by an import');
 assert.match(tickIn(oldList, 'emails', 'go'), /^0 new contacts were added, 0 existing contacts were added to the list, 3 were already on it/);
+const longOne = `${'x'.repeat(30)}-${imp}@example.test`;
+assert.match(tickIn(`email,first name,last name\n${longOne},${'F'.repeat(60)},${'L'.repeat(60)}\n`, 'emails', 'go'), /^1 new contacts were added/, 'long names are cut to fit, not refused');
+assert.equal(contactOf(longOne).lastname.length, 50);
 
 step('start over: an unpaid signup at the payment step is thrown away');
 const quit = `e2e-quit-${Date.now()}@example.test`;
