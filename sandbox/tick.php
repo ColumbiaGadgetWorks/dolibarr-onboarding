@@ -5,6 +5,7 @@
  *   php tick.php daily 8      run reminders as if it were 8 days from now
  *   php tick.php sync         pull from the fake Givebutter
  *   php tick.php dump EMAIL   print what Dolibarr holds for one person
+ *   php tick.php contact EMAIL   the email updates list's view of one address
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -28,6 +29,23 @@ if ($job == 'daily') {
 	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {
 	echo implode("\n", $svc->importLegacy((string) file_get_contents('php://stdin'), !(isset($argv[2]) && $argv[2] == 'go')))."\n";
+} elseif ($job == 'emails') {
+	echo implode("\n", $svc->importEmails((string) file_get_contents('php://stdin'), 'sandbox import', !(isset($argv[2]) && $argv[2] == 'go')))."\n";
+} elseif ($job == 'contact') {
+	// What the email updates list holds for one address.
+	$id = $svc->contactByEmail(isset($argv[2]) ? $argv[2] : '');
+	$out = array('id' => $id, 'tagged' => false, 'unsubscribed' => $svc->isUnsubscribed(isset($argv[2]) ? $argv[2] : ''), 'contacts' => 0);
+	if ($id) {
+		$c = new Contact($db);
+		$c->fetch($id);
+		$res = $db->query("SELECT COUNT(*) AS n FROM ".$db->prefix()."socpeople WHERE LOWER(email) = '".$db->escape(OnboardingService::cleanEmail($argv[2]))."'");
+		$out = array_merge($out, array('tagged' => $svc->isTaggedForUpdates($id), 'firstname' => $c->firstname, 'lastname' => $c->lastname, 'note' => $c->note_private, 'fields' => $c->array_options, 'contacts' => (int) $db->fetch_object($res)->n));
+	}
+	echo json_encode($out)."\n";
+} elseif ($job == 'unsubscribe') {
+	$c = new Contact($db);
+	$c->email = OnboardingService::cleanEmail(isset($argv[2]) ? $argv[2] : '');
+	echo $c->setNoEmail(1)."\n";
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');
 	$out = array('applicant' => $app, 'member' => null, 'contact_fields' => null);
@@ -50,6 +68,6 @@ if ($job == 'daily') {
 	}
 	echo json_encode($out)."\n";
 } else {
-	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL | connect [URL] | import [go] < sheet\n");
+	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL | connect [URL] | import [go] < sheet | emails [go] < list | contact EMAIL | unsubscribe EMAIL\n");
 	exit(1);
 }

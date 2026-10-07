@@ -27,6 +27,11 @@ check 'admin/import.php' 'Import existing members'
 T2=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/import.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
 out=$(curl -s -b "$JAR" --data-urlencode "token=$T2" -d 'action=check' --data-urlencode "sheet=$(printf 'name\temail\tmember_type\tpayment_channel\taccess_code\nPaste Test\tpaste-test@example.test\tLegacy\tPayPal\tCGW-77')" "$BASE/custom/onboarding/admin/import.php")
 if grep -q 'would add as member (Legacy, pays by PayPal), badge CGW-77' <<<"$out"; then echo "ok   import page check"; else echo "FAIL import page check"; grep -o 'Row 2[^<]*' <<<"$out" | head -3; fail=1; fi
+check 'admin/import-emails.php' 'Import email list'
+# The email list import's "Check" button, with a pasted CSV.
+T3=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/import-emails.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
+out=$(curl -s -b "$JAR" --data-urlencode "token=$T3" -d 'action=check' -d 'source=smoke' --data-urlencode "sheet=$(printf 'email,name\npaste-list-%s@example.test,Paste List' "$RANDOM$RANDOM")" "$BASE/custom/onboarding/admin/import-emails.php")
+if grep -q '1 new contacts would be added' <<<"$out"; then echo "ok   email import page check"; else echo "FAIL email import page check"; grep -oE '(Fatal error|[0-9]+ new contacts)[^<]{0,200}' <<<"$out" | head -3; fail=1; fi
 ID=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT rowid FROM llx_onboarding_applicant WHERE id_file IS NOT NULL ORDER BY rowid LIMIT 1")
 for f in waiver:application/pdf agreement:application/pdf id:image/png; do
   type=$(curl -s -b "$JAR" -o /dev/null -w '%{content_type}' "$BASE/custom/onboarding/document.php?id=$ID&file=${f%%:*}")

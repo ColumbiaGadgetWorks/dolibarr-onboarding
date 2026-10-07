@@ -31,6 +31,17 @@ if (GETPOST('action', 'aZ09') == 'sendlink' && $user->hasRight('onboarding', 'ap
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
+if (GETPOST('action', 'aZ09') == 'discard' && $user->hasRight('onboarding', 'applicant', 'write')) {
+	$target = $svc->fetch((int) GETPOST('id', 'int'));
+	if ($svc->canDiscard($target)) {
+		$svc->discard($target);
+		setEventMessages('Signup for '.$target->email.' deleted', null);
+	} else {
+		setEventMessages('That signup is complete or has paid dues, so it was kept. Change it on the member card instead.', null, 'errors');
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
 
 $filter = GETPOST('filter', 'aZ09');
 $filters = array(
@@ -121,6 +132,9 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 	print '<td class="right">';
 	if ($o->stage != 'complete' && $user->hasRight('onboarding', 'applicant', 'write')) {
 		print '<a class="button smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=sendlink&id='.((int) $o->rowid).'&token='.newToken().'" title="Email this person a link to finish their paperwork online">Email link</a>';
+	}
+	if ($svc->canDiscard($o) && $user->hasRight('onboarding', 'applicant', 'write')) {
+		print ' <a class="button smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=discard&id='.((int) $o->rowid).'&token='.newToken().'" title="Delete this unfinished signup, its documents and its draft member" onclick="return confirm(\'Delete the unfinished signup for '.dol_escape_js(dol_escape_htmltag($o->email)).'? Its signed documents and ID photo are deleted too.\')">Delete</a>';
 	}
 	print '</td>';
 	print '</tr>';

@@ -239,4 +239,99 @@ const gil2 = dumpOf(`legacy-gil-${stamp}@example.test`);
 assert.equal(gil2.member.subscriptions, 1);
 assert.ok(gil2.applicant.gb_plan_id, 'plan remembered for cancellation tracking');
 
+step('email updates: a website signup becomes a tagged contact');
+const contactOf = (who) => JSON.parse(tick('contact', who).split('\n').pop());
+const sub1 = `e2e-news-${Date.now()}@example.test`;
+assert.equal((await api('subscribe', { email: 'not an email' })).status, 400);
+const s1 = await api('subscribe', { email: sub1.toUpperCase(), page: '/calendar/' });
+assert.equal(s1.ok, true);
+assert.equal(s1.result, 'added');
+let c1 = contactOf(sub1);
+assert.equal(c1.tagged, true);
+assert.equal(c1.lastname, sub1, 'with no name, the address is the last name');
+assert.equal(String(c1.fields.options_notify_news), '1');
+assert.equal(String(c1.fields.options_notify_events), '1');
+assert.match(c1.note, /\/calendar\//);
+assert.equal((await api('subscribe', { email: sub1 })).result, 'already', 'signing up twice changes nothing');
+assert.equal(contactOf(sub1).contacts, 1);
+
+step('email updates: an existing contact is tagged, not duplicated');
+assert.equal((await api('subscribe', { email: email2 })).result, 'tagged');
+assert.equal(contactOf(email2).contacts, 1);
+assert.ok(dumpOf(email2).contact_fields, 'the member keeps their contact card');
+
+step('email updates: signing up again after unsubscribing resubscribes');
+tick('unsubscribe', sub1);
+assert.equal(contactOf(sub1).unsubscribed, true);
+assert.equal((await api('subscribe', { email: sub1 })).result, 'tagged');
+assert.equal(contactOf(sub1).unsubscribed, false);
+
+step('email updates: a join signup with a notify box ticked is on the list, and stays after cleanup');
+const sub2 = `e2e-joinnews-${Date.now()}@example.test`;
+assert.equal((await api('start', { firstname: 'Nia', lastname: 'News', email: sub2, notify_news: true })).ok, true);
+let c2 = contactOf(sub2);
+assert.equal(c2.tagged, true);
+assert.equal(String(c2.fields.options_notify_news), '1');
+assert.ok(!Number(c2.fields.options_notify_events), 'only the ticked box is set');
+console.log(tick('daily', '31'));
+assert.equal(dumpOf(sub2).applicant, null, 'the abandoned signup is gone');
+assert.equal(contactOf(sub2).tagged, true, 'but the contact stays on the list');
+
+step('email updates: importing an old list');
+const imp = `imp-${Date.now()}`;
+tick('unsubscribe', `${imp}-gone@example.test`);
+const oldList = [
+  'Email,First Name,Last Name,Date Subscribed',
+  `${imp}-a@example.test,Ada,Lovelace,2019-04-02 10:00:00`,
+  `${imp}-b@example.test,,,`,
+  `${imp}-gone@example.test,Old,Unsub,2018-01-01`,
+  `${sub1},,,`,
+  `not-an-email,,,`,
+  `${imp}-A@example.test,Ada,Again,`,
+].join('\n');
+const checked = tickIn(oldList, 'emails');
+console.log(checked);
+assert.match(checked, /^2 new contacts would be added, 0 existing contacts would be added to the list, 1 were already on it, 1 skipped because they unsubscribed, 1 invalid, 1 repeated/);
+assert.equal(contactOf(`${imp}-a@example.test`).id, 0, 'a check changes nothing');
+console.log(tickIn(oldList, 'emails', 'go'));
+const ada = contactOf(`${imp}-a@example.test`);
+assert.equal(ada.tagged, true);
+assert.equal(ada.firstname, 'Ada');
+assert.equal(ada.lastname, 'Lovelace');
+assert.match(ada.note, /2019-04-02.*sandbox import/);
+assert.equal(contactOf(`${imp}-gone@example.test`).id, 0, 'an unsubscribe is never undone by an import');
+assert.match(tickIn(oldList, 'emails', 'go'), /^0 new contacts were added, 0 existing contacts were added to the list, 3 were already on it/);
+
+step('start over: an unpaid signup at the payment step is thrown away');
+const quit = `e2e-quit-${Date.now()}@example.test`;
+const q = await api('start', { firstname: 'Quinn', lastname: 'Quitter', email: quit });
+for (const doc of ['waiver', 'agreement']) {
+  assert.equal((await api('sign', { token: q.token, doc, name: 'Quinn Quitter', version: docs[doc].version, signature })).ok, true);
+}
+assert.equal((await api('id', { token: q.token, data: png().toString('base64') })).stage, 'payment');
+const qd = dumpOf(quit);
+assert.equal(qd.member.status, -1);
+const sqlCount = (sql) => Number(execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-N', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e', sql], { encoding: 'utf8' }).trim());
+assert.equal((await api('cancel', { token: q.token })).ok, true);
+assert.equal(dumpOf(quit).applicant, null);
+assert.equal(sqlCount(`SELECT COUNT(*) FROM llx_adherent WHERE rowid = ${qd.member.id}`), 0, 'the draft member is gone');
+assert.equal(contactOf(quit).id, 0, 'the contact is gone');
+assert.equal((await api('status', { token: q.token })).status, 404, 'the token no longer works');
+assert.equal((await api('start', { firstname: 'Quinn', lastname: 'Again', email: quit })).token?.length, 48, 'the same email can start fresh');
+
+step('start over: a signup that asked for updates keeps its contact on the list');
+const quit2 = `e2e-quit2-${Date.now()}@example.test`;
+const q2 = await api('start', { firstname: 'Rae', lastname: 'Reader', email: quit2, notify_events: true });
+assert.equal((await api('cancel', { token: q2.token })).ok, true);
+assert.equal(contactOf(quit2).tagged, true);
+
+step('start over: refused once dues are paid');
+const paidEmail = `e2e-paid-${Date.now()}@example.test`;
+const p1 = await api('start', { firstname: 'Pia', lastname: 'Paid', email: paidEmail });
+assert.match((await mock('/control/pay', { email: paidEmail, amount: 50 })).delivery.status, /applied/);
+const refused = await api('cancel', { token: p1.token });
+assert.equal(refused.status, 409);
+assert.equal(refused.error, 'paid');
+assert.ok(dumpOf(paidEmail).applicant, 'still there');
+
 console.log('\nALL PASSED');
