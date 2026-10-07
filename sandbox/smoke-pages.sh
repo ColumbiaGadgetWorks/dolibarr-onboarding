@@ -1,0 +1,33 @@
+#!/bin/bash
+# Logs in to the sandbox Dolibarr as admin and checks that every staff page of
+# the module renders. Run after e2e.mjs, which leaves data to display.
+set -u
+BASE=${DOLI_URL:-http://localhost:8080}
+JAR=$(mktemp)
+TOKEN=$(curl -s -c "$JAR" "$BASE/index.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
+curl -s -b "$JAR" -c "$JAR" -o /dev/null --data-urlencode "token=$TOKEN" -d 'actionlogin=login&loginfunction=loginfunction&username=admin&password=admin' "$BASE/index.php?mainmenu=home"
+fail=0
+check() { # path, text that must appear
+  local body code
+  body=$(curl -s -b "$JAR" -w '\n%{http_code}' "$BASE/custom/onboarding/$1")
+  code=${body##*$'\n'}
+  if [ "$code" != "200" ] || ! grep -q "$2" <<<"$body" || grep -qE 'Fatal error|Parse error|<b>Warning</b>|Deprecated</b>|name="password"' <<<"$body"; then
+    echo "FAIL $1 (HTTP $code, wanted \"$2\")"; grep -oE '(Fatal error|Parse error|<b>Warning</b>|Deprecated</b>)[^<]{0,300}' <<<"$body" | head -5; fail=1
+  else
+    echo "ok   $1"
+  fi
+}
+check 'applicants.php' 'e2e-'
+check 'applicants.php?filter=nobadge' 'Paying, no active badge'
+check 'applicants.php?filter=problem' 'Payment problem'
+check 'payments.php' 'stranger-'
+check 'admin/setup.php' 'Key for the website'
+ID=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT rowid FROM llx_onboarding_applicant WHERE id_file IS NOT NULL ORDER BY rowid LIMIT 1")
+for f in waiver:application/pdf agreement:application/pdf id:image/png; do
+  type=$(curl -s -b "$JAR" -o /dev/null -w '%{content_type}' "$BASE/custom/onboarding/document.php?id=$ID&file=${f%%:*}")
+  if [ "$type" = "${f#*:}" ]; then echo "ok   document ${f%%:*}"; else echo "FAIL document ${f%%:*}: got $type"; fail=1; fi
+done
+# Not logged in: the ID photo must not be served.
+type=$(curl -s -o /dev/null -w '%{content_type}' "$BASE/custom/onboarding/document.php?id=$ID&file=id")
+case "$type" in image/*) echo "FAIL ID photo served without login"; fail=1;; *) echo "ok   ID photo needs login";; esac
+exit $fail

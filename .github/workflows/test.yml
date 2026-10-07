@@ -47,8 +47,36 @@ jobs:
           done
           exit 1
       - run: node e2e.mjs
+      - name: Staff pages render
+        run: bash smoke-pages.sh
       - name: Logs
         if: always()
         run: |
           docker compose logs --no-color --tail 300 dolibarr givebutter
           docker compose exec -T dolibarr sh -c 'tail -n 200 /var/www/documents/dolibarr.log 2>/dev/null; cat /var/www/documents/initdb.log 2>/dev/null | tail -n 60' || true
+
+  # The sandbox exactly as a person would start it, website included.
+  stack:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sandbox
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: docker compose up -d
+      - name: Wait for Dolibarr and the website
+        run: |
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/api/join/docs || true)
+            echo "attempt $i: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 5
+          done
+          exit 1
+      - run: node smoke-stack.mjs
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color --tail 120 website givebutter dolibarr
