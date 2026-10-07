@@ -1713,6 +1713,73 @@ class OnboardingService
 	}
 
 	/**
+	 * Can this signup still be thrown away? Not once it is complete or any
+	 * dues have been paid: from then on it is a member's record.
+	 *
+	 * @param object $app Applicant row
+	 * @return bool
+	 */
+	public function canDiscard($app)
+	{
+		return $app && $app->stage != 'complete' && $app->payment_state == 'none';
+	}
+
+	/**
+	 * Delete a signup that never became a membership: the applicant row, its
+	 * signed documents and ID photo, its contact, and the draft member made when
+	 * the paperwork was done. A contact on the email updates list is kept, and so
+	 * is any member record that is more than an unpaid draft.
+	 *
+	 * @param object $app Applicant row
+	 * @return void
+	 */
+	public function discard($app)
+	{
+		$actor = $this->actor();
+		if ($app->fk_adherent > 0) {
+			$adh = new Adherent($this->db);
+			if ($adh->fetch((int) $app->fk_adherent) > 0 && (int) $adh->statut == Adherent::STATUS_DRAFT) {
+				$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$this->db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
+				$obj = $res ? $this->db->fetch_object($res) : null;
+				if ($obj && (int) $obj->n == 0) {
+					// Dolibarr 20 dropped the leading $rowid argument.
+					$params = (new ReflectionMethod($adh, 'delete'))->getParameters();
+					if ($params && $params[0]->getName() == 'rowid') {
+						$adh->delete($adh->id, $actor);
+					} else {
+						$adh->delete($actor);
+					}
+				}
+			}
+		}
+		if ($app->fk_socpeople > 0) {
+			$contact = new Contact($this->db);
+			// Someone who asked for email updates stays on the list even though
+			// they never finished joining.
+			if ($contact->fetch((int) $app->fk_socpeople) > 0 && !$this->isTaggedForUpdates($contact->id)) {
+				$contact->delete($actor);
+			}
+		}
+		dol_delete_dir_recursive(DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid));
+		$this->db->query("DELETE FROM ".$this->db->prefix()."onboarding_applicant WHERE rowid = ".((int) $app->rowid));
+	}
+
+	/**
+	 * The applicant pressed "Start over" on the join page.
+	 *
+	 * @param object $app Applicant row
+	 * @return array<string,mixed> Response for the website
+	 */
+	public function cancel($app)
+	{
+		if (!$this->canDiscard($app)) {
+			return array('ok' => false, 'error' => 'paid', 'http' => 409);
+		}
+		$this->discard($app);
+		return array('ok' => true);
+	}
+
+	/**
 	 * Delete abandoned signups and expired ID photos.
 	 *
 	 * @return string Summary
@@ -1734,17 +1801,7 @@ class OnboardingService
 				$ids[] = (int) $obj->rowid;
 			}
 			foreach ($ids as $id) {
-				$app = $this->fetch($id);
-				if ($app->fk_socpeople > 0) {
-					$contact = new Contact($this->db);
-					// Someone who asked for email updates stays on the list even
-					// though they never finished joining.
-					if ($contact->fetch((int) $app->fk_socpeople) > 0 && !$this->isTaggedForUpdates($contact->id)) {
-						$contact->delete($actor);
-					}
-				}
-				dol_delete_dir_recursive(DOL_DATA_ROOT.'/onboarding/applicant/'.$id);
-				$this->db->query("DELETE FROM ".$this->db->prefix()."onboarding_applicant WHERE rowid = ".$id);
+				$this->discard($this->fetch($id));
 				$deleted++;
 			}
 		}

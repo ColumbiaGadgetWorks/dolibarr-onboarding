@@ -302,4 +302,36 @@ assert.match(ada.note, /2019-04-02.*sandbox import/);
 assert.equal(contactOf(`${imp}-gone@example.test`).id, 0, 'an unsubscribe is never undone by an import');
 assert.match(tickIn(oldList, 'emails', 'go'), /^0 new contacts were added, 0 existing contacts were added to the list, 3 were already on it/);
 
+step('start over: an unpaid signup at the payment step is thrown away');
+const quit = `e2e-quit-${Date.now()}@example.test`;
+const q = await api('start', { firstname: 'Quinn', lastname: 'Quitter', email: quit });
+for (const doc of ['waiver', 'agreement']) {
+  assert.equal((await api('sign', { token: q.token, doc, name: 'Quinn Quitter', version: docs[doc].version, signature })).ok, true);
+}
+assert.equal((await api('id', { token: q.token, data: png().toString('base64') })).stage, 'payment');
+const qd = dumpOf(quit);
+assert.equal(qd.member.status, -1);
+const sqlCount = (sql) => Number(execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-N', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e', sql], { encoding: 'utf8' }).trim());
+assert.equal((await api('cancel', { token: q.token })).ok, true);
+assert.equal(dumpOf(quit).applicant, null);
+assert.equal(sqlCount(`SELECT COUNT(*) FROM llx_adherent WHERE rowid = ${qd.member.id}`), 0, 'the draft member is gone');
+assert.equal(contactOf(quit).id, 0, 'the contact is gone');
+assert.equal((await api('status', { token: q.token })).status, 404, 'the token no longer works');
+assert.equal((await api('start', { firstname: 'Quinn', lastname: 'Again', email: quit })).token?.length, 48, 'the same email can start fresh');
+
+step('start over: a signup that asked for updates keeps its contact on the list');
+const quit2 = `e2e-quit2-${Date.now()}@example.test`;
+const q2 = await api('start', { firstname: 'Rae', lastname: 'Reader', email: quit2, notify_events: true });
+assert.equal((await api('cancel', { token: q2.token })).ok, true);
+assert.equal(contactOf(quit2).tagged, true);
+
+step('start over: refused once dues are paid');
+const paidEmail = `e2e-paid-${Date.now()}@example.test`;
+const p1 = await api('start', { firstname: 'Pia', lastname: 'Paid', email: paidEmail });
+assert.match((await mock('/control/pay', { email: paidEmail, amount: 50 })).delivery.status, /applied/);
+const refused = await api('cancel', { token: p1.token });
+assert.equal(refused.status, 409);
+assert.equal(refused.error, 'paid');
+assert.ok(dumpOf(paidEmail).applicant, 'still there');
+
 console.log('\nALL PASSED');

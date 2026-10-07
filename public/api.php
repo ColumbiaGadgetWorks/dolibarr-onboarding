@@ -10,7 +10,7 @@
  *   Header  X-Onboarding-Key: <key from the module setup page>
  *   Body    JSON
  *
- * Actions: docs, start, subscribe, status, sign, id, givebutter
+ * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -127,6 +127,10 @@ if ($action == 'sign') {
 		isset($in['ip']) ? (string) $in['ip'] : '',
 		(string) base64_decode(isset($in['signature']) ? (string) $in['signature'] : '', true)
 	));
+}
+
+if ($action == 'cancel') {
+	onboarding_reply($svc->cancel($app));
 }
 
 if ($action == 'id') {
