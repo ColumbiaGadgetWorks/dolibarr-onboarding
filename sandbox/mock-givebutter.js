@@ -18,8 +18,9 @@
 const http = require('node:http');
 
 const PORT = Number(process.env.PORT || 8090);
-const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
-const SIGNATURE = process.env.WEBHOOK_SIGNATURE || 'sandbox-signature';
+let WEBHOOK_URL = process.env.WEBHOOK_URL || '';
+let SIGNATURE = process.env.WEBHOOK_SIGNATURE || 'sandbox-signature';
+let registered = null; // set when the module's "Connect Givebutter" button calls POST /v1/webhooks
 const DOLIBARR_KEY = process.env.DOLIBARR_KEY || '';
 const CAMPAIGN = process.env.CAMPAIGN_CODE || 'SANDBOX';
 const RETURN_URL = process.env.RETURN_URL || '';
@@ -39,7 +40,7 @@ async function deliver(event, data) {
   if (!WEBHOOK_URL) return entry;
   try {
     const headers = { 'content-type': 'application/json', Signature: SIGNATURE };
-    if (DOLIBARR_KEY) headers['X-Onboarding-Key'] = DOLIBARR_KEY;
+    if (DOLIBARR_KEY && !registered) headers['X-Onboarding-Key'] = DOLIBARR_KEY;
     const r = await fetch(WEBHOOK_URL, { method: 'POST', headers, body });
     entry.status = `${r.status} ${(await r.text()).slice(0, 200)}`;
   } catch (e) {
@@ -152,6 +153,15 @@ http.createServer(async (req, res) => {
     if (path.startsWith('/v1/')) {
       if (!/^Bearer \S+/.test(req.headers.authorization || '')) return json(res, 401, { message: 'Unauthenticated.' });
       if (path === '/v1/transactions') return json(res, 200, { data: transactions, links: { next: null }, meta: { total: transactions.length } });
+      if (path === '/v1/webhooks' && req.method === 'POST') {
+        const b = await readBody(req);
+        if (!b.url) return json(res, 422, { message: 'The url field is required.' });
+        registered = { id: `wh_${++seq}`, name: b.name || null, url: b.url, events: b.events || [], enabled: true, signature: `sig_${Math.random().toString(36).slice(2)}` };
+        WEBHOOK_URL = registered.url;
+        SIGNATURE = registered.signature;
+        return json(res, 201, registered);
+      }
+      if (/^\/v1\/webhooks\/[^/]+$/.test(path) && req.method === 'DELETE') { registered = null; return json(res, 200, {}); }
       const m = path.match(/^\/v1\/plans\/([^/]+)$/);
       if (m) return plans.has(m[1]) ? json(res, 200, plans.get(m[1])) : json(res, 404, { message: 'Not found.' });
       return json(res, 404, { message: 'Not found.' });

@@ -11,6 +11,7 @@
  *   Body    JSON
  *
  * Actions: docs, start, status, sign, id, givebutter
+ * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
 if (!defined('NOLOGIN')) {
@@ -119,7 +120,8 @@ if ($action == 'sign') {
 		isset($in['doc']) ? (string) $in['doc'] : '',
 		isset($in['name']) ? (string) $in['name'] : '',
 		isset($in['version']) ? (string) $in['version'] : '',
-		isset($in['ip']) ? (string) $in['ip'] : ''
+		isset($in['ip']) ? (string) $in['ip'] : '',
+		(string) base64_decode(isset($in['signature']) ? (string) $in['signature'] : '', true)
 	));
 }
 

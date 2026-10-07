@@ -22,6 +22,11 @@ check 'applicants.php?filter=nobadge' 'Paying, no active badge'
 check 'applicants.php?filter=problem' 'Payment problem'
 check 'payments.php' 'stranger-'
 check 'admin/setup.php' 'Key for the website'
+check 'admin/import.php' 'Import existing members'
+# The import page's "Check" button, with a pasted tab-separated sheet.
+T2=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/import.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
+out=$(curl -s -b "$JAR" --data-urlencode "token=$T2" -d 'action=check' --data-urlencode "sheet=$(printf 'name\temail\tmember_type\tpayment_channel\taccess_code\nPaste Test\tpaste-test@example.test\tLegacy\tPayPal\tCGW-77')" "$BASE/custom/onboarding/admin/import.php")
+if grep -q 'would add as member (Legacy, pays by PayPal), badge CGW-77' <<<"$out"; then echo "ok   import page check"; else echo "FAIL import page check"; grep -o 'Row 2[^<]*' <<<"$out" | head -3; fail=1; fi
 ID=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT rowid FROM llx_onboarding_applicant WHERE id_file IS NOT NULL ORDER BY rowid LIMIT 1")
 for f in waiver:application/pdf agreement:application/pdf id:image/png; do
   type=$(curl -s -b "$JAR" -o /dev/null -w '%{content_type}' "$BASE/custom/onboarding/document.php?id=$ID&file=${f%%:*}")

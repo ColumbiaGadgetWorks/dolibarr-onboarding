@@ -41,6 +41,14 @@ class OnboardingService
 		'lapsed' => 'Non-paying',
 	);
 
+	/** Only Givebutter dues are tracked automatically. The others are kept up by hand. */
+	const PAYMENT_CHANNELS = array(
+		'givebutter' => 'Givebutter',
+		'paypal' => 'PayPal',
+		'check' => 'Check',
+		'none' => 'Nothing (scholarship or waived)',
+	);
+
 	/**
 	 * @param DoliDB $db Database handler
 	 */
@@ -77,6 +85,7 @@ class OnboardingService
 				$fields['onb_badge_id'] = array('Badge ID', 'varchar', 64);
 				$fields['onb_badge_access'] = array('Badge access active', 'boolean', '');
 				$fields['onb_dues_waived_until'] = array('Dues waived until', 'date', '');
+				$fields['onb_payment_channel'] = array('Pays dues by', 'select', '');
 			}
 			foreach ($fields as $name => $def) {
 				$pos++;
@@ -85,7 +94,7 @@ class OnboardingService
 				}
 				$param = '';
 				if ($def[1] == 'select') {
-					$param = array('options' => self::PAYMENT_STATES);
+					$param = array('options' => $name == 'onb_payment_channel' ? self::PAYMENT_CHANNELS : self::PAYMENT_STATES);
 				}
 				$extrafields->addExtraField($name, $def[0], $def[1], $pos, $def[2], $element, 0, 0, '', $param, 1, '', '1');
 			}
@@ -161,8 +170,8 @@ class OnboardingService
 	{
 		$out = array();
 		$defaults = array(
-			'waiver' => array('Liability waiver', "PLACEHOLDER WAIVER. Replace this text in the Onboarding module setup before going live.\n\nI understand that a makerspace contains tools that can injure me, and I accept that risk."),
-			'agreement' => array('Membership agreement', "PLACEHOLDER AGREEMENT. Replace this text in the Onboarding module setup before going live.\n\nI agree to follow the shop rules, clean up after myself, and pay my dues."),
+			'waiver' => array('Liability waiver', "I understand that Columbia Gadget Works is a shared workshop with tools and machines that can cause serious injury. I choose to use the space and its equipment at my own risk.\n\nI will not use a tool I have not been trained on, I will follow posted safety rules, and I will wear appropriate protective equipment.\n\nTo the extent the law allows, I release Columbia Gadget Works, its volunteers, board and members from liability for injury or property damage arising from my use of the space."),
+			'agreement' => array('Membership agreement', "As a member of Columbia Gadget Works I agree to:\n\n- Follow the shop rules and the code of conduct.\n- Clean up after myself and leave tools and benches ready for the next person.\n- Report damage or unsafe conditions right away.\n- Be responsible for any guests I bring.\n- Keep my dues current. I can cancel at any time.\n\nI understand that membership and badge access can be suspended for unsafe behavior or unpaid dues."),
 		);
 		foreach ($defaults as $key => $def) {
 			$text = getDolGlobalString('ONBOARDING_'.strtoupper($key).'_TEXT', $def[1]);
@@ -294,8 +303,86 @@ class OnboardingService
 			$this->save($id, $fields);
 			$app = $this->fetch($id);
 		}
+		// Ready to pay: from here they are a non-member (a draft member in Dolibarr)
+		// rather than only a contact.
+		if ($stage == 'payment' && !($app->fk_adherent > 0)) {
+			$this->ensureMember($app);
+			$app = $this->fetch($id);
+		}
 		$this->syncExtraFields($app);
 		return $app;
+	}
+
+	/**
+	 * Find or create a member type by its label.
+	 *
+	 * @param string $label Label, e.g. Legacy
+	 * @return int Type id, 0 on failure
+	 */
+	public function memberType($label)
+	{
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent_type WHERE libelle = '".$this->db->escape($label)."' AND entity IN (".getEntity('member_type').") LIMIT 1");
+		if ($res && ($obj = $this->db->fetch_object($res))) {
+			return (int) $obj->rowid;
+		}
+		$type = new AdherentType($this->db);
+		$type->label = $label;
+		$type->morphy = 'phy';
+		$type->status = 1;
+		$type->subscription = 1;
+		$type->vote = 1;
+		$id = $type->create($this->actor());
+		return $id > 0 ? (int) $id : 0;
+	}
+
+	/**
+	 * The member record for an applicant. Created as a draft, which is what
+	 * Dolibarr shows for a non-member, when there is none yet.
+	 *
+	 * @param object $app Applicant row
+	 * @param int $typeid Member type, default Standard
+	 * @param int $datec Creation date, default now
+	 * @param string $note Private note
+	 * @return Adherent|null
+	 */
+	public function ensureMember($app, $typeid = 0, $datec = 0, $note = '')
+	{
+		$actor = $this->actor();
+		$adh = new Adherent($this->db);
+		if ($app->fk_adherent > 0 && $adh->fetch((int) $app->fk_adherent) > 0) {
+			return $adh;
+		}
+		$adh = new Adherent($this->db);
+		$found = false;
+		// Someone who was already a member before this module existed.
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE email = '".$this->db->escape($app->email)."' AND entity IN (".getEntity('adherent').") LIMIT 1");
+		if ($res && ($obj = $this->db->fetch_object($res))) {
+			$found = $adh->fetch((int) $obj->rowid) > 0;
+		}
+		if (!$found) {
+			$adh->firstname = $app->firstname;
+			$adh->lastname = $app->lastname;
+			$adh->email = $app->email;
+			$adh->login = $app->email;
+			$adh->morphy = 'phy';
+			$adh->typeid = $typeid > 0 ? $typeid : getDolGlobalInt('ONBOARDING_TYPE_STANDARD');
+			$adh->public = 0;
+			$adh->statut = Adherent::STATUS_DRAFT;
+			$adh->status = Adherent::STATUS_DRAFT;
+			if ($datec) {
+				$adh->datec = $datec;
+			}
+			if ($note !== '') {
+				$adh->note_private = $note;
+			}
+			if ($adh->create($actor) <= 0) {
+				dol_syslog('Onboarding: member create failed: '.$adh->error, LOG_ERR);
+				return null;
+			}
+			$adh->fetch($adh->id);
+		}
+		$this->save($app->rowid, array('fk_adherent' => $adh->id));
+		return $adh;
 	}
 
 	/**
@@ -484,6 +571,7 @@ class OnboardingService
 		return array(
 			'stage' => $app->stage,
 			'firstname' => $app->firstname,
+			'lastname' => $app->lastname,
 			'email' => $app->email,
 			'waiver' => !empty($app->waiver_signed_at) && $app->waiver_version == $docs['waiver']['version'],
 			'agreement' => !empty($app->agreement_signed_at) && $app->agreement_version == $docs['agreement']['version'],
@@ -505,9 +593,10 @@ class OnboardingService
 	 * @param string $name Typed full name
 	 * @param string $version Version the browser showed
 	 * @param string $ip Signer's address
+	 * @param string $signature The drawn signature, PNG bytes
 	 * @return array<string,mixed>
 	 */
-	public function sign($app, $doc, $name, $version, $ip)
+	public function sign($app, $doc, $name, $version, $ip, $signature = '')
 	{
 		$docs = $this->docs();
 		$name = trim(dol_string_nohtmltag((string) $name));
@@ -517,6 +606,10 @@ class OnboardingService
 		if ($version !== $docs[$doc]['version']) {
 			// The text changed while the form was open. They must read the new one.
 			return array('ok' => false, 'error' => 'stale', 'http' => 409);
+		}
+		$info = strlen($signature) > 200 && strlen($signature) < 1024 * 1024 ? @getimagesizefromstring($signature) : false;
+		if (!$info || $info[2] != IMAGETYPE_PNG || $info[0] > 2400 || $info[1] > 1200) {
+			return array('ok' => false, 'error' => 'signature', 'http' => 400);
 		}
 		$now = self::now();
 		$this->save($app->rowid, array(
@@ -534,7 +627,8 @@ class OnboardingService
 		$record .= "Document version: ".$version."\n";
 		$dir = $this->dir($app);
 		file_put_contents($dir.'/'.$doc.'.txt', $record);
-		$this->writePdf($dir.'/'.$doc.'.pdf', $docs[$doc]['title'], $record);
+		file_put_contents($dir.'/'.$doc.'-signature.png', $signature);
+		$this->writePdf($dir.'/'.$doc.'.pdf', $docs[$doc]['title'], $record, $dir.'/'.$doc.'-signature.png');
 
 		$app = $this->refreshStage($app->rowid);
 		return array('ok' => true) + $this->status($app);
@@ -546,9 +640,10 @@ class OnboardingService
 	 * @param string $path Target file
 	 * @param string $title Title
 	 * @param string $text Text
+	 * @param string $image Drawn signature to place under the text
 	 * @return void
 	 */
-	private function writePdf($path, $title, $text)
+	private function writePdf($path, $title, $text, $image = '')
 	{
 		global $langs;
 		try {
@@ -564,6 +659,12 @@ class OnboardingService
 			$pdf->AddPage();
 			$pdf->SetFont(pdf_getPDFFont($langs), '', 10);
 			$pdf->MultiCell(0, 5, $text, 0, 'L');
+			if ($image && is_readable($image)) {
+				if ($pdf->GetY() > 240) {
+					$pdf->AddPage();
+				}
+				$pdf->Image($image, 15, $pdf->GetY() + 3, 80);
+			}
 			$pdf->Output($path, 'F');
 		} catch (Throwable $e) {
 			dol_syslog('Onboarding: PDF failed: '.$e->getMessage(), LOG_WARNING);
@@ -760,40 +861,23 @@ class OnboardingService
 
 		$amount = (float) $pay->amount;
 		$when = $this->db->jdate($pay->transacted_at);
-		$wasMember = $app->fk_adherent > 0;
+		$first = $app->payment_state == 'none';
 		$supporter = $amount >= (float) getDolGlobalString('ONBOARDING_DUES_SUPPORTER', '100');
 		$typeid = getDolGlobalInt($supporter ? 'ONBOARDING_TYPE_SUPPORTER' : 'ONBOARDING_TYPE_STANDARD');
 
-		$adh = new Adherent($this->db);
-		$ok = false;
-		if ($wasMember) {
-			$ok = $adh->fetch((int) $app->fk_adherent) > 0;
+		$adh = $this->ensureMember($app, $typeid);
+		if (!$adh) {
+			$this->db->query("UPDATE ".$table." SET status = 'unmatched' WHERE rowid = ".((int) $paymentId));
+			$user = $saved;
+			return 'error: member create failed';
 		}
-		if (!$ok) {
-			// Someone who was a member before this module existed.
-			$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE email = '".$this->db->escape($app->email)."' AND entity IN (".getEntity('adherent').") LIMIT 1");
-			if ($res && ($obj = $this->db->fetch_object($res))) {
-				$ok = $adh->fetch((int) $obj->rowid) > 0;
-			}
+		// A Standard member who starts paying the Supporter rate, or the reverse.
+		$managed = array(getDolGlobalInt('ONBOARDING_TYPE_STANDARD'), getDolGlobalInt('ONBOARDING_TYPE_SUPPORTER'));
+		if ($typeid > 0 && $adh->typeid != $typeid && in_array((int) $adh->typeid, $managed)) {
+			$this->db->query("UPDATE ".$this->db->prefix()."adherent SET fk_adherent_type = ".((int) $typeid)." WHERE rowid = ".((int) $adh->id));
 		}
-		if (!$ok) {
-			$adh->firstname = $app->firstname;
-			$adh->lastname = $app->lastname;
-			$adh->email = $app->email;
-			$adh->login = $app->email;
-			$adh->morphy = 'phy';
-			$adh->typeid = $typeid;
-			$adh->public = 0;
-			$adh->statut = Adherent::STATUS_DRAFT;
-			$adh->status = Adherent::STATUS_DRAFT;
-			if ($adh->create($actor) <= 0) {
-				dol_syslog('Onboarding: member create failed: '.$adh->error, LOG_ERR);
-				$this->db->query("UPDATE ".$table." SET status = 'unmatched' WHERE rowid = ".((int) $paymentId));
-				$user = $saved;
-				return 'error: member create failed: '.$adh->error;
-			}
-			$adh->fetch($adh->id);
-		}
+		$adh->array_options['options_onb_payment_channel'] = 'givebutter';
+		$adh->insertExtraFields();
 		if ($adh->statut != Adherent::STATUS_VALIDATED && $adh->statut != Adherent::STATUS_EXCLUDED) {
 			$adh->validate($actor);
 		}
@@ -834,7 +918,7 @@ class OnboardingService
 		$this->save($app->rowid, $fields);
 		$app = $this->refreshStage($app->rowid);
 
-		if (!$wasMember) {
+		if ($first) {
 			$missing = self::paperworkDone($app) ? '' : "\n\nNote: their waiver, agreement or ID photo is still missing.";
 			$this->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), 'New paying member: '.$app->firstname.' '.$app->lastname, $app->firstname.' '.$app->lastname.' <'.$app->email.'> has set up dues ('.price($amount).') and needs a badge.'.$missing);
 			$this->mail($app->email, $this->template('ONBOARDING_MAIL_WELCOME_SUBJECT', 'Welcome to {org}', $app), $this->template('ONBOARDING_MAIL_WELCOME_BODY', "Hi {firstname},\n\nYour dues payment came through and your membership is active. Someone from the membership team will be in touch about your badge.", $app));
@@ -956,6 +1040,195 @@ class OnboardingService
 		return $seen.' transactions seen, '.$applied.' applied, '.$plans.' plans checked';
 	}
 
+	/**
+	 * Create the webhook in Givebutter so it reports payments straight to this
+	 * Dolibarr. Replaces one created earlier.
+	 *
+	 * @param string $target Override of the address Givebutter should call
+	 * @return string What happened
+	 */
+	public function connectGivebutter($target = '')
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
+
+		$key = getDolGlobalString('ONBOARDING_GB_API_KEY');
+		if (!$key) {
+			return 'Set the Givebutter API key first.';
+		}
+		if ($target === '') {
+			$target = $this->webhookUrl();
+		}
+		$base = rtrim(getDolGlobalString('ONBOARDING_GB_API_BASE', 'https://api.givebutter.com/v1'), '/');
+		$headers = array('Authorization: Bearer '.$key, 'Accept: application/json', 'Content-Type: application/json');
+		$old = getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID');
+		if ($old !== '') {
+			getURLContent($base.'/webhooks/'.rawurlencode($old), 'DELETE', '', 1, $headers, array('http', 'https'), 2);
+		}
+		$body = json_encode(array(
+			'name' => 'Dolibarr member onboarding',
+			'url' => $target,
+			'events' => array('transaction.succeeded', 'plan.canceled', 'plan.failed', 'plan.paused', 'plan.resumed'),
+			'enabled' => true,
+		));
+		$r = getURLContent($base.'/webhooks', 'POSTALREADYFORMATED', $body, 1, $headers, array('http', 'https'), 2);
+		$json = isset($r['content']) ? json_decode($r['content'], true) : null;
+		if (isset($json['data']) && is_array($json['data'])) {
+			$json = $json['data'];
+		}
+		if (empty($r['http_code']) || $r['http_code'] >= 300 || empty($json['id'])) {
+			return 'Givebutter refused: HTTP '.(isset($r['http_code']) ? $r['http_code'] : '?').' '.dol_trunc(isset($r['content']) ? (string) $r['content'] : '', 200);
+		}
+		dolibarr_set_const($this->db, 'ONBOARDING_GB_WEBHOOK_ID', (string) $json['id'], 'chaine', 0, '', $conf->entity);
+		dolibarr_set_const($this->db, 'ONBOARDING_GB_WEBHOOK_SECRET', isset($json['signature']) ? (string) $json['signature'] : '', 'chaine', 0, '', $conf->entity);
+		return 'Connected. Givebutter will report payments to '.$target;
+	}
+
+	/**
+	 * @return string Address Givebutter calls
+	 */
+	public function webhookUrl()
+	{
+		$public = rtrim(getDolGlobalString('ONBOARDING_PUBLIC_URL'), '/');
+		if ($public !== '') {
+			return $public.'/custom/onboarding/public/givebutter.php';
+		}
+		return dol_buildpath('/onboarding/public/givebutter.php', 2);
+	}
+
+	// ---------------------------------------------------------------- legacy import
+
+	/**
+	 * Import the old member spreadsheet. Tab or comma separated, first line is
+	 * the header. Columns used: name, email, access_code, discord, license,
+	 * member_type, payment_channel, join_date, open_item, comment.
+	 * People already known by email are skipped, so it is safe to run twice.
+	 *
+	 * @param string $text Pasted spreadsheet
+	 * @param bool $dry Only report what would happen
+	 * @return string[] One line per row
+	 */
+	public function importLegacy($text, $dry = true)
+	{
+		global $conf;
+
+		$report = array();
+		$lines = preg_split('/\\r\\n|\\r|\\n/', trim((string) $text));
+		if (count($lines) < 2) {
+			return array('Nothing to import: paste the header line and at least one row.');
+		}
+		$sep = strpos($lines[0], "\t") !== false ? "\t" : ',';
+		$head = array_map(function ($h) {
+			return strtolower(trim($h));
+		}, str_getcsv(array_shift($lines), $sep, '"', '\\'));
+		if (!in_array('email', $head) || !in_array('name', $head)) {
+			return array('The header line needs at least "name" and "email" columns.');
+		}
+		$actor = $this->actor();
+		$seenBadges = array();
+
+		foreach ($lines as $n => $line) {
+			if (trim($line) === '') {
+				continue;
+			}
+			$cells = str_getcsv($line, $sep, '"', '\\');
+			$row = array();
+			foreach ($head as $i => $h) {
+				$v = isset($cells[$i]) ? trim($cells[$i]) : '';
+				$row[$h] = strtolower($v) == 'null' ? '' : $v;
+			}
+			$get = function ($k) use ($row) {
+				return isset($row[$k]) ? $row[$k] : '';
+			};
+			$name = trim(dol_string_nohtmltag($get('name')));
+			$email = self::cleanEmail($get('email'));
+			$label = 'Row '.($n + 2).' ('.$name.')';
+			if (!isValidEmail($email) || $name === '') {
+				$report[] = $label.': SKIPPED, needs a name and a valid email.';
+				continue;
+			}
+			if ($this->findByEmail($email)) {
+				$report[] = $label.': already here, skipped.';
+				continue;
+			}
+			$pos = strrpos($name, ' ');
+			$first = $pos === false ? $name : substr($name, 0, $pos);
+			$last = $pos === false ? '-' : substr($name, $pos + 1);
+
+			$type = ucfirst(strtolower($get('member_type')));
+			$isMember = $type !== '' && $type != 'Onboarding';
+			$chanRaw = strtolower($get('payment_channel'));
+			$channel = 'none';
+			foreach (array('givebutter', 'paypal', 'check') as $c) {
+				if (strpos($chanRaw, $c) !== false) {
+					$channel = $c;
+				}
+			}
+			$joined = 0;
+			if (preg_match('/^(\\d{4})-(\\d{1,2})(?:-(\\d{1,2}))?/', $get('join_date'), $m)) {
+				$joined = dol_mktime(12, 0, 0, (int) $m[2], isset($m[3]) ? (int) $m[3] : 1, (int) $m[1]);
+			}
+			$badge = $get('access_code');
+			$hasId = in_array(strtolower($get('license')), array('yes', 'y', '1', 'true'));
+			$notes = array();
+			foreach (array('payment_channel' => 'Pays by', 'open_item' => 'Open item', 'comment' => 'Comment') as $k => $t) {
+				if ($get($k) !== '') {
+					$notes[] = $t.': '.$get($k);
+				}
+			}
+			$warn = '';
+			if ($badge !== '') {
+				if (isset($seenBadges[$badge])) {
+					$warn = ' WARNING: badge '.$badge.' is also on '.$seenBadges[$badge].'.';
+				}
+				$seenBadges[$badge] = $name;
+			}
+			$what = ($isMember ? 'member ('.$type.', pays by '.self::PAYMENT_CHANNELS[$channel].')' : 'non-member, signup in progress').($badge !== '' ? ', badge '.$badge : ', no badge').($hasId ? ', ID on file' : '');
+			if ($dry) {
+				$report[] = $label.': would add as '.$what.'.'.$warn;
+				continue;
+			}
+
+			$contact = new Contact($this->db);
+			$contact->firstname = $first;
+			$contact->lastname = $last;
+			$contact->email = $email;
+			$contact->statut = 1;
+			$contact->status = 1;
+			$contact->note_private = 'Imported from the legacy member list.';
+			$cid = $contact->create($actor);
+			if ($cid <= 0) {
+				$report[] = $label.': FAILED to create the contact: '.$contact->error;
+				continue;
+			}
+			$when = $this->db->idate($joined ? $joined : self::now());
+			$sql = "INSERT INTO ".$this->db->prefix()."onboarding_applicant (entity, email, firstname, lastname, discord, notify_events, notify_news, fk_socpeople, payment_state, id_uploaded_at, datec) VALUES (";
+			$sql .= ((int) $conf->entity).", '".$this->db->escape($email)."', '".$this->db->escape($first)."', '".$this->db->escape($last)."', '".$this->db->escape(substr($get('discord'), 0, 100))."', 0, 0, ".((int) $cid).", ";
+			$sql .= "'".($isMember ? 'active' : 'none')."', ".($hasId ? "'".$when."'" : "NULL").", '".$when."')";
+			if (!$this->db->query($sql)) {
+				$report[] = $label.': FAILED: '.$this->db->lasterror();
+				continue;
+			}
+			$app = $this->fetch($this->db->last_insert_id($this->db->prefix()."onboarding_applicant"));
+			$adh = $this->ensureMember($app, $isMember ? $this->memberType($type) : 0, $joined, implode("\n", $notes));
+			if (!$adh) {
+				$report[] = $label.': contact added, but the member record FAILED.';
+				continue;
+			}
+			if ($isMember && $adh->statut != Adherent::STATUS_VALIDATED) {
+				$adh->validate($actor);
+			}
+			$adh->array_options['options_onb_badge_id'] = $badge;
+			$adh->array_options['options_onb_badge_access'] = ($badge !== '' && $isMember) ? 1 : 0;
+			$adh->array_options['options_onb_payment_channel'] = $channel;
+			$adh->insertExtraFields();
+			$this->refreshStage($app->rowid);
+			$report[] = $label.': added as '.$what.'.'.$warn;
+		}
+		return $report;
+	}
+
 	// ---------------------------------------------------------------- reminders
 
 	/**
@@ -996,6 +1269,10 @@ class OnboardingService
 				if ($waivedTs && $waivedTs >= $now) {
 					continue; // Scholarship or board-approved pause.
 				}
+			}
+			$channel = isset($adh->array_options['options_onb_payment_channel']) ? (string) $adh->array_options['options_onb_payment_channel'] : '';
+			if ($channel !== '' && $channel !== 'givebutter') {
+				continue; // PayPal, check and scholarship members are kept up by hand.
 			}
 			$paidUntil = (int) $adh->datefin;
 

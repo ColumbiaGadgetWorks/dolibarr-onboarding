@@ -21,6 +21,17 @@ if (!isModEnabled('onboarding') || !$user->hasRight('onboarding', 'applicant', '
 	accessforbidden();
 }
 
+$svc = new OnboardingService($db);
+if (GETPOST('action', 'aZ09') == 'sendlink' && $user->hasRight('onboarding', 'applicant', 'write')) {
+	$target = $svc->fetch((int) GETPOST('id', 'int'));
+	if ($target) {
+		$svc->issueToken($target, true);
+		setEventMessages('Signup link emailed to '.$target->email, null);
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+
 $filter = GETPOST('filter', 'aZ09');
 $filters = array(
 	'' => 'Everyone',
@@ -32,7 +43,7 @@ $filters = array(
 $canid = $user->hasRight('onboarding', 'idphoto', 'read');
 
 $ef = $db->prefix()."adherent_extrafields";
-$sql = "SELECT a.*, m.datefin, e.onb_badge_id, e.onb_badge_access";
+$sql = "SELECT a.*, m.datefin, m.statut AS member_status, e.onb_badge_id, e.onb_badge_access, e.onb_payment_channel";
 $sql .= " FROM ".$db->prefix()."onboarding_applicant AS a";
 $sql .= " LEFT JOIN ".$db->prefix()."adherent AS m ON m.rowid = a.fk_adherent";
 $sql .= " LEFT JOIN ".$ef." AS e ON e.fk_object = a.fk_adherent";
@@ -63,14 +74,15 @@ $yes = img_picto('Yes', 'tick');
 $no = '<span class="opacitymedium">no</span>';
 
 print '<div class="div-table-responsive"><table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Name</td><td>Email</td><td>Discord</td><td>Started</td><td>Stage</td><td class="center">Waiver</td><td class="center">Agreement</td><td class="center">ID</td><td>Dues</td><td>Paid until</td><td>Badge</td></tr>';
+print '<tr class="liste_titre"><td>Name</td><td>Email</td><td>Discord</td><td>Started</td><td>Stage</td><td class="center">Waiver</td><td class="center">Agreement</td><td class="center">ID</td><td>Dues</td><td>Paid until</td><td>Badge</td><td></td></tr>';
 $n = 0;
 while ($resql && ($o = $db->fetch_object($resql))) {
 	$n++;
 	$doc = dol_buildpath('/onboarding/document.php', 1).'?id='.((int) $o->rowid).'&file=';
 	$name = dol_escape_htmltag(trim($o->firstname.' '.$o->lastname));
 	if ($o->fk_adherent > 0) {
-		$name = '<a href="'.DOL_URL_ROOT.'/adherents/card.php?rowid='.((int) $o->fk_adherent).'">'.$name.'</a> <span class="opacitymedium small">member</span>';
+		$kind = $o->member_status == 1 ? 'member' : ($o->member_status == 0 ? 'former member' : 'non-member');
+		$name = '<a href="'.DOL_URL_ROOT.'/adherents/card.php?rowid='.((int) $o->fk_adherent).'">'.$name.'</a> <span class="opacitymedium small">'.$kind.'</span>';
 	} elseif ($o->fk_socpeople > 0) {
 		$name = '<a href="'.DOL_URL_ROOT.'/contact/card.php?id='.((int) $o->fk_socpeople).'">'.$name.'</a> <span class="opacitymedium small">contact</span>';
 	}
@@ -94,16 +106,24 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 	if ($o->problem_since) {
 		$state .= ' <span class="opacitymedium small">since '.dol_print_date($db->jdate($o->problem_since), 'day').'</span>';
 	}
+	if ($o->onb_payment_channel && $o->onb_payment_channel != 'givebutter' && isset(OnboardingService::PAYMENT_CHANNELS[$o->onb_payment_channel])) {
+		$state = 'By hand <span class="opacitymedium small">'.dol_escape_htmltag(OnboardingService::PAYMENT_CHANNELS[$o->onb_payment_channel]).'</span>';
+	}
 	print '<td>'.$state.'</td>';
 	print '<td>'.($o->datefin ? dol_print_date($db->jdate($o->datefin), 'day') : '').'</td>';
 	print '<td>'.dol_escape_htmltag((string) $o->onb_badge_id).($o->fk_adherent > 0 ? ' <span class="opacitymedium small">'.($o->onb_badge_access ? 'access on' : 'access off').'</span>' : '').'</td>';
+	print '<td class="right">';
+	if ($o->stage != 'complete' && $user->hasRight('onboarding', 'applicant', 'write')) {
+		print '<a class="button smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=sendlink&id='.((int) $o->rowid).'&token='.newToken().'" title="Email this person a link to finish their paperwork online">Email link</a>';
+	}
+	print '</td>';
 	print '</tr>';
 }
 if (!$n) {
-	print '<tr><td colspan="11"><span class="opacitymedium">Nobody here.</span></td></tr>';
+	print '<tr><td colspan="12"><span class="opacitymedium">Nobody here.</span></td></tr>';
 }
 print '</table></div>';
-print '<p class="opacitymedium small">Badge ID, badge access and "dues waived until" are edited on the member card.</p>';
+print '<p class="opacitymedium small">Badge ID, badge access, "pays dues by" and "dues waived until" are edited on the member card.</p>';
 
 llxFooter();
 $db->close();

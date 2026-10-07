@@ -24,6 +24,10 @@ if ($job == 'daily') {
 	echo $svc->dunning().'; '.$svc->cleanup()."\n";
 } elseif ($job == 'sync') {
 	echo $svc->reconcile()."\n";
+} elseif ($job == 'connect') {
+	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
+} elseif ($job == 'import') {
+	echo implode("\n", $svc->importLegacy((string) file_get_contents('php://stdin'), !(isset($argv[2]) && $argv[2] == 'go')))."\n";
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');
 	$out = array('applicant' => $app, 'member' => null, 'contact_fields' => null);
@@ -46,6 +50,6 @@ if ($job == 'daily') {
 	}
 	echo json_encode($out)."\n";
 } else {
-	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL\n");
+	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL | connect [URL] | import [go] < sheet\n");
 	exit(1);
 }

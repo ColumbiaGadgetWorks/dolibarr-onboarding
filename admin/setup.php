@@ -34,7 +34,8 @@ $sections = array(
 		'ONBOARDING_MAIL_FROM' => array('Send emails from', 'text', 'Leave empty to use Dolibarr\'s default sender.'),
 	),
 	'Givebutter' => array(
-		'ONBOARDING_GB_API_KEY' => array('Givebutter API key', 'secret', 'Settings, Integrations, API Keys in Givebutter. Used for the hourly sync.'),
+		'ONBOARDING_GB_API_KEY' => array('Givebutter API key', 'secret', 'Settings, Integrations, API Keys in Givebutter. Used for the hourly sync and for the Connect button below.'),
+		'ONBOARDING_PUBLIC_URL' => array('This Dolibarr\'s public address', 'text', 'The address Givebutter can reach, for example https://dolibarr.example.org . Leave empty if Dolibarr\'s own address setting is already the public one.'),
 		'ONBOARDING_GB_CAMPAIGN_CODE' => array('Membership campaign code', 'text', 'Only payments to this campaign count as dues. It is the code at the end of the campaign link, for example kxk2FA. Leave empty to count every payment.'),
 		'ONBOARDING_CHECKOUT_URL' => array('Dues payment page', 'text', 'Where the signup sends people to pay, for example https://givebutter.com/kxk2FA .'),
 		'ONBOARDING_GB_API_BASE' => array('Givebutter API address', 'text', 'Only change this to point at the sandbox.'),
@@ -54,7 +55,7 @@ $sections = array(
 		'ONBOARDING_MAIL_RESUME_BODY' => array('Signup link text', 'area', 'Sent after step 1. Placeholders: {firstname} {org} {link}'),
 	),
 	'Documents' => array(
-		'ONBOARDING_WAIVER_TEXT' => array('Liability waiver', 'area', 'Plain text. Editing it creates a new version; existing signatures keep the text they signed. Current version: '.$docs['waiver']['version']),
+		'ONBOARDING_WAIVER_TEXT' => array('Liability waiver', 'area', 'Plain text. Shown as a placeholder until you save your own wording. Editing it creates a new version; existing signatures keep the text they signed. Current version: '.$docs['waiver']['version']),
 		'ONBOARDING_AGREEMENT_TEXT' => array('Membership agreement', 'area', 'Current version: '.$docs['agreement']['version']),
 	),
 	'Housekeeping' => array(
@@ -88,8 +89,12 @@ if ($action == 'save') {
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
-if ($action == 'runsync' || $action == 'rundaily') {
-	$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->cleanup();
+if ($action == 'runsync' || $action == 'rundaily' || $action == 'connect') {
+	if ($action == 'connect') {
+		$out = $svc->connectGivebutter();
+	} else {
+		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->cleanup();
+	}
 	setEventMessages($out, null);
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
@@ -101,6 +106,13 @@ print load_fiche_titre('Member onboarding setup', $linkback, 'title_setup');
 
 $endpoint = dol_buildpath('/onboarding/public/api.php', 2);
 print '<div class="info">The website talks to Dolibarr at <strong>'.dol_escape_htmltag($endpoint).'</strong>. In the website Worker, set the secret <code>DOLIBARR_URL</code> to <strong>'.dol_escape_htmltag(preg_replace('/\/custom\/onboarding\/public\/api\.php$/', '', $endpoint)).'</strong> and <code>DOLIBARR_API_KEY</code> to the key below.</div>';
+
+$connected = getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID') !== '';
+print '<div class="'.($connected ? 'ok' : 'warning').'">';
+print $connected ? 'Givebutter is connected: it reports payments and cancelled plans to <strong>'.dol_escape_htmltag($svc->webhookUrl()).'</strong>. ' : 'Givebutter is not connected yet, so payments are only noticed by the hourly sync. Save the API key below, then press Connect. ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=connect&token='.newToken().'">'.($connected ? 'Reconnect' : 'Connect Givebutter').'</a>';
+print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import.php', 1).'">Import existing members</a>';
+print '</div>';
 
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
