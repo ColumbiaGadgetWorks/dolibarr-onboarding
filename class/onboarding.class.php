@@ -1614,16 +1614,18 @@ class OnboardingService
 				return array('ok' => true, 'result' => 'added');
 			}
 			$pos = strrpos($name, ' ');
-			$contact->firstname = $pos === false ? '' : substr($name, 0, $pos);
+			// Both name columns hold 50 characters; a longer value makes the insert fail.
+			$contact->firstname = dol_substr($pos === false ? '' : substr($name, 0, $pos), 0, 50);
 			// A contact needs a last name. With no name given, the address stands in.
-			$contact->lastname = $name === '' ? $email : ($pos === false ? $name : substr($name, $pos + 1));
+			$contact->lastname = dol_substr($name === '' ? $email : ($pos === false ? $name : substr($name, $pos + 1)), 0, 50);
 			$contact->email = $email;
 			$contact->statut = 1;
 			$contact->status = 1;
 			$contact->note_private = $line;
 			if ($contact->create($this->actor()) <= 0) {
-				dol_syslog('Onboarding: contact create failed: '.$contact->error, LOG_ERR);
-				return array('ok' => false, 'error' => 'server', 'http' => 500);
+				$why = trim($contact->error.' '.implode(' ', (array) $contact->errors));
+				dol_syslog('Onboarding: contact create failed: '.$why, LOG_ERR);
+				return array('ok' => false, 'error' => 'server', 'detail' => $why, 'http' => 500);
 			}
 			$contact->fetch($contact->id);
 			$result = 'added';
@@ -1674,7 +1676,7 @@ class OnboardingService
 		$cd = $find(array('subscribed', 'date', 'datesubscribed', 'subscriptiondate', 'created', 'createdat', 'signupdate', 'optintime', 'confirmtime'));
 		$source = trim((string) $source) === '' ? 'imported list' : trim((string) $source);
 
-		$count = array('added' => 0, 'tagged' => 0, 'already' => 0, 'unsubscribed' => 0, 'invalid' => 0, 'duplicate' => 0);
+		$count = array('added' => 0, 'tagged' => 0, 'already' => 0, 'unsubscribed' => 0, 'invalid' => 0, 'duplicate' => 0, 'failed' => 0);
 		$notes = array();
 		$seen = array();
 		foreach ($lines as $n => $line) {
@@ -1698,9 +1700,14 @@ class OnboardingService
 				$date = gmdate('Y-m-d', $t);
 			}
 			$r = $this->subscribe(array('email' => $email, 'name' => $name, 'date' => $date, 'source' => $source), false, $dry);
-			if (!$r['ok']) {
+			if (!$r['ok'] && $r['error'] == 'invalid') {
 				$count['invalid']++;
 				$notes[] = 'Row '.($n + 2).': "'.$get($ce).'" is not a valid email address, skipped.';
+				continue;
+			}
+			if (!$r['ok']) {
+				$count['failed']++;
+				$notes[] = 'Row '.($n + 2).' ('.$email.'): Dolibarr could not save the contact'.(empty($r['detail']) ? '' : ': '.$r['detail']).'.';
 				continue;
 			}
 			$count[$r['result']]++;
@@ -1708,7 +1715,8 @@ class OnboardingService
 		$verb = $dry ? 'would be' : 'were';
 		$summary = $count['added'].' new contacts '.$verb.' added, '.$count['tagged'].' existing contacts '.$verb.' added to the list, '
 			.$count['already'].' were already on it, '.$count['unsubscribed'].' skipped because they unsubscribed, '
-			.$count['invalid'].' invalid'.($count['duplicate'] ? ', '.$count['duplicate'].' repeated in the paste' : '').'.';
+			.$count['invalid'].' invalid'.($count['duplicate'] ? ', '.$count['duplicate'].' repeated in the paste' : '')
+			.($count['failed'] ? ', '.$count['failed'].' COULD NOT BE SAVED (see below)' : '').'.';
 		return array_merge(array($summary), $notes);
 	}
 
