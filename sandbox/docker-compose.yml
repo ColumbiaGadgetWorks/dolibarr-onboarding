@@ -90,8 +90,7 @@ services:
           --var DOLIBARR_API_KEY:sandbox-key-sandbox-key-sandbox-key \
           --var GIVEBUTTER_WEBHOOK_SECRET:sandbox-signature
     environment:
-      # Change the default to main once the join flow has been merged there.
-      WEBSITE_REF: ${WEBSITE_REF:-member-join-flow}
+      WEBSITE_REF: ${WEBSITE_REF:-main}
       CI: "1"
       WRANGLER_SEND_METRICS: "false"
     ports:
