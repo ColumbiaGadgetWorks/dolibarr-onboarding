@@ -196,7 +196,7 @@ on the form and the exact answers to paste.
 Setup: create the Givebutter campaign with the three questions, hide Funds on it,
 then on the setup page fill in **Training campaign code** and **Training lookup
 page**. Give staff the new permissions: see trainings; match trainers, approve credits and handle tool requests; and, for the purchaser only, add zone budgets and record purchases. An existing install needs the module
-disabled and enabled once to create the three new tables.
+disabled and enabled once to create the new tables and permissions.
 
 ## Fields on the member card
 
