@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.3.0';
+		$this->version = '0.4.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
@@ -54,6 +54,9 @@ class modOnboarding extends DolibarrModules
 			array('ONBOARDING_TRAINING_TRAINER_SHARE', 'chaine', '50', 'Percent of a training fee credited to the trainer; the rest goes to the zone budget', 0, 'current', 0),
 			array('ONBOARDING_TRAINING_CREDIT_THRESHOLD', 'chaine', '50', 'Trainer credit that earns a month of dues refunded', 0, 'current', 0),
 			array('ONBOARDING_TRAINED_TAG', 'chaine', 'Trained', 'Parent tag for "Trained: <tool>" tags on members and contacts', 0, 'current', 0),
+			array('ONBOARDING_TRAINING_ZONES', 'chaine', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting', 'Zones with a budget, comma separated, as on the training form', 0, 'current', 0),
+			array('ONBOARDING_TRAINING_CATALOG_URL', 'chaine', 'https://columbiagadgetworks.org/training/catalog/index.json', 'The website training catalog (tools, zones, fees, trainers) as JSON', 0, 'current', 0),
+			array('ONBOARDING_TRAINING_CATALOG_EDIT_URL', 'chaine', 'https://github.com/ColumbiaGadgetWorks/website/edit/main/data/training.yaml', 'Where the training catalog is edited', 0, 'current', 0),
 		);
 
 		$this->tabs = array();
@@ -82,7 +85,7 @@ class modOnboarding extends DolibarrModules
 				'objectname' => 'OnboardingCron',
 				'method' => 'daily',
 				'parameters' => '',
-				'comment' => 'Sends due payment reminders, marks members non-paying after the grace period, deletes abandoned signups.',
+				'comment' => 'Sends due payment reminders, marks members non-paying after the grace period, deletes abandoned signups, expires unpaid training registrations, refreshes the training catalog.',
 				'frequency' => 1,
 				'unitfrequency' => 86400,
 				'status' => 1,
@@ -114,8 +117,13 @@ class modOnboarding extends DolibarrModules
 		$this->rights[$r][5] = 'read';
 		$r++;
 		$this->rights[$r][0] = $this->numero.'05';
-		$this->rights[$r][1] = 'Match trainers, record zone spending, approve dues credits';
+		$this->rights[$r][1] = 'Match trainers, link training payments, approve dues credits';
 		$this->rights[$r][4] = 'training';
+		$this->rights[$r][5] = 'write';
+		$r++;
+		$this->rights[$r][0] = $this->numero.'06';
+		$this->rights[$r][1] = 'Add zone budgets and record purchases against them';
+		$this->rights[$r][4] = 'budget';
 		$this->rights[$r][5] = 'write';
 		$r++;
 
@@ -171,6 +179,20 @@ class modOnboarding extends DolibarrModules
 			'mainmenu' => 'members',
 			'leftmenu' => 'onboarding_training_accounts',
 			'url' => '/onboarding/training-accounts.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->hasRight("onboarding", "training", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Training tools',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_training_tools',
+			'url' => '/onboarding/training-tools.php',
 			'langs' => 'onboarding@onboarding',
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',

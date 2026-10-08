@@ -44,9 +44,12 @@ $sections = array(
 		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'A payment of at least this much makes the member a Supporter.'),
 	),
 	'Training fees' => array(
-		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on, for example the code at the end of its link. Leave empty to turn training tracking off. Its checkout questions are found by their titles: one mentioning "zone", one mentioning "trainer", and one mentioning "tool" or "equipment".'),
+		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on (through the widget on the website\'s /training/pay/ page), for example the code at the end of its link. Leave empty to turn training tracking off.'),
+		'ONBOARDING_TRAINING_CATALOG_URL' => array('Training catalog', 'text', 'The website\'s catalog of tools, zones, fees and trainers as JSON, e.g. https://columbiagadgetworks.org/training/catalog/index.json . Shown under Training tools; refreshed daily.'),
+		'ONBOARDING_TRAINING_CATALOG_EDIT_URL' => array('Edit the catalog at', 'text', 'Link shown under Training tools, e.g. https://github.com/ColumbiaGadgetWorks/website/edit/main/data/training.yaml'),
 		'ONBOARDING_TRAINING_TRAINER_SHARE' => array('Trainer\'s share (percent)', 'text', 'Credited to the trainer. The rest of each fee goes to the zone\'s budget.'),
 		'ONBOARDING_TRAINING_CREDIT_THRESHOLD' => array('Credit for a month of dues', 'text', 'When a trainer\'s credit reaches this, a dues refund waits for approval under Training accounts, and the membership team is emailed.'),
+		'ONBOARDING_TRAINING_ZONES' => array('Zones', 'text', 'Comma separated, e.g. Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting. Each has a budget under Training accounts. Zones in the training catalog are added to these.'),
 		'ONBOARDING_TRAINED_TAG' => array('Trained tag', 'text', 'Trainees get a tag "<this>: <tool>" on their member and contact cards.'),
 		'ONBOARDING_TRAINING_LOOKUP_URL' => array('Training lookup page', 'text', 'The website page where people check what they are trained on, for example https://columbiagadgetworks.org/training/ . Put in the email sent after a training.'),
 		'ONBOARDING_MAIL_TRAINED_SUBJECT' => array('Trained email subject', 'text', 'Placeholders: {tool}'),

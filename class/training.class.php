@@ -144,6 +144,11 @@ class OnboardingTraining
 	/**
 	 * Record a training-campaign transaction. Safe to call again for the same one.
 	 *
+	 * The tool, zone and trainer come from the registration made on the website
+	 * just before paying, matched by email. Without one they come from the
+	 * Givebutter checkout questions if the campaign still has them; failing that
+	 * the payment waits on the Trainings page for someone to link it.
+	 *
 	 * @param array $t TransactionResource, already known to be succeeded
 	 * @return string What was done, for the log
 	 */
@@ -158,49 +163,106 @@ class OnboardingTraining
 			return 'duplicate';
 		}
 
-		$a = self::answers($t);
 		// The gift itself, not a fee the payer chose to cover.
 		$amount = isset($t['donated']) && is_numeric($t['donated']) && (float) $t['donated'] > 0 ? (float) $t['donated'] : (float) (isset($t['amount']) ? $t['amount'] : 0);
-		$trainerAmount = round($amount * self::trainerShare(), 2);
-		$zoneAmount = round($amount - $trainerAmount, 2);
 		$email = OnboardingService::cleanEmail(isset($t['email']) ? $t['email'] : '');
 		$when = !empty($t['transacted_at']) ? strtotime((string) $t['transacted_at']) : 0;
-		$zone = self::zoneName($a['zone']);
-		$tool = dol_trunc($a['tool'] !== '' ? $a['tool'] : $zone, 150, 'right', 'UTF-8', 1);
-		$trainee = $this->memberByEmail($email);
-		$trainer = $this->matchTrainer($a['trainer']);
+		$trunc = function ($k, $max) use ($t) {
+			return dol_trunc((string) (isset($t[$k]) ? $t[$k] : ''), $max, 'right', 'UTF-8', 1);
+		};
 
-		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, trainer_name, fk_trainer, amount, zone_amount, trainer_amount, transacted_at, status, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($email)."', ";
-		$sql .= "'".$this->db->escape(dol_trunc((string) (isset($t['first_name']) ? $t['first_name'] : ''), 100, 'right', 'UTF-8', 1))."', '".$this->db->escape(dol_trunc((string) (isset($t['last_name']) ? $t['last_name'] : ''), 100, 'right', 'UTF-8', 1))."', ";
-		$sql .= ($trainee ? (int) $trainee : 'NULL').", '".$this->db->escape($zone)."', '".$this->db->escape($tool)."', '".$this->db->escape(dol_trunc($a['trainer'], 150, 'right', 'UTF-8', 1))."', ";
-		$sql .= ($trainer ? (int) $trainer : 'NULL').", ".price2num($amount).", ".price2num($zoneAmount).", ".price2num($trainerAmount).", ";
-		$sql .= "'".$this->db->idate($when ? $when : OnboardingService::now())."', '".($trainer ? 'recorded' : 'trainer_unmatched')."', '".$this->db->idate(OnboardingService::now())."')";
+		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, trainer_name, amount, zone_amount, trainer_amount, transacted_at, status, datec) VALUES (";
+		$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($email)."', '".$this->db->escape($trunc('first_name', 100))."', '".$this->db->escape($trunc('last_name', 100))."', ";
+		$trainee = $this->memberByEmail($email);
+		$sql .= ($trainee ? (int) $trainee : 'NULL').", '', '', '', ".price2num($amount).", 0, 0, ";
+		$sql .= "'".$this->db->idate($when ? $when : OnboardingService::now())."', 'unregistered', '".$this->db->idate(OnboardingService::now())."')";
 		if (!$this->db->query($sql)) {
 			return 'duplicate'; // Lost a race with another delivery.
 		}
 		$id = (int) $this->db->last_insert_id($table);
 
+		$reg = $this->findRegistration($email, $amount);
+		if (!$reg) {
+			$a = self::answers($t);
+			if ($a['zone'] !== '' || $a['tool'] !== '') {
+				$zone = self::zoneName($a['zone']);
+				$reg = (object) array('rowid' => 0, 'tool' => $a['tool'] !== '' ? $a['tool'] : $zone, 'zone' => $zone, 'trainer_name' => $a['trainer'], 'trainer_member' => '');
+			}
+		}
+		if (!$reg || !$this->apply($id, $reg)) {
+			$this->svc->mail(
+				getDolGlobalString('ONBOARDING_STAFF_EMAIL'),
+				'Training payment without a registration',
+				trim($trunc('first_name', 100).' '.$trunc('last_name', 100)).' <'.$email.'> paid '.price($amount)." for a training, but registered no tool on the website with that email.\n\nLink it to their registration under Members, Onboarding, Trainings.\n".dol_buildpath('/onboarding/trainings.php', 2)
+			);
+			return 'training '.$id.' paid without a registration';
+		}
+		$res = $this->db->query("SELECT status, trainer_name FROM ".$table." WHERE rowid = ".$id);
+		$row = $res ? $this->db->fetch_object($res) : null;
+		return 'training '.$id.' recorded'.($row && $row->status == 'trainer_unmatched' ? ', trainer "'.$row->trainer_name.'" not matched' : '');
+	}
+
+	/**
+	 * Fill in a paid training from its registration (or the checkout answers),
+	 * split the fee, tag and email the trainee.
+	 *
+	 * @param int $id Training row
+	 * @param object $reg Registration row, or answers with rowid 0
+	 * @return bool Applied (false if the registration was claimed by another payment)
+	 */
+	private function apply($id, $reg)
+	{
+		$table = $this->db->prefix().'onboarding_training';
+		if ($reg->rowid) {
+			$claim = $this->db->query("UPDATE ".$this->db->prefix()."onboarding_training_reg SET status = 'paid', fk_training = ".((int) $id)." WHERE rowid = ".((int) $reg->rowid)." AND status = 'waiting'");
+			if (!$claim || $this->db->affected_rows($claim) < 1) {
+				return false;
+			}
+		}
+		// The trainee is the person who registered, even if someone else paid.
+		if (!empty($reg->email)) {
+			$member = $this->memberByEmail($reg->email);
+			$this->db->query("UPDATE ".$table." SET email = '".$this->db->escape($reg->email)."', firstname = '".$this->db->escape((string) $reg->firstname)."', lastname = '".$this->db->escape((string) $reg->lastname)."', fk_adherent = ".($member ? (int) $member : 'NULL')." WHERE rowid = ".((int) $id));
+		}
+		$res = $this->db->query("SELECT * FROM ".$table." WHERE rowid = ".((int) $id));
+		$tr = $res ? $this->db->fetch_object($res) : null;
+		if (!$tr) {
+			return false;
+		}
+		$trainer = $this->memberByCode($reg->trainer_member);
+		if (!$trainer) {
+			$trainer = $this->matchTrainer($reg->trainer_name);
+		}
+		$trainerAmount = round((float) $tr->amount * self::trainerShare(), 2);
+		$zoneAmount = round((float) $tr->amount - $trainerAmount, 2);
+		$tool = dol_trunc((string) $reg->tool, 150, 'right', 'UTF-8', 1);
+		$zone = dol_trunc((string) $reg->zone, 100, 'right', 'UTF-8', 1);
+		$trainerName = dol_trunc((string) $reg->trainer_name, 150, 'right', 'UTF-8', 1);
+		$this->db->query("UPDATE ".$table." SET zone = '".$this->db->escape($zone)."', tool = '".$this->db->escape($tool)."', trainer_name = '".$this->db->escape($trainerName)."', fk_trainer = ".($trainer ? (int) $trainer : 'NULL').", zone_amount = ".price2num($zoneAmount).", trainer_amount = ".price2num($trainerAmount).", status = '".($trainer ? 'recorded' : 'trainer_unmatched')."' WHERE rowid = ".((int) $id));
+
 		$this->post('zone', $zone, $zoneAmount, 'training', $id, 'Training fee, '.$tool);
 		if ($trainer) {
 			$this->postTrainerShare($id);
 		}
-		$this->markTrained($email, $trainee, $tool);
+		$this->markTrained($tr->email, (int) $tr->fk_adherent, $tool);
 
-		$first = isset($t['first_name']) ? (string) $t['first_name'] : '';
+		$first = (string) $tr->firstname;
+		if ($first === '' && !empty($reg->firstname)) {
+			$first = (string) $reg->firstname;
+		}
 		$this->svc->mail(
-			$email,
+			$tr->email,
 			strtr(getDolGlobalString('ONBOARDING_MAIL_TRAINED_SUBJECT', 'You are trained on the {tool}'), array('{tool}' => $tool)),
 			strtr(getDolGlobalString('ONBOARDING_MAIL_TRAINED_BODY', "Hi {firstname},\n\nThanks for your training fee. You are now on record as trained to use the {tool} ({zone}).\n\nYou can check what you are trained on at any time: {lookup_url}"), array(
 				'{firstname}' => $first !== '' ? $first : 'there',
 				'{tool}' => $tool,
 				'{zone}' => $zone,
-				'{trainer}' => $a['trainer'],
+				'{trainer}' => $trainerName,
 				'{lookup_url}' => getDolGlobalString('ONBOARDING_TRAINING_LOOKUP_URL', '(ask a member of staff)'),
 				'{org}' => getDolGlobalString('MAIN_INFO_SOCIETE_NOM', 'the makerspace'),
 			))
 		);
-		return 'training '.$id.' recorded'.($trainer ? '' : ', trainer "'.$a['trainer'].'" not matched');
+		return true;
 	}
 
 	/**
@@ -408,7 +470,7 @@ class OnboardingTraining
 		}
 		$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$table." WHERE entity = ".((int) $conf->entity)." AND status <> 'ignored' AND tool = '".$this->db->escape($tr->tool)."' AND (email = '".$this->db->escape($tr->email)."'".($tr->fk_adherent ? " OR fk_adherent = ".((int) $tr->fk_adherent) : '').")");
 		$left = $res ? (int) $this->db->fetch_object($res)->n : 1;
-		if (!$left) {
+		if (!$left && $tr->tool !== '') {
 			$targets = array();
 			if ($tr->fk_adherent) {
 				$targets[] = array(Categorie::TYPE_MEMBER, new Adherent($this->db), (int) $tr->fk_adherent);
@@ -516,12 +578,181 @@ class OnboardingTraining
 		}
 		$member = $this->memberByEmail($email);
 		$where = "email = '".$this->db->escape($email)."'".($member ? " OR fk_adherent = ".((int) $member) : '');
-		$res = $this->db->query("SELECT tool, zone, MIN(transacted_at) AS first FROM ".$this->db->prefix()."onboarding_training WHERE entity = ".((int) $conf->entity)." AND status <> 'ignored' AND (".$where.") GROUP BY tool, zone ORDER BY zone, tool");
+		$res = $this->db->query("SELECT tool, zone, MIN(transacted_at) AS first FROM ".$this->db->prefix()."onboarding_training WHERE entity = ".((int) $conf->entity)." AND status IN ('recorded', 'trainer_unmatched') AND (".$where.") GROUP BY tool, zone ORDER BY zone, tool");
 		$out = array();
 		while ($res && ($obj = $this->db->fetch_object($res))) {
 			$out[] = array('tool' => (string) $obj->tool, 'zone' => (string) $obj->zone, 'date' => dol_print_date($this->db->jdate($obj->first), '%Y-%m-%d'));
 		}
 		return $out;
+	}
+
+	// ---------------------------------------------------------------- zones and the catalog
+
+	/**
+	 * Every zone: the setting's list first, then zones in the website's training
+	 * catalog, then any other zone with ledger entries.
+	 *
+	 * @return string[]
+	 */
+	public function zones()
+	{
+		global $conf;
+		$out = array();
+		$catalog = $this->catalog(false);
+		$lists = array(explode(',', getDolGlobalString('ONBOARDING_TRAINING_ZONES', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting')), $catalog ? $catalog['zones'] : array());
+		foreach ($lists as $list) {
+			foreach ($list as $z) {
+				$z = trim((string) $z);
+				if ($z !== '') {
+					$out[$z] = true;
+				}
+			}
+		}
+		$res = $this->db->query("SELECT DISTINCT account_key AS z FROM ".$this->db->prefix()."onboarding_ledger WHERE entity = ".((int) $conf->entity)." AND account_type = 'zone' ORDER BY account_key");
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$out[(string) $obj->z] = true;
+		}
+		return array_keys($out);
+	}
+
+	/**
+	 * The website's training catalog (data/training.yaml in the website repo, as
+	 * published at ONBOARDING_TRAINING_CATALOG_URL): zones, fees, trainers, tools.
+	 * The last copy fetched is kept, so pages work while the site is unreachable.
+	 *
+	 * @param bool $fetch Fetch a fresh copy first
+	 * @return array{zones:string[],fees:float[],trainers:array,tools:array,fetched:int}|null
+	 */
+	public function catalog($fetch = true)
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		$url = getDolGlobalString('ONBOARDING_TRAINING_CATALOG_URL');
+		if ($fetch && $url !== '') {
+			require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
+			$r = getURLContent($url, 'GET', '', 1, array('Accept: application/json'), array('http', 'https'), 2);
+			$json = !empty($r['http_code']) && $r['http_code'] == 200 ? json_decode($r['content'], true) : null;
+			if (is_array($json) && isset($json['tools']) && is_array($json['tools'])) {
+				$json['fetched'] = OnboardingService::now();
+				dolibarr_set_const($this->db, 'ONBOARDING_TRAINING_CATALOG_CACHE', json_encode($json), 'chaine', 0, '', $conf->entity);
+				return $json + array('zones' => array(), 'fees' => array(), 'trainers' => array());
+			}
+			dol_syslog('Onboarding: training catalog '.$url.' returned '.(isset($r['http_code']) ? $r['http_code'] : '?'), LOG_WARNING);
+		}
+		$cached = json_decode(getDolGlobalString('ONBOARDING_TRAINING_CATALOG_CACHE'), true);
+		return is_array($cached) ? $cached + array('zones' => array(), 'fees' => array(), 'trainers' => array(), 'tools' => array(), 'fetched' => 0) : null;
+	}
+
+	/**
+	 * @param string $code Badge code (member_code)
+	 * @return int Member with that badge code, 0 if none
+	 */
+	public function memberByCode($code)
+	{
+		$code = trim((string) $code);
+		if ($code === '') {
+			return 0;
+		}
+		$res = $this->db->query("SELECT fk_object FROM ".$this->db->prefix()."adherent_extrafields WHERE member_code = '".$this->db->escape($code)."' LIMIT 1");
+		$obj = $res ? $this->db->fetch_object($res) : null;
+		return $obj ? (int) $obj->fk_object : 0;
+	}
+
+	// ---------------------------------------------------------------- registrations
+
+	/**
+	 * A training registered on the website before payment (action=trainingstart).
+	 * The website has already checked the tool and trainer against the catalog.
+	 *
+	 * @param array<string,mixed> $in email, firstname, lastname, tool_id, tool, zone, fee, trainer_id, trainer_name, trainer_member, ip
+	 * @return array<string,mixed>
+	 */
+	public function register($in)
+	{
+		global $conf;
+		$get = function ($k, $max) use ($in) {
+			return dol_trunc(trim((string) (isset($in[$k]) ? $in[$k] : '')), $max, 'right', 'UTF-8', 1);
+		};
+		$email = OnboardingService::cleanEmail($get('email', 255));
+		if (!preg_match('/^[^@\s]+@[^@\s]+\.[^@\s]+$/', $email) || $get('tool', 150) === '' || $get('zone', 100) === '' || $get('trainer_name', 150) === '') {
+			return array('ok' => false, 'error' => 'invalid', 'http' => 400);
+		}
+		$fee = isset($in['fee']) && is_numeric($in['fee']) ? (float) $in['fee'] : 0;
+		$table = $this->db->prefix().'onboarding_training_reg';
+		$cols = array('email' => $email);
+		foreach (array('firstname' => 100, 'lastname' => 100, 'tool_id' => 100, 'tool' => 150, 'zone' => 100, 'trainer_id' => 100, 'trainer_name' => 150, 'trainer_member' => 64, 'ip' => 64) as $k => $max) {
+			$cols[$k] = $get($k, $max);
+		}
+		$sql = "INSERT INTO ".$table." (entity, ".implode(', ', array_keys($cols)).", fee, status, datec) VALUES (".((int) $conf->entity);
+		foreach ($cols as $v) {
+			$sql .= ", '".$this->db->escape($v)."'";
+		}
+		$sql .= ", ".price2num($fee).", 'waiting', '".$this->db->idate(OnboardingService::now())."')";
+		if (!$this->db->query($sql)) {
+			return array('ok' => false, 'error' => 'save', 'http' => 500);
+		}
+		return array('ok' => true, 'id' => (int) $this->db->last_insert_id($table));
+	}
+
+	/**
+	 * The waiting registration a payment belongs to: same email, from the last
+	 * 14 days, preferring one whose fee equals the amount paid, then the newest.
+	 *
+	 * @param string $email Email used at checkout
+	 * @param float $amount Amount paid
+	 * @return object|null
+	 */
+	public function findRegistration($email, $amount)
+	{
+		global $conf;
+		if ($email === '') {
+			return null;
+		}
+		$since = $this->db->idate(OnboardingService::now() - 14 * 86400);
+		$res = $this->db->query("SELECT * FROM ".$this->db->prefix()."onboarding_training_reg WHERE entity = ".((int) $conf->entity)." AND status = 'waiting' AND email = '".$this->db->escape($email)."' AND datec >= '".$since."' ORDER BY (ABS(fee - ".price2num((float) $amount).") < 0.005) DESC, datec DESC LIMIT 1");
+		return $res ? ($this->db->fetch_object($res) ?: null) : null;
+	}
+
+	/**
+	 * @param int $id Registration
+	 * @return object|null
+	 */
+	public function registration($id)
+	{
+		global $conf;
+		$res = $this->db->query("SELECT * FROM ".$this->db->prefix()."onboarding_training_reg WHERE rowid = ".((int) $id)." AND entity = ".((int) $conf->entity));
+		return $res ? ($this->db->fetch_object($res) ?: null) : null;
+	}
+
+	/**
+	 * Give a payment that arrived without a registration the registration it
+	 * belongs to (the payer used another email, for instance).
+	 *
+	 * @param int $trainingId Training row with status unregistered
+	 * @param int $regId Waiting registration
+	 * @return string Result for the page
+	 */
+	public function linkRegistration($trainingId, $regId)
+	{
+		global $conf;
+		$reg = $this->registration($regId);
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_training WHERE rowid = ".((int) $trainingId)." AND entity = ".((int) $conf->entity)." AND status = 'unregistered'");
+		if (!$reg || $reg->status != 'waiting' || !$res || !$this->db->fetch_object($res)) {
+			return 'Pick a payment without a registration and a registration that is still waiting.';
+		}
+		return $this->apply((int) $trainingId, $reg) ? 'Linked: '.$reg->tool.' for '.trim($reg->firstname.' '.$reg->lastname).'.' : 'That registration was just used by another payment.';
+	}
+
+	/**
+	 * Mark registrations nobody paid for within 14 days as expired.
+	 *
+	 * @return string Summary
+	 */
+	public function expireRegistrations()
+	{
+		global $conf;
+		$res = $this->db->query("UPDATE ".$this->db->prefix()."onboarding_training_reg SET status = 'expired' WHERE entity = ".((int) $conf->entity)." AND status = 'waiting' AND datec < '".$this->db->idate(OnboardingService::now() - 14 * 86400)."'");
+		return ($res ? $this->db->affected_rows($res) : 0).' unpaid training registrations expired';
 	}
 
 	// ---------------------------------------------------------------- dues credit

@@ -172,6 +172,12 @@ http.createServer(async (req, res) => {
       return json(res, 404, { message: 'Not found.' });
     }
     if (path === '/health') return json(res, 200, { ok: true });
+    // Stands in for the website's /training/catalog/index.json.
+    if (path === '/training-catalog.json') return json(res, 200, {
+      zones: ['Digital Fab', 'Machining'], fees: [5, 10, 15, 20],
+      trainers: [{ id: 'pia', name: 'Pia P.', member: 'CGW-NOBODY' }, { id: 'gus', name: 'Gus Ghost', member: 'CGW-GHOST' }],
+      tools: [{ id: 'clausing-lathe', name: 'Clausing lathe', zone: 'Machining', fee: 15, trainers: ['pia', 'gus'] }],
+    });
     if (path === '/' && req.method === 'GET') return send(res, 200, controlPage());
     if (path === '/checkout' && req.method === 'GET') return send(res, 200, checkoutPage(url.searchParams));
     if (path === '/checkout' && req.method === 'POST') {

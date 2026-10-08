@@ -27,6 +27,18 @@ check 'trainings.php' 'Sewing machine'
 check 'trainings.php?search=lathe' 'voided'
 check 'training-accounts.php' 'Zone budgets'
 check 'training-accounts.php' 'Dues refunded'
+check 'training-tools.php' 'Clausing lathe'
+check 'training-tools.php' 'no member match'
+# Zone budgets: a starting budget for every zone, then a purchase against one.
+before=$(docker compose exec -T -u www-data dolibarr php /var/www/html/custom/onboarding/sandbox/tick.php training balance zone Metalworking)
+T4=$(curl -s -b "$JAR" "$BASE/custom/onboarding/training-accounts.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
+curl -s -b "$JAR" -o /dev/null --data-urlencode "token=$T4" -d 'action=zoneentry&kind=allocation&zone=*&amount=300' --data-urlencode 'from=General fund' "$BASE/custom/onboarding/training-accounts.php"
+T5=$(curl -s -b "$JAR" "$BASE/custom/onboarding/training-accounts.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
+curl -s -b "$JAR" -o /dev/null --data-urlencode "token=$T5" -d 'action=zoneentry&kind=spend&zone=Crafting&amount=50' --data-urlencode 'note=Workbench' "$BASE/custom/onboarding/training-accounts.php"
+out=$(curl -s -b "$JAR" "$BASE/custom/onboarding/training-accounts.php")
+if grep -q 'Budget added (from General fund)' <<<"$out" && grep -q 'Workbench' <<<"$out" && grep -q '>Metalworking<' <<<"$out"; then echo "ok   zone budgets and a purchase"; else echo "FAIL zone budgets and a purchase"; fail=1; fi
+bal=$(docker compose exec -T -u www-data dolibarr php /var/www/html/custom/onboarding/sandbox/tick.php training balance zone Metalworking)
+if [ "$bal" = "$((before + 300))" ]; then echo "ok   every zone got 300"; else echo "FAIL Metalworking went from $before to $bal"; fail=1; fi
 check 'admin/import.php' 'Import existing members'
 # The import page's "Check" button, with a pasted tab-separated sheet.
 T2=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/import.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
