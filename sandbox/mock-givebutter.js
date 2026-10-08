@@ -7,6 +7,8 @@
 //      resume it, each firing its webhook.
 //   3. Answers the two API calls the module makes: GET /v1/transactions and
 //      GET /v1/plans/{id}.
+//   4. /control/pay also takes custom_fields (the checkout questions, as
+//      [{title, value}]) and a campaign, for training fees.
 //
 // Environment:
 //   WEBHOOK_URL        where webhooks go
@@ -60,6 +62,8 @@ function charge(plan, campaign = CAMPAIGN) {
     email: plan.email,
     status: 'succeeded',
     amount: Number(plan.amount),
+    donated: Number(plan.amount),
+    custom_fields: plan.custom_fields || [],
     currency: 'USD',
     transacted_at: iso(),
     created_at: iso(),
@@ -69,7 +73,7 @@ function charge(plan, campaign = CAMPAIGN) {
   return t;
 }
 
-async function pay({ email, first_name, last_name, amount, frequency, campaign, silent }) {
+async function pay({ email, first_name, last_name, amount, frequency, campaign, silent, custom_fields }) {
   const plan = {
     id: `plan_${++seq}`,
     contact_id: `contact_${++seq}`,
@@ -83,6 +87,7 @@ async function pay({ email, first_name, last_name, amount, frequency, campaign, 
     created_at: iso(),
     updated_at: iso(),
     canceled_at: null,
+    custom_fields: Array.isArray(custom_fields) ? custom_fields : [],
   };
   if (plan.recurring) plans.set(plan.id, plan);
   const transaction = charge(plan, campaign);

@@ -337,4 +337,82 @@ assert.equal(refused.status, 409);
 assert.equal(refused.error, 'paid');
 assert.ok(dumpOf(paidEmail).applicant, 'still there');
 
+// ---------------------------------------------------------------- training fees
+{
+const train = async (amount, zone, tool, trainer, who = email, extra = {}) => mock('/control/pay', {
+  email: who, amount, frequency: 'once', campaign: 'TRAINING', first_name: 'Ada', last_name: 'Tester',
+  custom_fields: [{ title: 'Training Zone?', value: zone }, { title: 'Tool or equipment', value: tool }, { title: "Trainer's name", value: trainer }],
+  ...extra,
+});
+const trainingId = (delivery) => Number((delivery.status.match(/training (\d+) recorded/) || [])[1]);
+const training = (...args) => tick('training', ...args);
+const balance = (type, key) => Number(training('balance', type, String(key)));
+const pia = dumpOf(paidEmail).member.id;
+const adaId = dumpOf(email).member.id;
+const subsBefore = dumpOf(email).member.subscriptions;
+
+step('training fee: split between the zone budget and the matched trainer');
+const t1 = await train(20, 'Machining (Mill, Lathe)', 'Lathe', 'pia  paid');
+assert.match(t1.delivery.status, /^200 .*training \d+ recorded"/, t1.delivery.status);
+assert.equal(balance('zone', 'Machining'), 10);
+assert.equal(balance('trainer', pia), 10);
+assert.equal(dumpOf(email).member.subscriptions, subsBefore, 'a training fee is not dues');
+
+step('training fee: the same webhook twice is recorded once');
+assert.match((await mock('/control/resend')).status, /duplicate/);
+assert.equal(balance('zone', 'Machining'), 10);
+
+step('training fee: the trainee is tagged, emailed, and found by the lookup');
+assert.equal(sqlCount(`SELECT COUNT(*) FROM llx_categorie_member cm JOIN llx_categorie c ON c.rowid = cm.fk_categorie WHERE c.label = 'Trained: Lathe' AND cm.fk_member = ${adaId}`), 1);
+assert.ok((await mailTo(email)).includes('You are trained on the Lathe'));
+const look = await api('trainings', { email: email.toUpperCase() });
+assert.deepEqual(look.trainings.map((t) => [t.tool, t.zone]), [['Lathe', 'Machining']]);
+assert.deepEqual((await api('trainings', { email: 'nobody@example.test' })).trainings, []);
+assert.equal((await api('trainings', { email }, 'nope')).status, 401);
+
+step('training fee: an unknown trainer waits, then is matched by hand, and the name is remembered');
+const t2 = await train(10, 'Woodworking (Table Saw, Router)', 'Table saw', 'Mystery Trainer');
+assert.match(t2.delivery.status, /not matched/);
+assert.equal(balance('zone', 'Woodworking'), 5);
+assert.equal(balance('trainer', pia), 10, 'nothing credited until matched');
+assert.equal(training('match', String(trainingId(t2.delivery)), String(pia)), '1');
+assert.equal(balance('trainer', pia), 15);
+const t3 = await train(20, 'Woodworking (Table Saw, Router)', 'Table saw', 'mystery trainer');
+assert.doesNotMatch(t3.delivery.status, /not matched/);
+assert.equal(balance('trainer', pia), 25);
+
+step('training credit: reaching the threshold asks for approval');
+await train(20, 'Digital Fab (3D printers, laser cutter)', 'Laser cutter', 'Pia Paid');
+await train(20, 'Digital Fab (3D printers, laser cutter)', 'Laser cutter', 'Pia Paid');
+assert.equal(balance('trainer', pia), 45);
+assert.equal(sqlCount(`SELECT COUNT(*) FROM llx_onboarding_credit WHERE fk_adherent = ${pia}`), 0, 'not yet');
+await train(10, 'Digital Fab (3D printers, laser cutter)', '3D printer', 'Pia Paid');
+assert.equal(balance('trainer', pia), 50);
+const credit = sqlCount(`SELECT rowid FROM llx_onboarding_credit WHERE fk_adherent = ${pia} AND status = 'pending'`);
+assert.ok(credit > 0, 'a dues credit is waiting');
+assert.ok((await mailTo('membership-team@example.test')).some((s) => s === 'Dues credit to approve: Pia Paid'));
+
+step('training credit: approving takes it off their credit and names the dues payment to refund');
+assert.match(training('approve', String(credit)), /Refund .*50.* of Givebutter transaction tx_\d+/);
+assert.equal(balance('trainer', pia), 0);
+assert.equal(training('approve', String(credit)), 'That credit is not waiting for approval.');
+assert.match(training('refunded', String(credit)), /Marked refunded/);
+assert.ok((await mailTo(paidEmail)).includes('A month of dues refunded for your training'));
+
+step('training: voiding takes the shares back out');
+const before = balance('zone', 'Machining');
+assert.equal(training('void', String(trainingId(t1.delivery))), 'voided');
+assert.equal(balance('zone', 'Machining'), before - 10);
+assert.equal(balance('trainer', pia), -10);
+assert.equal(training('void', String(trainingId(t1.delivery))), 'not voided');
+assert.deepEqual((await api('trainings', { email })).trainings.map((t) => t.tool).sort(), ['3D printer', 'Laser cutter', 'Table saw']);
+assert.equal(sqlCount(`SELECT COUNT(*) FROM llx_categorie_member cm JOIN llx_categorie c ON c.rowid = cm.fk_categorie WHERE c.label = 'Trained: Lathe' AND cm.fk_member = ${adaId}`), 0, 'Lathe tag removed');
+
+step('training fee from someone with no member record is still recorded');
+const walkIn = `e2e-walkin-${Date.now()}@example.test`;
+assert.match((await train(5, 'Crafting (Sewing, Painting)', 'Sewing machine', 'Pia Paid', walkIn)).delivery.status, /recorded/);
+assert.deepEqual((await api('trainings', { email: walkIn })).trainings.map((t) => t.tool), ['Sewing machine']);
+
+}
+
 console.log('\nALL PASSED');

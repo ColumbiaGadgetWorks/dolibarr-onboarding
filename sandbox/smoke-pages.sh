@@ -22,6 +22,11 @@ check 'applicants.php?filter=nobadge' 'Paying, no active badge'
 check 'applicants.php?filter=problem' 'Payment problem'
 check 'payments.php' 'stranger-'
 check 'admin/setup.php' 'Key for the website'
+check 'admin/setup.php' 'Training campaign code'
+check 'trainings.php' 'Sewing machine'
+check 'trainings.php?search=lathe' 'voided'
+check 'training-accounts.php' 'Zone budgets'
+check 'training-accounts.php' 'Dues refunded'
 check 'admin/import.php' 'Import existing members'
 # The import page's "Check" button, with a pasted tab-separated sheet.
 T2=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/import.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')

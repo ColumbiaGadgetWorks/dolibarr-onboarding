@@ -135,6 +135,49 @@ the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signup
 Connect Givebutter button, and the legacy import. It also checks that the staff pages render
 and runs a signup through the real website.
 
+## Training fees
+
+Trainings are paid on their own Givebutter campaign (not the dues campaign, and
+with Funds hidden on it). Its checkout asks three questions, found by their
+titles: one with "zone" in it (e.g. "Training Zone?", answers like
+"Machining (Mill, Lathe)"), one with "trainer" ("Trainer's name"), and one with
+"tool" or "equipment" ("Tool or equipment"). The amount is the fee the zone boss
+set (5, 10, 15, 20).
+
+For each paid training the module:
+
+1. Records the training (Members, Onboarding, **Trainings**) and tags the payer's
+   member and contact cards **Trained: <tool>**, under a parent tag **Trained**.
+   The payer gets an email saying so.
+2. Splits the fee: the trainer's share (50% by default) to the trainer's credit,
+   the rest to the zone's budget ("Machining", the answer up to the bracket).
+3. Matches the typed trainer name to a member: their full name, Discord handle,
+   badge code or email. A name that matches nobody (or two people) waits on the
+   Trainings page; pick the member once and that spelling is remembered.
+4. When a trainer's credit reaches $50 (setting), opens a **dues credit** under
+   Members, Onboarding, **Training accounts** and emails the membership team.
+   Approving takes $50 off their credit and names the Givebutter dues payment to
+   refund. Givebutter's API cannot refund, so refund it in the Givebutter
+   dashboard, then press **Mark refunded**; the trainer is emailed.
+
+Zone budgets and trainer credit are entries in the module's own ledger, not
+Dolibarr bank accounts. The money itself arrives in one place (the Givebutter
+payout); a bank account per zone or per trainer would not match any real
+statement and would need one account per member. Each balance is the sum of its
+entries, all listed on Training accounts, where zone spending and corrections
+are entered too. **Void** on a training (refunded, or entered by mistake)
+reverses its shares and removes the tag if nothing else covers that tool.
+
+The website's **/training/** page looks up what an email address is trained on
+(tool, zone, date only), through the same website key, behind Turnstile and an
+hourly limit.
+
+Setup: create the Givebutter campaign with the three questions, hide Funds on it,
+then on the setup page fill in **Training campaign code** and **Training lookup
+page**. Give staff the two new permissions (see trainings; match trainers,
+record spending and approve credits). An existing install needs the module
+disabled and enabled once to create the three new tables.
+
 ## Fields on the member card
 
 The module and the CGWManagement scripts (`dolibarr/scripts/bootstrap.py`) share one set of

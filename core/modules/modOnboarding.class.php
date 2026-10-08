@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.2.0';
+		$this->version = '0.3.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
@@ -51,6 +51,9 @@ class modOnboarding extends DolibarrModules
 			array('ONBOARDING_DUES_SUPPORTER', 'chaine', '100', 'Supporter monthly dues', 0, 'current', 0),
 			array('ONBOARDING_GB_API_BASE', 'chaine', 'https://api.givebutter.com/v1', 'Givebutter API base URL', 0, 'current', 0),
 			array('ONBOARDING_UPDATES_TAG', 'chaine', 'Email updates', 'Contact tag for people who asked for email updates', 0, 'current', 0),
+			array('ONBOARDING_TRAINING_TRAINER_SHARE', 'chaine', '50', 'Percent of a training fee credited to the trainer; the rest goes to the zone budget', 0, 'current', 0),
+			array('ONBOARDING_TRAINING_CREDIT_THRESHOLD', 'chaine', '50', 'Trainer credit that earns a month of dues refunded', 0, 'current', 0),
+			array('ONBOARDING_TRAINED_TAG', 'chaine', 'Trained', 'Parent tag for "Trained: <tool>" tags on members and contacts', 0, 'current', 0),
 		);
 
 		$this->tabs = array();
@@ -105,6 +108,16 @@ class modOnboarding extends DolibarrModules
 		$this->rights[$r][4] = 'idphoto';
 		$this->rights[$r][5] = 'read';
 		$r++;
+		$this->rights[$r][0] = $this->numero.'04';
+		$this->rights[$r][1] = 'See trainings, zone budgets and trainer credit';
+		$this->rights[$r][4] = 'training';
+		$this->rights[$r][5] = 'read';
+		$r++;
+		$this->rights[$r][0] = $this->numero.'05';
+		$this->rights[$r][1] = 'Match trainers, record zone spending, approve dues credits';
+		$this->rights[$r][4] = 'training';
+		$this->rights[$r][5] = 'write';
+		$r++;
 
 		$this->menu = array();
 		$r = 0;
@@ -134,6 +147,34 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->hasRight("onboarding", "applicant", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Trainings',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_trainings',
+			'url' => '/onboarding/trainings.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->hasRight("onboarding", "training", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Training accounts',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_training_accounts',
+			'url' => '/onboarding/training-accounts.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->hasRight("onboarding", "training", "read")',
 			'target' => '',
 			'user' => 0,
 		);

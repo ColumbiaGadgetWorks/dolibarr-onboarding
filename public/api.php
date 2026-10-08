@@ -3,8 +3,9 @@
  * License: GPL-3.0-or-later
  *
  * The one endpoint the website Worker talks to. It is not Dolibarr's REST API:
- * the key it accepts can do nothing except drive a signup and deliver Givebutter
- * events, so a leaked key cannot read the member list.
+ * the key it accepts can do nothing except drive a signup, deliver Givebutter
+ * events and say which tools one given email address is trained on, so a leaked
+ * key cannot read the member list.
  *
  *   POST .../custom/onboarding/public/api.php?action=<name>
  *   Header  X-Onboarding-Key: <key from the module setup page>
@@ -99,6 +100,14 @@ if ($action == 'start') {
 
 if ($action == 'subscribe') {
 	onboarding_reply($svc->subscribe($in, true));
+}
+
+if ($action == 'trainings') {
+	// What one email address is trained on: tool, zone and date only. The website
+	// rate-limits this, since anyone can type any address.
+	dol_include_once('/onboarding/class/training.class.php');
+	$training = new OnboardingTraining($db, $svc);
+	onboarding_reply(array('ok' => true, 'trainings' => $training->trainedOn(isset($in['email']) ? (string) $in['email'] : '')));
 }
 
 if ($action == 'givebutter') {
