@@ -42,6 +42,7 @@ $consts = array(
 	'ONBOARDING_GB_CAMPAIGN_CODE' => 'SANDBOX',
 	'ONBOARDING_TRAINING_CAMPAIGN_CODE' => 'TRAINING',
 	'ONBOARDING_TRAINING_LOOKUP_URL' => 'http://'.$host.':8787/training/',
+	'ONBOARDING_TRAINING_CATALOG_URL' => 'http://givebutter:8090/training-catalog.json',
 	'ONBOARDING_CHECKOUT_URL' => 'http://'.$host.':8090/checkout',
 	'ONBOARDING_JOIN_URL' => 'http://'.$host.':8787/membership/join/',
 	'ONBOARDING_STAFF_EMAIL' => 'membership-team@example.test',

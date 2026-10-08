@@ -38,14 +38,18 @@ class OnboardingCron
 	}
 
 	/**
-	 * Daily: reminders, lapses, cleanup.
+	 * Daily: reminders, lapses, cleanup, expired training registrations, and a
+	 * fresh copy of the website's training catalog.
 	 *
 	 * @return int 0 if OK
 	 */
 	public function daily()
 	{
 		$svc = new OnboardingService($this->db);
-		$this->output = $svc->dunning().'; '.$svc->cleanup();
+		dol_include_once('/onboarding/class/training.class.php');
+		$training = new OnboardingTraining($this->db, $svc);
+		$training->catalog(true);
+		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations();
 		return 0;
 	}
 }

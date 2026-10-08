@@ -27,7 +27,8 @@ check 'trainings.php' 'Sewing machine'
 check 'trainings.php?search=lathe' 'voided'
 check 'training-accounts.php' 'Zone budgets'
 check 'training-accounts.php' 'Dues refunded'
-check 'training-tools.php' 'On the training form'
+check 'training-tools.php' 'Clausing lathe'
+check 'training-tools.php' 'no member match'
 # Zone budgets: a starting budget for every zone, then a purchase against one.
 before=$(docker compose exec -T -u www-data dolibarr php /var/www/html/custom/onboarding/sandbox/tick.php training balance zone Metalworking)
 T4=$(curl -s -b "$JAR" "$BASE/custom/onboarding/training-accounts.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')

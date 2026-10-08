@@ -31,6 +31,11 @@ if ($action == 'match' && $canwrite) {
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
+if ($action == 'link' && $canwrite) {
+	setEventMessages($training->linkRegistration((int) GETPOST('training', 'int'), (int) GETPOST('registration', 'int')), null);
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
 if ($action == 'void' && $canwrite) {
 	$ok = $training->voidTraining((int) GETPOST('training', 'int'), $user);
 	setEventMessages($ok ? 'Voided. Its shares were taken back out.' : 'That training was already voided.', null, $ok ? 'mesgs' : 'warnings');
@@ -53,6 +58,42 @@ foreach ($members as $m) {
 }
 
 $p = $db->prefix();
+
+// Payments that found no registration, and registrations still waiting.
+$waiting = array();
+$resql = $db->query("SELECT * FROM ".$p."onboarding_training_reg WHERE entity = ".((int) $conf->entity)." AND status = 'waiting' ORDER BY datec DESC LIMIT 200");
+while ($resql && ($o = $db->fetch_object($resql))) {
+	$waiting[] = $o;
+}
+$resql = $db->query("SELECT * FROM ".$p."onboarding_training WHERE entity = ".((int) $conf->entity)." AND status = 'unregistered' ORDER BY transacted_at DESC LIMIT 200");
+$orphans = array();
+while ($resql && ($o = $db->fetch_object($resql))) {
+	$orphans[] = $o;
+}
+if ($orphans) {
+	print '<h3>Paid without a registration</h3>';
+	print '<p class="opacitymedium">These payments came in on the training campaign from an email with no registration from the website\'s payment page, usually because the payer typed a different email at Givebutter. Pick the registration it belongs to. If there is none, void it and refund it in Givebutter.</p>';
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre"><td>Date</td><td>Paid by</td><td class="right">Amount</td><td>Givebutter id</td><td></td></tr>';
+	foreach ($orphans as $o) {
+		print '<tr class="oddeven"><td>'.dol_print_date($db->jdate($o->transacted_at), 'day').'</td>';
+		print '<td>'.dol_escape_htmltag(trim($o->firstname.' '.$o->lastname)).'<br><span class="opacitymedium small">'.dol_escape_htmltag($o->email).'</span></td>';
+		print '<td class="right">'.price($o->amount).'</td><td>'.dol_escape_htmltag($o->gb_transaction_id).'</td><td class="right">';
+		if ($canwrite) {
+			print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block">';
+			print '<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="training" value="'.((int) $o->rowid).'">';
+			print '<select name="registration" class="minwidth300"><option value="0">Registration…</option>';
+			foreach ($waiting as $w) {
+				print '<option value="'.((int) $w->rowid).'">'.dol_escape_htmltag(trim($w->firstname.' '.$w->lastname).' <'.$w->email.'>, '.$w->tool.', '.price($w->fee).', '.dol_print_date($db->jdate($w->datec), 'day')).'</option>';
+			}
+			print '</select> <button type="submit" name="action" value="link" class="button smallpaddingimp">Link</button> ';
+			print '<button type="submit" name="action" value="void" class="button smallpaddingimp">Void</button></form>';
+		}
+		print '</td></tr>';
+	}
+	print '</table></div><br>';
+}
+
 $resql = $db->query("SELECT * FROM ".$p."onboarding_training WHERE entity = ".((int) $conf->entity)." AND status = 'trainer_unmatched' ORDER BY transacted_at DESC LIMIT 200");
 $unmatched = array();
 while ($resql && ($o = $db->fetch_object($resql))) {
@@ -83,6 +124,19 @@ if ($unmatched) {
 	print '</table></div><br>';
 }
 
+if ($waiting) {
+	print '<h3>Registered, not paid yet</h3>';
+	print '<p class="opacitymedium">Filled in on the website\'s payment page. Each is used by the next training payment from the same email, and expires after 14 days.</p>';
+	print '<div class="div-table-responsive"><table class="noborder centpercent">';
+	print '<tr class="liste_titre"><td>Registered</td><td>Trainee</td><td>Zone</td><td>Tool</td><td>Trainer</td><td class="right">Fee</td></tr>';
+	foreach ($waiting as $w) {
+		print '<tr class="oddeven"><td>'.dol_print_date($db->jdate($w->datec), 'dayhour').'</td>';
+		print '<td>'.dol_escape_htmltag(trim($w->firstname.' '.$w->lastname)).'<br><span class="opacitymedium small">'.dol_escape_htmltag($w->email).'</span></td>';
+		print '<td>'.dol_escape_htmltag($w->zone).'</td><td>'.dol_escape_htmltag($w->tool).'</td><td>'.dol_escape_htmltag($w->trainer_name).'</td><td class="right">'.price($w->fee).'</td></tr>';
+	}
+	print '</table></div><br>';
+}
+
 print '<form method="GET" action="'.$_SERVER['PHP_SELF'].'"><input type="text" name="search" value="'.dol_escape_htmltag($search).'" placeholder="Email, name or tool" class="minwidth300"> <button type="submit" class="button smallpaddingimp">Search</button></form><br>';
 
 $where = "t.entity = ".((int) $conf->entity);
@@ -100,7 +154,7 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 	print '<tr class="oddeven'.($void ? ' opacitymedium' : '').'">';
 	print '<td>'.dol_print_date($db->jdate($o->transacted_at), 'day').'</td>';
 	print '<td>'.dol_escape_htmltag(trim($o->firstname.' '.$o->lastname)).'<br><span class="opacitymedium small">'.dol_escape_htmltag($o->email).'</span></td>';
-	print '<td>'.dol_escape_htmltag($o->zone).'</td><td>'.dol_escape_htmltag($o->tool).($void ? ' <span class="badge badge-status8">voided</span>' : '').'</td>';
+	print '<td>'.dol_escape_htmltag($o->zone).'</td><td>'.($o->status == 'unregistered' ? '<span class="opacitymedium">no registration</span>' : dol_escape_htmltag($o->tool)).($void ? ' <span class="badge badge-status8">voided</span>' : '').'</td>';
 	print '<td>'.($o->fk_trainer && isset($names[(int) $o->fk_trainer]) ? dol_escape_htmltag(preg_replace('/ \(.*$/', '', $names[(int) $o->fk_trainer])) : '<span class="opacitymedium">'.dol_escape_htmltag($o->trainer_name).' (not matched)</span>').'</td>';
 	print '<td class="right">'.price($o->amount).'</td><td class="right">'.price($o->zone_amount).'</td><td class="right">'.price($o->trainer_amount).'</td>';
 	print '<td>'.dol_escape_htmltag($o->gb_transaction_id).'</td><td class="right">';

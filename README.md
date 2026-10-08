@@ -137,36 +137,45 @@ and runs a signup through the real website.
 
 ## Training fees
 
-Trainings are paid on their own Givebutter campaign (not the dues campaign, and
-with Funds hidden on it). Its checkout asks three questions, found by their
-titles: one with "zone" in it (e.g. "Training Zone?", answers like
-"Machining (Mill, Lathe)"), one with "trainer" ("Trainer's name"), and one with
-"tool" or "equipment" ("Tool or equipment"). The amount is the fee the zone boss
-set (5, 10, 15, 20).
+Trainees pay on the website's **/training/pay/** page (ColumbiaGadgetWorks/website).
+They pick the tool, which sets the fee and zone, and their trainer from the people
+qualified on it, all from the website's **training catalog** (`data/training.yaml`
+in the website repository, edited by pull request). The website registers the
+training here (`action=trainingstart`), then opens the Givebutter widget of the
+training campaign (its own campaign, with Funds hidden).
 
-For each paid training the module:
+When the payment arrives on the training campaign, the module finds the
+registration with the same email (from the last 14 days, preferring one whose fee
+equals the amount) and:
 
-1. Records the training (Members, Onboarding, **Trainings**) and tags the payer's
-   member and contact cards **Trained: <tool>**, under a parent tag **Trained**.
-   The payer gets an email saying so.
+1. Records the training (Members, Onboarding, **Trainings**) for the person who
+   registered, and tags their member and contact cards **Trained: <tool>**, under
+   a parent tag **Trained**. They get an email saying so.
 2. Splits the fee: the trainer's share (50% by default) to the trainer's credit,
-   the rest to the zone's budget ("Machining", the answer up to the bracket).
-3. Matches the typed trainer name to a member: their full name, Discord handle,
-   badge code or email. A name that matches nobody (or two people) waits on the
-   Trainings page; pick the member once and that spelling is remembered.
+   the rest to the zone's budget.
+3. Finds the trainer's member card by the badge code in the catalog, or failing
+   that by their name. A trainer it cannot find waits on the Trainings page; pick
+   the member once and that name is remembered.
 4. When a trainer's credit reaches $50 (setting), opens a **dues credit** under
    Members, Onboarding, **Training accounts** and emails the membership team.
    Approving takes $50 off their credit and names the Givebutter dues payment to
    refund. Givebutter's API cannot refund, so refund it in the Givebutter
    dashboard, then press **Mark refunded**; the trainer is emailed.
 
+A payment with no registration (the payer typed another email at Givebutter)
+waits under **Paid without a registration** on the Trainings page, and the
+membership team is emailed; pick the registration it belongs to. Registrations
+nobody pays for expire after 14 days (daily job). If the Givebutter campaign
+still has checkout questions mentioning "zone", "trainer" and "tool", a payment
+without a registration uses those answers instead.
+
 Zone budgets and trainer credit are entries in the module's own ledger, not
 Dolibarr bank accounts. The money itself arrives in one place (the Givebutter
 payout); a bank account per zone or per trainer would not match any real
 statement and would need one account per member. Each balance is the sum of its
-entries, all listed on Training accounts, where zone spending and corrections
-are entered too. **Void** on a training (refunded, or entered by mistake)
-reverses its shares and removes the tag if nothing else covers that tool.
+entries, all listed on Training accounts. **Void** on a training (refunded, or
+entered by mistake) reverses its shares and removes the tag if nothing else
+covers that tool.
 
 The website's **/training/** page looks up what an email address is trained on
 (tool, zone, date only), through the same website key, behind Turnstile and an
@@ -174,29 +183,28 @@ hourly limit.
 
 ### Zone budgets and purchases
 
-The zones are listed on the setup page (**Zones**). On Training accounts,
-**Add budget** puts money into one zone or every zone at once, noting which
-account it came from (a Dolibarr bank account when the Banks module is on).
-Each zone row records a **Purchase** (or an adjustment) with what was bought.
-Only people with the permission "Add zone budgets and record purchases" see
-these forms, so purchasing can stay with one person; every entry shows who
+The zones are the setup page's **Zones** plus any in the training catalog. On
+Training accounts, **Add budget** puts money into one zone or every zone at once,
+noting which account it came from (a Dolibarr bank account when the Banks module
+is on). Each zone row records a **Purchase** (or an adjustment) with what was
+bought. Only people with the permission "Add zone budgets and record purchases"
+see these forms, so purchasing can stay with one person; every entry shows who
 entered it.
 
-### New tools on the training form
+### The training catalog
 
-Givebutter's form can only be edited by hand. A zone boss runs
-`/training request tool:<name> zone:<zone> fee:<5-20>` in Discord (the website
-Worker passes it here as `action=toolrequest`). The module checks the zone and
-fee, refuses duplicates, and emails **Training form editor email**. That person
-adds the answer in Givebutter, then presses **Added to Givebutter** under
-Members, Onboarding, **Training tools**; whoever asked is emailed if their Discord
-name matches a member's Discord handle. The page also lists the tools already
-on the form and the exact answers to paste.
+Members, Onboarding, **Training tools** shows the catalog as the website
+publishes it (setting **Training catalog**, refreshed when the page opens and
+daily) and checks each trainer's badge code against the member cards, flagging
+any it cannot find. **Edit the catalog** links to the file on GitHub.
 
-Setup: create the Givebutter campaign with the three questions, hide Funds on it,
-then on the setup page fill in **Training campaign code** and **Training lookup
-page**. Give staff the new permissions: see trainings; match trainers, approve credits and handle tool requests; and, for the purchaser only, add zone budgets and record purchases. An existing install needs the module
-disabled and enabled once to create the new tables and permissions.
+Setup: create the Givebutter training campaign and a widget for it, hide Funds on
+it, then on the setup page fill in **Training campaign code** and **Training
+lookup page** (the catalog addresses default to columbiagadgetworks.org). Give
+staff the new permissions: see trainings; match trainers, link payments and
+approve credits; and, for the purchaser only, add zone budgets and record
+purchases. An existing install needs the module disabled and enabled once to
+create the new tables and permissions.
 
 ## Fields on the member card
 

@@ -415,29 +415,60 @@ assert.deepEqual((await api('trainings', { email: walkIn })).trainings.map((t) =
 
 }
 
-// ---------------------------------------------------------------- training tool requests
+// ---------------------------------------------------------------- training registered on the website
 {
-step('tool request: checked, filed, and the form editor is emailed');
-const discordName = `pia-${Date.now()}`;
+const stamp = Date.now();
+const badge = `CGW-E2E-${stamp % 100000}`;
+const piaId = dumpOf(paidEmail).member.id;
 execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e',
-  `UPDATE llx_adherent_extrafields SET discord_handle = '${discordName}' WHERE fk_object = ${dumpOf(paidEmail).member.id}`]);
-assert.equal((await api('toolrequest', { tool: 'Lathe', zone: 'Nowhere', price: 10, requested_by: discordName })).error, 'zone');
-assert.equal((await api('toolrequest', { tool: 'Lathe', zone: 'Machining', price: 7, requested_by: discordName })).error, 'price');
-assert.equal((await api('toolrequest', { tool: ' ', zone: 'Machining', price: 10 })).error, 'tool');
-const tool = `Tormach ${Date.now()}`;
-const req = await api('toolrequest', { tool, zone: 'Machining', price: 15, requested_by: discordName, note: 'new CNC mill' });
-assert.equal(req.ok, true, JSON.stringify(req));
-assert.equal(req.notify, true, 'matched to a member by Discord handle');
-const again = await api('toolrequest', { tool: tool.toUpperCase(), zone: 'Machining', price: 15 });
-assert.equal(again.error, 'exists');
-assert.ok((await mailTo('membership-team@example.test')).includes(`Add to the training form: ${tool} (Machining)`));
+  `UPDATE llx_adherent_extrafields SET member_code = '${badge}' WHERE fk_object = ${piaId}`]);
+const bal = (type, key) => Number(tick('training', 'balance', type, String(key)));
+const reg = (who, fee, extra = {}) => api('trainingstart', {
+  email: who, firstname: 'Rey', lastname: 'Gistered', tool_id: 'clausing-lathe', tool: 'Clausing lathe', zone: 'Machining', fee,
+  trainer_id: 'pia', trainer_name: 'Pia P.', trainer_member: badge, ip: '203.0.113.5', ...extra,
+});
+const payOnce = (who, amount) => mock('/control/pay', { email: who, amount, frequency: 'once', campaign: 'TRAINING', first_name: 'Rey', last_name: 'Gistered' });
 
-step('tool request: marked added, the person who asked is told, and it cannot be decided twice');
-assert.match(tick('training', 'tool', 'active', String(req.id)), /Marked as on the training form and .* was told/);
-assert.ok((await mailTo(paidEmail)).includes(`Now on the training form: ${tool}`));
-assert.equal(tick('training', 'tool', 'declined', String(req.id)), 'That tool has already been dealt with.');
-assert.equal((await api('toolrequest', { tool, zone: 'Machining', price: 15 })).status, 'active', 'already on the form');
-assert.match(tick('training', 'tool', 'retired', String(req.id)), /Retired/);
+step('registration: refused without the required fields');
+assert.equal((await api('trainingstart', { email: 'not-an-email', tool: 'X', zone: 'Y', trainer_name: 'Z' })).error, 'invalid');
+
+step('registration: the payment from the same email takes its tool, zone and trainer (matched by badge code)');
+const regEmail = `e2e-reg-${stamp}@example.test`;
+assert.equal((await reg(regEmail, 15)).ok, true);
+const piaBefore = bal('trainer', piaId);
+const machBefore = bal('zone', 'Machining');
+const p1 = await payOnce(regEmail.toUpperCase(), 15);
+assert.match(p1.delivery.status, /training \d+ recorded"/, p1.delivery.status);
+assert.equal(bal('trainer', piaId), piaBefore + 7.5);
+assert.equal(bal('zone', 'Machining'), machBefore + 7.5);
+assert.deepEqual((await api('trainings', { email: regEmail })).trainings.map((t) => t.tool), ['Clausing lathe']);
+assert.ok((await mailTo(regEmail)).includes('You are trained on the Clausing lathe'));
+
+step('registration: used once; a second payment waits to be linked by hand');
+const p2 = await payOnce(regEmail, 15);
+assert.match(p2.delivery.status, /paid without a registration/);
+assert.ok((await mailTo('membership-team@example.test')).includes('Training payment without a registration'));
+assert.deepEqual((await api('trainings', { email: regEmail })).trainings.map((t) => t.tool), ['Clausing lathe'], 'nothing recorded for it yet');
+const orphan = Number(p2.delivery.status.match(/training (\d+) paid/)[1]);
+const other = `e2e-reg-other-${stamp}@example.test`;
+const r2 = await reg(other, 15, { tool: 'Laser cutter', zone: 'Digital Fab', tool_id: 'laser-cutter' });
+assert.match(tick('training', 'link', String(orphan), String(r2.id)), /^Linked: Laser cutter/);
+assert.equal(tick('training', 'link', String(orphan), String(r2.id)), 'Pick a payment without a registration and a registration that is still waiting.');
+assert.equal(bal('trainer', piaId), piaBefore + 15);
+assert.deepEqual((await api('trainings', { email: other })).trainings.map((t) => t.tool), ['Laser cutter'], 'recorded for the person who registered');
+assert.deepEqual((await api('trainings', { email: regEmail })).trainings.map((t) => t.tool), ['Clausing lathe'], 'not for whoever paid');
+
+step('registration: the one whose fee matches the payment is used');
+const twice = `e2e-reg-twice-${stamp}@example.test`;
+await reg(twice, 20, { tool: 'Table saw', zone: 'Woodworking' });
+await reg(twice, 10, { tool: 'Band saw', zone: 'Woodworking' });
+assert.match((await payOnce(twice, 20)).delivery.status, /recorded/);
+assert.deepEqual((await api('trainings', { email: twice })).trainings.map((t) => t.tool), ['Table saw']);
+
+step('registration: unpaid ones expire after 14 days');
+execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e',
+  `UPDATE llx_onboarding_training_reg SET datec = DATE_SUB(NOW(), INTERVAL 20 DAY) WHERE email = '${twice}' AND status = 'waiting'`]);
+assert.match(tick('training', 'expire'), /^1 unpaid training registrations expired/);
 }
 
 console.log('\nALL PASSED');
