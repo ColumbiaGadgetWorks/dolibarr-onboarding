@@ -415,4 +415,29 @@ assert.deepEqual((await api('trainings', { email: walkIn })).trainings.map((t) =
 
 }
 
+// ---------------------------------------------------------------- training tool requests
+{
+step('tool request: checked, filed, and the form editor is emailed');
+const discordName = `pia-${Date.now()}`;
+execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e',
+  `UPDATE llx_adherent_extrafields SET discord_handle = '${discordName}' WHERE fk_object = ${dumpOf(paidEmail).member.id}`]);
+assert.equal((await api('toolrequest', { tool: 'Lathe', zone: 'Nowhere', price: 10, requested_by: discordName })).error, 'zone');
+assert.equal((await api('toolrequest', { tool: 'Lathe', zone: 'Machining', price: 7, requested_by: discordName })).error, 'price');
+assert.equal((await api('toolrequest', { tool: ' ', zone: 'Machining', price: 10 })).error, 'tool');
+const tool = `Tormach ${Date.now()}`;
+const req = await api('toolrequest', { tool, zone: 'Machining', price: 15, requested_by: discordName, note: 'new CNC mill' });
+assert.equal(req.ok, true, JSON.stringify(req));
+assert.equal(req.notify, true, 'matched to a member by Discord handle');
+const again = await api('toolrequest', { tool: tool.toUpperCase(), zone: 'Machining', price: 15 });
+assert.equal(again.error, 'exists');
+assert.ok((await mailTo('membership-team@example.test')).includes(`Add to the training form: ${tool} (Machining)`));
+
+step('tool request: marked added, the person who asked is told, and it cannot be decided twice');
+assert.match(tick('training', 'tool', 'active', String(req.id)), /Marked as on the training form and .* was told/);
+assert.ok((await mailTo(paidEmail)).includes(`Now on the training form: ${tool}`));
+assert.equal(tick('training', 'tool', 'declined', String(req.id)), 'That tool has already been dealt with.');
+assert.equal((await api('toolrequest', { tool, zone: 'Machining', price: 15 })).status, 'active', 'already on the form');
+assert.match(tick('training', 'tool', 'retired', String(req.id)), /Retired/);
+}
+
 console.log('\nALL PASSED');

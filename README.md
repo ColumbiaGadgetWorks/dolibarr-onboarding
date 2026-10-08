@@ -172,10 +172,30 @@ The website's **/training/** page looks up what an email address is trained on
 (tool, zone, date only), through the same website key, behind Turnstile and an
 hourly limit.
 
+### Zone budgets and purchases
+
+The zones are listed on the setup page (**Zones**). On Training accounts,
+**Add budget** puts money into one zone or every zone at once, noting which
+account it came from (a Dolibarr bank account when the Banks module is on).
+Each zone row records a **Purchase** (or an adjustment) with what was bought.
+Only people with the permission "Add zone budgets and record purchases" see
+these forms, so purchasing can stay with one person; every entry shows who
+entered it.
+
+### New tools on the training form
+
+Givebutter's form can only be edited by hand. A zone boss runs
+`/training request tool:<name> zone:<zone> fee:<5-20>` in Discord (the website
+Worker passes it here as `action=toolrequest`). The module checks the zone and
+fee, refuses duplicates, and emails **Training form editor email**. That person
+adds the answer in Givebutter, then presses **Added to Givebutter** under
+Members, Onboarding, **Training tools**; whoever asked is emailed if their Discord
+name matches a member's Discord handle. The page also lists the tools already
+on the form and the exact answers to paste.
+
 Setup: create the Givebutter campaign with the three questions, hide Funds on it,
 then on the setup page fill in **Training campaign code** and **Training lookup
-page**. Give staff the two new permissions (see trainings; match trainers,
-record spending and approve credits). An existing install needs the module
+page**. Give staff the new permissions: see trainings; match trainers, approve credits and handle tool requests; and, for the purchaser only, add zone budgets and record purchases. An existing install needs the module
 disabled and enabled once to create the three new tables.
 
 ## Fields on the member card

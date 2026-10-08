@@ -524,6 +524,158 @@ class OnboardingTraining
 		return $out;
 	}
 
+	// ---------------------------------------------------------------- zones and tools
+
+	/**
+	 * Every zone: the ones listed in the setting first, then any other zone that
+	 * has ledger entries or tools.
+	 *
+	 * @return string[]
+	 */
+	public function zones()
+	{
+		global $conf;
+		$out = array();
+		foreach (explode(',', getDolGlobalString('ONBOARDING_TRAINING_ZONES', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting')) as $z) {
+			$z = trim($z);
+			if ($z !== '') {
+				$out[$z] = true;
+			}
+		}
+		$p = $this->db->prefix();
+		foreach (array("SELECT DISTINCT account_key AS z FROM ".$p."onboarding_ledger WHERE entity = ".((int) $conf->entity)." AND account_type = 'zone' ORDER BY account_key", "SELECT DISTINCT zone AS z FROM ".$p."onboarding_tool WHERE entity = ".((int) $conf->entity)." AND status = 'active' ORDER BY zone") as $sql) {
+			$res = $this->db->query($sql);
+			while ($res && ($obj = $this->db->fetch_object($res))) {
+				$out[(string) $obj->z] = true;
+			}
+		}
+		return array_keys($out);
+	}
+
+	/**
+	 * @return float[] Fees a zone boss can set
+	 */
+	public static function prices()
+	{
+		$out = array();
+		foreach (explode(',', getDolGlobalString('ONBOARDING_TRAINING_PRICES', '5,10,15,20')) as $v) {
+			if (is_numeric(trim($v)) && (float) $v > 0) {
+				$out[] = (float) $v;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @param string $status Tool status
+	 * @return object[] Tools with that status, by zone and name
+	 */
+	public function tools($status)
+	{
+		global $conf;
+		$out = array();
+		$res = $this->db->query("SELECT * FROM ".$this->db->prefix()."onboarding_tool WHERE entity = ".((int) $conf->entity)." AND status = '".$this->db->escape($status)."' ORDER BY zone, label");
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$out[] = $obj;
+		}
+		return $out;
+	}
+
+	/**
+	 * Ask for a tool to be added to the Givebutter training form. Emails the
+	 * person who edits the form.
+	 *
+	 * @param array<string,mixed> $in tool, zone, price, requested_by, note
+	 * @param string $status 'requested', or 'active' when staff add a tool directly
+	 * @param User|null $by Staff member adding it directly
+	 * @return array<string,mixed> ok, id, or error
+	 */
+	public function requestTool($in, $status = 'requested', $by = null)
+	{
+		global $conf;
+		$label = dol_trunc(trim(preg_replace('/\s+/', ' ', (string) (isset($in['tool']) ? $in['tool'] : ''))), 150, 'right', 'UTF-8', 1);
+		$zone = trim((string) (isset($in['zone']) ? $in['zone'] : ''));
+		$price = isset($in['price']) && is_numeric($in['price']) ? (float) $in['price'] : 0;
+		$who = dol_trunc(trim((string) (isset($in['requested_by']) ? $in['requested_by'] : '')), 150, 'right', 'UTF-8', 1);
+		$note = dol_trunc(trim((string) (isset($in['note']) ? $in['note'] : '')), 500, 'right', 'UTF-8', 1);
+		if ($label === '') {
+			return array('ok' => false, 'error' => 'tool', 'http' => 400);
+		}
+		if (!in_array($zone, $this->zones(), true)) {
+			return array('ok' => false, 'error' => 'zone', 'zones' => $this->zones(), 'http' => 400);
+		}
+		if (!in_array($price, self::prices())) {
+			return array('ok' => false, 'error' => 'price', 'prices' => self::prices(), 'http' => 400);
+		}
+		$table = $this->db->prefix().'onboarding_tool';
+		$res = $this->db->query("SELECT rowid, label, status FROM ".$table." WHERE entity = ".((int) $conf->entity)." AND zone = '".$this->db->escape($zone)."' AND status IN ('requested', 'active')");
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			if (self::norm($obj->label) === self::norm($label)) {
+				return array('ok' => false, 'error' => 'exists', 'status' => $obj->status, 'http' => 409);
+			}
+		}
+		// A Discord name, matched to a member so they can be told when it is done.
+		$email = '';
+		if ($who !== '') {
+			foreach ($this->members() as $m) {
+				if ($m->email && in_array(self::norm($who), array(self::norm($m->discord_handle), self::norm($m->email), self::norm($m->firstname.' '.$m->lastname)), true)) {
+					$email = $m->email;
+					break;
+				}
+			}
+		}
+		$now = $this->db->idate(OnboardingService::now());
+		$sql = "INSERT INTO ".$table." (entity, zone, label, price, status, requested_by, requester_email, note, fk_user_decided, date_decided, datec) VALUES (";
+		$sql .= ((int) $conf->entity).", '".$this->db->escape($zone)."', '".$this->db->escape($label)."', ".price2num($price).", '".$this->db->escape($status)."', ";
+		$sql .= "'".$this->db->escape($who)."', '".$this->db->escape($email)."', '".$this->db->escape($note)."', ".($by ? (int) $by->id : 'NULL').", ".($status == 'active' ? "'".$now."'" : 'NULL').", '".$now."')";
+		if (!$this->db->query($sql)) {
+			return array('ok' => false, 'error' => 'save', 'http' => 500);
+		}
+		$id = (int) $this->db->last_insert_id($table);
+		if ($status == 'requested') {
+			$to = getDolGlobalString('ONBOARDING_TRAINING_ADMIN_EMAIL', getDolGlobalString('ONBOARDING_STAFF_EMAIL'));
+			$this->svc->mail($to, 'Add to the training form: '.$label.' ('.$zone.')', ($who !== '' ? $who : 'Someone')." asked for a new training option.\n\nTool or equipment: ".$label."\nZone: ".$zone."\nFee: ".price($price).($note !== '' ? "\nNote: ".$note : '')."\n\nAdd \"".$label."\" to the \"Tool or equipment\" answers on the Givebutter training campaign, then mark it added in Dolibarr: Members, Onboarding, Training tools.\n".dol_buildpath('/onboarding/training-tools.php', 2));
+		}
+		return array('ok' => true, 'id' => $id, 'notify' => $email !== '');
+	}
+
+	/**
+	 * Close a request (added to the form, or declined) or retire a tool. Tells
+	 * the person who asked, when they are known.
+	 *
+	 * @param int $id Tool row
+	 * @param string $status active, declined or retired
+	 * @param User $by Who decided
+	 * @param string $note Reason, for a decline
+	 * @return string Result for the page
+	 */
+	public function decideTool($id, $status, $by, $note = '')
+	{
+		global $conf;
+		$from = array('active' => 'requested', 'declined' => 'requested', 'retired' => 'active');
+		if (!isset($from[$status])) {
+			return 'Unknown action.';
+		}
+		$table = $this->db->prefix().'onboarding_tool';
+		$res = $this->db->query("SELECT * FROM ".$table." WHERE rowid = ".((int) $id)." AND entity = ".((int) $conf->entity));
+		$t = $res ? $this->db->fetch_object($res) : null;
+		$up = $t ? $this->db->query("UPDATE ".$table." SET status = '".$status."', decision_note = '".$this->db->escape(dol_trunc($note, 255, 'right', 'UTF-8', 1))."', fk_user_decided = ".((int) $by->id).", date_decided = '".$this->db->idate(OnboardingService::now())."' WHERE rowid = ".((int) $t->rowid)." AND status = '".$from[$status]."'") : null;
+		if (!$up || $this->db->affected_rows($up) < 1) {
+			return 'That tool has already been dealt with.';
+		}
+		if ($t->requester_email && $status != 'retired') {
+			$this->svc->mail(
+				$t->requester_email,
+				($status == 'active' ? 'Now on the training form: ' : 'Training request declined: ').$t->label,
+				$status == 'active'
+					? "Hi,\n\n\"".$t->label."\" (".$t->zone.", ".price($t->price).") is now on the Givebutter training form. Trainees can pick it when they pay."
+					: "Hi,\n\nYour request to add \"".$t->label."\" to the training form was declined.".($note !== '' ? "\n\nReason: ".$note : '')
+			);
+		}
+		$done = array('active' => 'Marked as on the training form', 'declined' => 'Declined', 'retired' => 'Retired; take it off the Givebutter form too');
+		return $done[$status].($t->requester_email && $status != 'retired' ? ' and '.$t->requester_email.' was told.' : '.');
+	}
+
 	// ---------------------------------------------------------------- dues credit
 
 	/**

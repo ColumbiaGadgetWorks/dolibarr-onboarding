@@ -8,6 +8,7 @@
  *   php tick.php contact EMAIL   the email updates list's view of one address
  *   php tick.php training match ID MEMBER | void ID | approve ID | reject ID | refunded ID
  *   php tick.php training balance zone|trainer KEY
+ *   php tick.php training tool active|declined|retired ID
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -63,6 +64,8 @@ if ($job == 'daily') {
 		echo $t->rejectCredit($id, $user)."\n";
 	} elseif ($what == 'refunded') {
 		echo $t->markRefunded($id)."\n";
+	} elseif ($what == 'tool') {
+		echo $t->decideTool((int) $argv[4], $argv[3], $user, isset($argv[5]) ? $argv[5] : '')."\n";
 	} elseif ($what == 'balance') {
 		echo $t->balance($argv[3], $argv[4])."\n";
 	}
