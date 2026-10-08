@@ -6,6 +6,8 @@
  *   php tick.php sync         pull from the fake Givebutter
  *   php tick.php dump EMAIL   print what Dolibarr holds for one person
  *   php tick.php contact EMAIL   the email updates list's view of one address
+ *   php tick.php training match ID MEMBER | void ID | approve ID | reject ID | refunded ID
+ *   php tick.php training balance zone|trainer KEY
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -46,6 +48,24 @@ if ($job == 'daily') {
 	$c = new Contact($db);
 	$c->email = OnboardingService::cleanEmail(isset($argv[2]) ? $argv[2] : '');
 	echo $c->setNoEmail(1)."\n";
+} elseif ($job == 'training') {
+	dol_include_once('/onboarding/class/training.class.php');
+	$t = new OnboardingTraining($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	$id = (int) (isset($argv[3]) ? $argv[3] : 0);
+	if ($what == 'match') {
+		echo $t->assignTrainer($id, (int) $argv[4])."\n";
+	} elseif ($what == 'void') {
+		echo ($t->voidTraining($id, $user) ? 'voided' : 'not voided')."\n";
+	} elseif ($what == 'approve') {
+		echo $t->approveCredit($id, $user)."\n";
+	} elseif ($what == 'reject') {
+		echo $t->rejectCredit($id, $user)."\n";
+	} elseif ($what == 'refunded') {
+		echo $t->markRefunded($id)."\n";
+	} elseif ($what == 'balance') {
+		echo $t->balance($argv[3], $argv[4])."\n";
+	}
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');
 	$out = array('applicant' => $app, 'member' => null, 'contact_fields' => null);
@@ -68,6 +88,6 @@ if ($job == 'daily') {
 	}
 	echo json_encode($out)."\n";
 } else {
-	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL | connect [URL] | import [go] < sheet | emails [go] < list | contact EMAIL | unsubscribe EMAIL\n");
+	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL | connect [URL] | import [go] < sheet | emails [go] < list | contact EMAIL | unsubscribe EMAIL | training ...\n");
 	exit(1);
 }

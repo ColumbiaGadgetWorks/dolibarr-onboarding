@@ -892,6 +892,12 @@ class OnboardingService
 			return 'ignored: status '.$t['status'];
 		}
 		$campaign = isset($t['campaign_code']) ? (string) $t['campaign_code'] : '';
+		// Training fees have their own campaign and their own bookkeeping.
+		dol_include_once('/onboarding/class/training.class.php');
+		if (OnboardingTraining::isTrainingCampaign($campaign)) {
+			$training = new OnboardingTraining($this->db, $this);
+			return $training->process($t);
+		}
 		$want = getDolGlobalString('ONBOARDING_GB_CAMPAIGN_CODE');
 		if ($want !== '' && strcasecmp($campaign, $want) != 0) {
 			return 'ignored: campaign '.$campaign;

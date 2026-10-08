@@ -43,6 +43,15 @@ $sections = array(
 		'ONBOARDING_DUES_STANDARD' => array('Standard monthly dues', 'text', ''),
 		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'A payment of at least this much makes the member a Supporter.'),
 	),
+	'Training fees' => array(
+		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on, for example the code at the end of its link. Leave empty to turn training tracking off. Its checkout questions are found by their titles: one mentioning "zone", one mentioning "trainer", and one mentioning "tool" or "equipment".'),
+		'ONBOARDING_TRAINING_TRAINER_SHARE' => array('Trainer\'s share (percent)', 'text', 'Credited to the trainer. The rest of each fee goes to the zone\'s budget.'),
+		'ONBOARDING_TRAINING_CREDIT_THRESHOLD' => array('Credit for a month of dues', 'text', 'When a trainer\'s credit reaches this, a dues refund waits for approval under Training accounts, and the membership team is emailed.'),
+		'ONBOARDING_TRAINED_TAG' => array('Trained tag', 'text', 'Trainees get a tag "<this>: <tool>" on their member and contact cards.'),
+		'ONBOARDING_TRAINING_LOOKUP_URL' => array('Training lookup page', 'text', 'The website page where people check what they are trained on, for example https://columbiagadgetworks.org/training/ . Put in the email sent after a training.'),
+		'ONBOARDING_MAIL_TRAINED_SUBJECT' => array('Trained email subject', 'text', 'Placeholders: {tool}'),
+		'ONBOARDING_MAIL_TRAINED_BODY' => array('Trained email text', 'area', 'Sent to the person who paid. Placeholders: {firstname} {tool} {zone} {trainer} {lookup_url} {org}'),
+	),
 	'Reminders' => array(
 		'ONBOARDING_REMINDER_DAYS' => array('Send reminders after (days)', 'text', 'Comma separated days after a payment is cancelled or missed, for example 3,7,14.'),
 		'ONBOARDING_GRACE_DAYS' => array('Mark non-paying after (days)', 'text', 'Counted from the same moment. A member who has already paid for a period keeps it until it runs out.'),
