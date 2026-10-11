@@ -9,6 +9,8 @@
  *   php tick.php training match ID MEMBER | void ID | approve ID | reject ID | refunded ID
  *   php tick.php training balance zone|trainer KEY
  *   php tick.php training link TRAINING REGISTRATION | expire
+ *   php tick.php deadlines 8     run deadline reminders as if it were 8 days from now
+ *   php tick.php deadline setup STAMP | task JSON | link TASK USER | show TASK | find LABEL
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -70,6 +72,81 @@ if ($job == 'daily') {
 		echo $t->expireRegistrations()."\n";
 	} elseif ($what == 'balance') {
 		echo $t->balance($argv[3], $argv[4])."\n";
+	}
+} elseif ($job == 'deadlines') {
+	dol_include_once('/onboarding/class/deadline.class.php');
+	OnboardingService::$now = dol_now() + ((int) (isset($argv[2]) ? $argv[2] : 0)) * 86400;
+	echo (new OnboardingDeadlines($db, $svc))->run()."\n";
+} elseif ($job == 'deadline') {
+	// Fixtures for the deadline reminder test: people, a group, a project, tasks.
+	dol_include_once('/onboarding/class/deadline.class.php');
+	require_once DOL_DOCUMENT_ROOT.'/user/class/usergroup.class.php';
+	require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
+	require_once DOL_DOCUMENT_ROOT.'/projet/class/task.class.php';
+	$deadlines = new OnboardingDeadlines($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'setup') {
+		$stamp = preg_replace('/\D/', '', $argv[3]);
+		$ids = array();
+		foreach (array('treasurer' => 'Tess', 'president' => 'Pres', 'secretary' => 'Sec', 'quiet' => 'Quinn') as $role => $first) {
+			$u = new User($db);
+			$u->login = $role.$stamp;
+			$u->firstname = $first;
+			$u->lastname = 'Board'.$stamp;
+			$u->email = $role !== 'quiet' ? $role.'-'.$stamp.'@example.test' : '';
+			$ids[$role] = $u->create($user);
+		}
+		$g = new UserGroup($db);
+		$g->name = 'Board '.$stamp;
+		$ids['group'] = $g->create($user);
+		foreach (array('treasurer', 'president', 'secretary', 'quiet') as $role) {
+			$u = new User($db);
+			$u->fetch($ids[$role]);
+			$u->SetInGroup($ids['group'], $conf->entity);
+		}
+		$p = new Project($db);
+		$p->ref = 'PJ'.$stamp;
+		$p->title = 'Board deadlines '.$stamp;
+		$p->socid = 0;
+		$p->date_start = dol_now();
+		$ids['project'] = $p->create($user);
+		$p->setValid($user);
+		echo json_encode($ids)."\n";
+	} elseif ($what == 'task') {
+		$in = json_decode($argv[3], true);
+		$t = new Task($db);
+		$t->fk_project = (int) $in['project'];
+		$t->ref = 'TK'.preg_replace('/\D/', '', microtime(true));
+		$t->label = $in['label'];
+		$t->description = isset($in['description']) ? $in['description'] : '';
+		$t->date_start = isset($in['start']) ? dol_now() + $in['start'] * 86400 : '';
+		$t->date_end = isset($in['due']) ? dol_now() + $in['due'] * 86400 : '';
+		$t->progress = 0;
+		foreach (array('remind_every', 'escalate_days', 'escalate_group', 'repeat_yearly') as $f) {
+			if (isset($in[$f])) {
+				$t->array_options['options_'.$f] = $in[$f];
+			}
+		}
+		$id = $t->create($user);
+		if ($id <= 0) {
+			fwrite(STDERR, 'task create failed: '.$t->error."\n");
+			exit(1);
+		}
+		foreach ((array) (isset($in['assign']) ? $in['assign'] : array()) as $uid) {
+			$t->add_contact((int) $uid, 'TASKEXECUTIVE', 'internal');
+		}
+		echo $id."\n";
+	} elseif ($what == 'link') {
+		echo $deadlines->link((int) $argv[3], (int) $argv[4])."\n";
+	} elseif ($what == 'show' || $what == 'find') {
+		$where = $what == 'show' ? "t.rowid = ".((int) $argv[3]) : "t.label = '".$db->escape($argv[3])."'";
+		$res = $db->query("SELECT t.rowid, t.dateo, t.datee, t.progress, t.fk_statut, ef.remind_every, ef.escalate_days, ef.escalate_group, ef.repeat_yearly FROM ".$db->prefix()."projet_task AS t LEFT JOIN ".$db->prefix()."projet_task_extrafields AS ef ON ef.fk_object = t.rowid WHERE ".$where." ORDER BY t.rowid");
+		$out = array();
+		while ($res && ($o = $db->fetch_object($res))) {
+			$o->assigned = array_keys($deadlines->assignees($o->rowid));
+			$out[] = $o;
+		}
+		echo json_encode($out)."\n";
 	}
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');

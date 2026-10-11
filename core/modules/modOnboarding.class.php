@@ -23,18 +23,18 @@ class modOnboarding extends DolibarrModules
 		$this->family = 'hr';
 		$this->module_position = '90';
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
-		$this->description = 'Website signup, paperwork, Givebutter dues and badge tracking for members';
+		$this->description = 'Website signup, paperwork, Givebutter dues and badge tracking for members; deadline reminders on project tasks';
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.4.0';
+		$this->version = '0.5.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
 		$this->dirs = array('/onboarding/applicant');
 		$this->config_page_url = array('setup.php@onboarding');
 		$this->hidden = false;
-		$this->depends = array('modAdherent', 'modSociete', 'modCategorie');
+		$this->depends = array('modAdherent', 'modSociete', 'modCategorie', 'modProjet');
 		$this->requiredby = array();
 		$this->conflictwith = array();
 		$this->langfiles = array('onboarding@onboarding');
@@ -91,6 +91,20 @@ class modOnboarding extends DolibarrModules
 				'status' => 1,
 				'test' => 'isModEnabled("onboarding")',
 				'priority' => 51,
+			),
+			2 => array(
+				'label' => 'Onboarding: deadline reminders',
+				'jobtype' => 'method',
+				'class' => '/onboarding/class/onboardingcron.class.php',
+				'objectname' => 'OnboardingCron',
+				'method' => 'deadlines',
+				'parameters' => '',
+				'comment' => 'Emails the people assigned to project tasks that have a reminder set, until the task is done; escalates to the chosen group before the due date; copies finished yearly tasks to next year.',
+				'frequency' => 1,
+				'unitfrequency' => 86400,
+				'status' => 1,
+				'test' => 'isModEnabled("onboarding") && isModEnabled("project")',
+				'priority' => 52,
 			),
 		);
 
@@ -200,6 +214,20 @@ class modOnboarding extends DolibarrModules
 			'target' => '',
 			'user' => 0,
 		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=project',
+			'type' => 'left',
+			'titre' => 'Deadline reminders',
+			'mainmenu' => 'project',
+			'leftmenu' => 'onboarding_deadlines',
+			'url' => '/onboarding/deadlines.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding") && isModEnabled("project")',
+			'perms' => '$user->hasRight("projet", "lire")',
+			'target' => '',
+			'user' => 0,
+		);
 	}
 
 	/**
@@ -221,6 +249,8 @@ class modOnboarding extends DolibarrModules
 
 		dol_include_once('/onboarding/class/onboarding.class.php');
 		OnboardingService::installExtraFields($this->db);
+		dol_include_once('/onboarding/class/deadline.class.php');
+		OnboardingDeadlines::installFields($this->db);
 
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 		if (!getDolGlobalString('ONBOARDING_API_KEY')) {
