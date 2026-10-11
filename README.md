@@ -120,6 +120,7 @@ docker compose exec -u www-data dolibarr php /var/www/html/custom/onboarding/san
 
 `daily 8` runs the reminder job as if it were 8 days from now. `sync` pulls from the fake
 Givebutter. `dump someone@example.test` prints what Dolibarr holds for a person.
+`deadlines 20` runs the deadline reminders as if it were 20 days from now.
 
 ```bash
 docker compose down -v
@@ -132,7 +133,8 @@ throws the sandbox away.
 `.github/workflows/test.yml` lints the PHP and runs `sandbox/e2e.mjs` against the sandbox on
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
-Connect Givebutter button, and the legacy import. It also checks that the staff pages render
+Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
+escalation, the mark-complete link, next year's copy). It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training fees
@@ -205,6 +207,41 @@ staff the new permissions: see trainings; match trainers, link payments and
 approve credits; and, for the purchaser only, add zone budgets and record
 purchases. An existing install needs the module disabled and enabled once to
 create the new tables and permissions.
+
+## Deadline reminders
+
+Any Dolibarr project task can nag the people assigned to it until it is done. Use it for board
+deadlines: the 990-N, the Missouri annual registration, the insurance renewal.
+
+Projects, **Deadline reminders** lists every task with a reminder set, when the next reminder
+and the escalation go out, and who is assigned. **Send due reminders now** does today's work
+straight away; otherwise the daily scheduled job does it.
+
+To set one up, create a project (for example "Board deadlines") and in it a task:
+
+- **Start date**: the first reminder goes out on this day. **End date**: the due date.
+- **Assigned to**: the people who get the reminders. Their user card needs an email address.
+- **Remind assignees every (days)**: 7 for weekly. Reminders keep going, past the due date
+  too, until the task is at 100%.
+- **Escalate this many days before due** and **Escalation group**: if the task is still open
+  that close to the due date, everyone in the group (for example a "Board" user group) gets
+  one email. People assigned to the task are left out; they already get the reminders.
+- **Repeat every year**: when the task is done, a copy for next year is made with the same
+  people and settings, dates one year later.
+
+Every reminder has a **mark complete** link. It works without logging in to Dolibarr, is
+signed for that one task and person, and asks for a button press before changing anything,
+so a mail scanner opening the link does nothing. Setting the task to 100% in Dolibarr works
+too.
+
+Example: taxes due 1 January, can start 1 December. Start 1 Dec, end 1 Jan, assigned to the
+treasurer, remind every 7 days, escalate 14 days before due to the Board group, repeat every
+year. The treasurer hears on 1, 8, 15, 22 and 29 December until it is done; the rest of the
+board hears once, on 18 December, if it is not.
+
+Updating from 0.4: the module now needs the **Projects** module (it is switched on with this
+one). Disable and enable **Member onboarding** once so the task fields, the table and the
+scheduled job are created.
 
 ## Fields on the member card
 

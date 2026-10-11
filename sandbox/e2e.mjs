@@ -15,8 +15,20 @@ const MAIL = process.env.MAIL_URL || 'http://localhost:8025';
 const KEY = process.env.ONBOARDING_API_KEY || 'sandbox-key-sandbox-key-sandbox-key';
 const email = `e2e-${Date.now()}@example.test`;
 
+// Apache closes an idle keep-alive connection after 5 seconds. When a step spends
+// longer than that in docker exec, the next request can go out on a connection
+// that is closing and never reach Dolibarr; send it once more on a fresh one.
+async function post(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if (e.cause?.code !== 'UND_ERR_SOCKET') throw e;
+    return fetch(url, init);
+  }
+}
+
 async function api(action, body = {}, key = KEY) {
-  const r = await fetch(`${DOLI}/custom/onboarding/public/api.php?action=${action}`, {
+  const r = await post(`${DOLI}/custom/onboarding/public/api.php?action=${action}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'X-Onboarding-Key': key },
     body: JSON.stringify(body),
@@ -26,7 +38,7 @@ async function api(action, body = {}, key = KEY) {
   try { json = JSON.parse(text); } catch { throw new Error(`${action}: HTTP ${r.status}, not JSON: ${text.slice(0, 600)}`); }
   return { status: r.status, ...json };
 }
-const mock = async (path, body = {}) => (await fetch(`${MOCK}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json();
+const mock = async (path, body = {}) => (await post(`${MOCK}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json();
 const tickIn = (input, ...args) => execFileSync('docker', ['compose', 'exec', '-T', '-u', 'www-data', 'dolibarr', 'php', '/var/www/html/custom/onboarding/sandbox/tick.php', ...args], { encoding: 'utf8', input }).trim();
 const tick = (...args) => execFileSync('docker', ['compose', 'exec', '-T', '-u', 'www-data', 'dolibarr', 'php', '/var/www/html/custom/onboarding/sandbox/tick.php', ...args], { encoding: 'utf8' }).trim();
 const dumpOf = (who) => JSON.parse(tick('dump', who).split('\n').pop());
@@ -469,6 +481,74 @@ step('registration: unpaid ones expire after 14 days');
 execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e',
   `UPDATE llx_onboarding_training_reg SET datec = DATE_SUB(NOW(), INTERVAL 20 DAY) WHERE email = '${twice}' AND status = 'waiting'`]);
 assert.match(tick('training', 'expire'), /^1 unpaid training registrations expired/);
+}
+
+
+step('deadline reminders: weekly from the start date until done, one escalation, next year\'s copy');
+{
+  const ds = String(Date.now());
+  const ids = JSON.parse(tick('deadline', 'setup', ds));
+  const taskOf = (spec) => Number(tick('deadline', 'task', JSON.stringify({ project: ids.project, ...spec })));
+  const show = (id) => JSON.parse(tick('deadline', 'show', String(id)))[0];
+  const run = (days) => tick('deadlines', String(days));
+  const treasurer = `treasurer-${ds}@example.test`;
+  const label = `File taxes ${ds}`;
+  const id = taskOf({ label, description: '<p>Form 990-N at irs.gov</p>', start: 3, due: 30, remind_every: 7, escalate_days: 10, escalate_group: ids.group, repeat_yearly: 1, assign: [ids.treasurer] });
+  const lonely = taskOf({ label: `Nobody assigned ${ds}`, start: 0, due: 30, remind_every: 7 });
+
+  assert.match(run(0), /nobody assigned/, 'a task without people is reported');
+  assert.equal((await mailTo(treasurer)).length, 0, 'nothing before the start date');
+  run(3);
+  const first = await mailTo(treasurer);
+  assert.equal(first.length, 1, 'first reminder on the start date');
+  assert.match(first[0], new RegExp(`^Reminder: ${label} \\(due `));
+  run(5);
+  assert.equal((await mailTo(treasurer)).length, 1, 'not again two days later');
+  run(10);
+  assert.equal((await mailTo(treasurer)).length, 2, 'again a week later');
+  assert.equal((await mailTo(`president-${ds}@example.test`)).length, 0, 'no escalation yet');
+  run(20);
+  assert.equal((await mailTo(treasurer)).length, 3);
+  const escalated = await mailTo(`president-${ds}@example.test`);
+  assert.equal(escalated.length, 1, 'the group is told');
+  assert.match(escalated[0], new RegExp(`^Not done yet: ${label} \\(due `));
+  assert.equal((await mailTo(`quiet${ds}@example.test`)).length, 0);
+  assert.equal((await mailTo(`secretary-${ds}@example.test`)).length, 1, 'everyone in the group');
+  run(21);
+  assert.equal((await mailTo(`president-${ds}@example.test`)).length, 1, 'escalated once');
+
+  step('deadline reminders: the link in the email marks the task complete');
+  const msgs = await (await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${treasurer}`)}`)).json();
+  const text = (await (await fetch(`${MAIL}/api/v1/message/${msgs.messages[0].ID}`)).json()).Text;
+  assert.ok(text.includes('Form 990-N at irs.gov'), 'description in the email');
+  const link = (text.match(/https?:\/\/\S+public\/task\.php\?\S+/) || [])[0];
+  assert.ok(link, 'mark-complete link in the email');
+  const local = link.replace(/^https?:\/\/[^/]+/, DOLI);
+  assert.equal((await fetch(local.replace(/k=\w+/, 'k=0000'))).status, 403, 'a changed link is refused');
+  assert.match(await (await fetch(local)).text(), /Mark this task complete\?/);
+  assert.equal(Number(show(id).progress), 0, 'opening the link changes nothing');
+  const [url, query] = local.split('?');
+  const post = () => fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: query }).then((r) => r.text());
+  assert.match(await post(), /Marked complete/);
+  assert.equal(Number(show(id).progress), 100);
+  assert.match(await post(), /Already complete/);
+  run(30);
+  assert.equal((await mailTo(treasurer)).length, 3, 'no reminders once done');
+
+  step('deadline reminders: a finished yearly task gets next year\'s copy, once');
+  const copies = JSON.parse(tick('deadline', 'find', label));
+  assert.equal(copies.length, 2);
+  const [was, next] = copies;
+  const plusYear = (d) => `${Number(d.slice(0, 4)) + 1}${d.slice(4, 10)}`;
+  assert.equal(next.dateo.slice(0, 10), plusYear(was.dateo));
+  assert.equal(next.datee.slice(0, 10), plusYear(was.datee));
+  assert.equal(Number(next.progress), 0);
+  assert.deepEqual(next.assigned, was.assigned, 'same people');
+  assert.equal(next.remind_every, '7');
+  assert.equal(String(next.escalate_group), String(ids.group));
+  run(31);
+  assert.equal(JSON.parse(tick('deadline', 'find', label)).length, 2, 'copied once');
+  assert.ok(show(lonely), 'the unassigned task is still there');
 }
 
 console.log('\nALL PASSED');

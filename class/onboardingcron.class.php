@@ -52,4 +52,17 @@ class OnboardingCron
 		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations();
 		return 0;
 	}
+
+	/**
+	 * Daily: reminders and escalations for project tasks with a deadline set.
+	 *
+	 * @return int 0 if OK
+	 */
+	public function deadlines()
+	{
+		dol_include_once('/onboarding/class/deadline.class.php');
+		$deadlines = new OnboardingDeadlines($this->db);
+		$this->output = $deadlines->run();
+		return 0;
+	}
 }

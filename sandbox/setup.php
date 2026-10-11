@@ -25,7 +25,7 @@ if ($user->id <= 0) {
 	exit(1);
 }
 
-foreach (array('modSociete', 'modAdherent', 'modCategorie', 'modMailing', 'modCron', 'modOnboarding') as $module) {
+foreach (array('modSociete', 'modAdherent', 'modCategorie', 'modMailing', 'modCron', 'modProjet', 'modOnboarding') as $module) {
 	$r = activateModule($module);
 	if (!empty($r['errors'])) {
 		fwrite(STDERR, $module.': '.implode('; ', $r['errors'])."\n");

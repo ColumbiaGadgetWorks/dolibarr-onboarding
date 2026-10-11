@@ -39,6 +39,8 @@ out=$(curl -s -b "$JAR" "$BASE/custom/onboarding/training-accounts.php")
 if grep -q 'Budget added (from General fund)' <<<"$out" && grep -q 'Workbench' <<<"$out" && grep -q '>Metalworking<' <<<"$out"; then echo "ok   zone budgets and a purchase"; else echo "FAIL zone budgets and a purchase"; fail=1; fi
 bal=$(docker compose exec -T -u www-data dolibarr php /var/www/html/custom/onboarding/sandbox/tick.php training balance zone Metalworking)
 if [ "$bal" = "$((before + 300))" ]; then echo "ok   every zone got 300"; else echo "FAIL Metalworking went from $before to $bal"; fail=1; fi
+check 'deadlines.php' 'File taxes'
+check 'deadlines.php?done=1' 'next year'
 check 'admin/import.php' 'Import existing members'
 # The import page's "Check" button, with a pasted tab-separated sheet.
 T2=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/import.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
