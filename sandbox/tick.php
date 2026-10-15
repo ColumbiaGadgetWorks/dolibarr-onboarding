@@ -11,6 +11,7 @@
  *   php tick.php training link TRAINING REGISTRATION | expire
  *   php tick.php deadlines 8     run deadline reminders as if it were 8 days from now
  *   php tick.php deadline setup STAMP | task JSON | link TASK USER | show TASK | find LABEL
+ *   php tick.php purchase const NAME VALUE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -147,6 +148,61 @@ if ($job == 'daily') {
 			$out[] = $o;
 		}
 		echo json_encode($out)."\n";
+	}
+} elseif ($job == 'purchase') {
+	// Fixtures and actions for the purchase request test.
+	dol_include_once('/onboarding/class/purchase.class.php');
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+	$pu = new OnboardingPurchase($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'const') {
+		echo dolibarr_set_const($db, $argv[3], isset($argv[4]) ? $argv[4] : '', 'chaine', 0, '', $conf->entity)."\n";
+	} elseif ($what == 'member') {
+		// member EMAIL CODE FIRST LAST: a validated member paid up for a year, with a member code
+		$adh = new Adherent($db);
+		$adh->firstname = $argv[5];
+		$adh->lastname = $argv[6];
+		$adh->email = $argv[3];
+		$adh->login = $argv[3];
+		$adh->morphy = 'phy';
+		$adh->typeid = getDolGlobalInt('ONBOARDING_TYPE_STANDARD');
+		$adh->public = 0;
+		$adh->statut = Adherent::STATUS_DRAFT;
+		$adh->status = Adherent::STATUS_DRAFT;
+		$adh->array_options = array('options_member_code' => $argv[4]);
+		$id = $adh->create($user);
+		if ($id <= 0) {
+			fwrite(STDERR, 'member create failed: '.$adh->error."\n");
+			exit(1);
+		}
+		$adh->fetch($id);
+		$adh->validate($user);
+		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = '".$db->idate(dol_now() + 365 * 86400)."' WHERE rowid = ".((int) $id));
+		echo $id."\n";
+	} elseif ($what == 'budget') {
+		echo ($pu->training->post('zone', $argv[3], (float) $argv[4], 'allocation', 0, 'test budget', 0, (int) $user->id) ? 'ok' : 'failed')."\n";
+	} elseif ($what == 'bank') {
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$a = new Account($db);
+		$a->ref = strtoupper(preg_replace('/\W/', '', $argv[3]));
+		$a->label = $argv[3];
+		$a->courant = 1;
+		$a->clos = 0;
+		$a->currency_code = 'USD';
+		$a->country_id = 1;
+		$a->date_solde = dol_now();
+		$a->solde = 0;
+		echo $a->create($user)."\n";
+	} elseif ($what == 'pay') {
+		echo $pu->markPaid((int) $argv[3], (int) $argv[4], $user)."\n";
+	} elseif ($what == 'link') {
+		echo $pu->link((int) $argv[3], $argv[4], $argv[5])."\n";
+	} elseif ($what == 'show') {
+		$row = $pu->fetch((int) $argv[3]);
+		if ($row) {
+			unset($row->token);
+		}
+		echo json_encode($row)."\n";
 	}
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');

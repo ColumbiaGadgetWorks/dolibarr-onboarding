@@ -11,7 +11,8 @@
  *   Header  X-Onboarding-Key: <key from the module setup page>
  *   Body    JSON
  *
- * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter
+ * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter, trainings,
+ * trainingstart, budget, purchase, purchasefile, purchasefinish
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -116,6 +117,32 @@ if ($action == 'trainingstart') {
 	dol_include_once('/onboarding/class/training.class.php');
 	$training = new OnboardingTraining($db, $svc);
 	onboarding_reply($training->register($in));
+}
+
+if (in_array($action, array('budget', 'purchase', 'purchasefile', 'purchasefinish'), true)) {
+	// The website's /budget page. "budget" is totals per zone and nothing else. A request
+	// is filed in three calls so receipts travel one at a time: purchase (checks the
+	// member, returns a draft id and token), purchasefile for each receipt, then
+	// purchasefinish, which sends it for approval. Turnstile and the per-IP limit are
+	// the Worker's; the member check and the guessing limits are here.
+	dol_include_once('/onboarding/class/purchase.class.php');
+	$purchase = new OnboardingPurchase($db, $svc);
+	if ($action == 'budget') {
+		onboarding_reply(array('ok' => true, 'zones' => $purchase->budget()));
+	}
+	if ($action == 'purchase') {
+		onboarding_reply($purchase->submit($in));
+	}
+	$pid = isset($in['id']) ? (int) $in['id'] : 0;
+	$ptoken = isset($in['token']) ? (string) $in['token'] : '';
+	if ($action == 'purchasefinish') {
+		onboarding_reply($purchase->finish($pid, $ptoken));
+	}
+	$pbytes = base64_decode(isset($in['data']) ? (string) $in['data'] : '', true);
+	if ($pbytes === false) {
+		onboarding_reply(array('ok' => false, 'error' => 'type', 'http' => 400));
+	}
+	onboarding_reply($purchase->addFile($pid, $ptoken, $pbytes));
 }
 
 if ($action == 'givebutter') {

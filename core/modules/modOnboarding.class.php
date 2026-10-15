@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.5.0';
+		$this->version = '0.6.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
@@ -56,6 +56,8 @@ class modOnboarding extends DolibarrModules
 			array('ONBOARDING_TRAINED_TAG', 'chaine', 'Trained', 'Parent tag for "Trained: <tool>" tags on members and contacts', 0, 'current', 0),
 			array('ONBOARDING_TRAINING_ZONES', 'chaine', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting', 'Zones with a budget, comma separated, as on the training form', 0, 'current', 0),
 			array('ONBOARDING_TRAINING_CATALOG_URL', 'chaine', 'https://columbiagadgetworks.org/training/catalog/index.json', 'The website training catalog (tools, zones, fees, trainers) as JSON', 0, 'current', 0),
+			array('ONBOARDING_PURCHASE_LEAD_LIMIT', 'chaine', '100', 'Largest purchase request a zone lead may approve alone; bigger ones need the treasurer and another director', 0, 'current', 0),
+			array('ONBOARDING_PURCHASE_RECEIPT_DAYS', 'chaine', '60', 'Days after buying that a reimbursement receipt is still accepted', 0, 'current', 0),
 			array('ONBOARDING_TRAINING_CATALOG_EDIT_URL', 'chaine', 'https://github.com/ColumbiaGadgetWorks/website/edit/main/data/training.yaml', 'Where the training catalog is edited', 0, 'current', 0),
 		);
 
@@ -193,6 +195,20 @@ class modOnboarding extends DolibarrModules
 			'mainmenu' => 'members',
 			'leftmenu' => 'onboarding_training_accounts',
 			'url' => '/onboarding/training-accounts.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->hasRight("onboarding", "training", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Purchase requests',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_purchases',
+			'url' => '/onboarding/purchases.php',
 			'langs' => 'onboarding@onboarding',
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',

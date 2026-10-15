@@ -49,7 +49,9 @@ class OnboardingCron
 		dol_include_once('/onboarding/class/training.class.php');
 		$training = new OnboardingTraining($this->db, $svc);
 		$training->catalog(true);
-		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations();
+		dol_include_once('/onboarding/class/purchase.class.php');
+		$purchase = new OnboardingPurchase($this->db, $svc);
+		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations().'; '.$purchase->purge();
 		return 0;
 	}
 

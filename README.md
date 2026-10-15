@@ -193,6 +193,45 @@ bought. Only people with the permission "Add zone budgets and record purchases"
 see these forms, so purchasing can stay with one person; every entry shows who
 entered it.
 
+### Purchase requests
+
+Members ask to spend a zone's budget on the website's **/budget** page. Two kinds of
+request, and only two:
+
+- **Reimburse me**: already bought. At least one receipt (PDF, JPG, PNG, WEBP or HEIC, up
+  to 5 files of 5 MB) is required, the purchase must be within 60 days (setting), and the
+  member says how to be paid (Venmo, PayPal or check).
+- **Request for purchase**: the treasurer buys it. It needs a web link and the total price.
+
+The member proves who they are with the email on their member card and the two digits of
+their `member_code`. `CGW-05`, `05` and `140405` all mean 05. Only validated members who are
+paid up (or waived through today) get in, and every wrong way in gets the same answer, so the
+form cannot be used to find out who is a member. Two digits is a weak secret, so failures are
+counted: five wrong tries lock an email for 24 hours, even for the right code; 20 from one
+address in an hour, or 100 across the whole form, shut it for an hour. A member whose card has
+no `member_code` cannot use the form.
+
+Who decides, from a signed link in their email (no Dolibarr login; opening the link only
+shows the request, a button decides):
+
+- The **zone lead**, for requests up to **$100** while the zone still has the money.
+- Anything bigger, over the zone's budget, from a zone with no lead, or from the lead
+  themselves: the **treasurer and one other director** (if the treasurer is the one asking,
+  any two other directors). Nobody ever approves their own request.
+
+Set the zone leads (one `Zone = Name or email` line each), the treasurer's email and the
+other directors' emails on the setup page, under Purchase requests. The zone leads default to
+the current six. Approved requests wait under Members, Onboarding, **Purchase requests**,
+where the treasurer presses **Mark paid** and chooses the account it was paid from. That puts
+the money out of that Dolibarr bank account (a bank line linked to the member) and out of the
+zone's budget, both naming the request. Until then an approved or waiting request counts as
+**committed**, so the page shows `available = added - spent - committed`.
+
+The website asks for `budget` (totals per zone: no names, no transactions), then files a
+request in three calls so receipts travel one at a time: `purchase` (checks the member,
+returns a draft), `purchasefile` for each receipt, `purchasefinish`. Turnstile and a per-IP
+limit are the website's. Unfinished drafts are removed after two days.
+
 ### The training catalog
 
 Members, Onboarding, **Training tools** shows the catalog as the website
