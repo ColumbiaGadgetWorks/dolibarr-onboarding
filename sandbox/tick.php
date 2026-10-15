@@ -184,7 +184,7 @@ if ($job == 'daily') {
 	} elseif ($what == 'bank') {
 		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
 		$a = new Account($db);
-		$a->ref = strtoupper(preg_replace('/\W/', '', $argv[3]));
+		$a->ref = 'T'.mt_rand(100000, 999999); // the column is short
 		$a->label = $argv[3];
 		$a->courant = 1;
 		$a->clos = 0;
