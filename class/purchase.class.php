@@ -39,7 +39,7 @@ class OnboardingPurchase
 	// any zone may file for it, it has no budget to check, and it always needs the board.
 	const GENERAL = 'General fund';
 	const DEFAULT_ANY_ZONE = "Adam Brown\nDavid Kotval";
-	const DEFAULT_LEADS ="Woodworking = Peter Tipton\nMachining = Jeff Thiele\nMetalworking = Jim Fieser\nDigital Fab = Will Smith\nCrafting = Madison Pawlicsak\nElectronics = Isaiah Davis-Stober";
+	const DEFAULT_LEADS ="Woodworking = Peter Tipton\nMachining = Jeff Thiele\nMetalworking = Jim Fieser\nDigital Fab = Will Smith\nCrafting = Madison Pawliczak\nElectronics = Isaiah Davis-Stober";
 
 	/** @var DoliDB */
 	public $db;
