@@ -290,7 +290,7 @@ assert.match(sh('pay', String(r7.id), String(bank)), /marked paid/);
 assert.ok(!(await zones()).some((z) => z.zone === 'General fund'), 'the General fund is not a zone budget');
 
 step('roles follow the tag: move the Woodworking boss tag and the new person gets everything');
-const newlead = `newlead-${ts}@example.test`;
+const newlead = `nia-${ts}@example.test`; // not a superstring of the old boss's address: the mail search matches substrings
 sh('member', newlead, 'CGW-80', 'Nia', `NewLead${ts}`);
 sh('untag', leadEmail, 'woodworking-boss');
 sh('tag', newlead, 'woodworking-boss');
