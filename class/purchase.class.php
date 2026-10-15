@@ -28,7 +28,7 @@ dol_include_once('/onboarding/class/training.class.php');
 class OnboardingPurchase
 {
 	const KINDS = array('reimburse' => 'Reimburse me', 'purchase' => 'Request for purchase');
-	const PAY_METHODS = array('venmo' => 'Venmo', 'paypal' => 'PayPal', 'check' => 'Check');
+	const PAY_METHODS = array('venmo' => 'Venmo', 'check' => 'Check');
 	const MAX_FILES = 5;
 	const MAX_FILE_BYTES = 5242880;
 	const MAX_AMOUNT = 5000;
@@ -38,8 +38,14 @@ class OnboardingPurchase
 	// Not a zone: money the organization keeps for itself. Anyone allowed to file for
 	// any zone may file for it, it has no budget to check, and it always needs the board.
 	const GENERAL = 'General fund';
-	const DEFAULT_ANY_ZONE = "Adam Brown\nDavid Kotval";
-	const DEFAULT_LEADS ="Woodworking = Peter Tipton\nMachining = Jeff Thiele\nMetalworking = Jim Fieser\nDigital Fab = Will Smith\nCrafting = Madison Pawliczak\nElectronics = Isaiah Davis-Stober";
+	// Roles are tags on a member card (Members, the member, Tags). The tag is the role's name
+	// in lower case; a zone boss's tag is the zone in lower case with hyphens, plus -boss
+	// (woodworking-boss, digital-fab-boss). Whoever holds the tag today is the person, with
+	// their email and member code taken from their card, so moving a tag moves the role.
+	const ROLE_PRESIDENT = 'president';
+	const ROLE_TREASURER = 'treasurer';
+	const BOARD_ROLES = array('president', 'vice-president', 'secretary', 'treasurer', 'director');
+	const ROLES_PARENT = 'Roles';
 
 	/** @var DoliDB */
 	public $db;
@@ -92,15 +98,59 @@ class OnboardingPurchase
 		return $secret;
 	}
 
+	// ---------------------------------------------------------------- roles
+
 	/**
-	 * @param string $list Comma, semicolon or newline separated addresses
-	 * @return string[] Lower case addresses
+	 * @param string $zone Zone name, for example Digital Fab
+	 * @return string The tag that makes someone that zone's boss, for example digital-fab-boss
 	 */
-	private static function emails($list)
+	public static function bossRole($zone)
+	{
+		return trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower((string) $zone)), '-').'-boss';
+	}
+
+	/**
+	 * Members holding any of these roles, read from their tags every time, so moving a tag
+	 * to someone else moves the role. Only validated members count.
+	 *
+	 * @param string[] $roles Tag names, lower case
+	 * @return object[] One row per member, with a roles list
+	 */
+	public function roleMembers($roles)
+	{
+		if (!isModEnabled('categorie')) {
+			return array();
+		}
+		require_once DOL_DOCUMENT_ROOT.'/categories/class/categorie.class.php';
+		$in = array();
+		foreach ($roles as $r) {
+			$in[] = "'".$this->db->escape(strtolower((string) $r))."'";
+		}
+		if (!$in) {
+			return array();
+		}
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT a.rowid, a.firstname, a.lastname, a.email, a.statut, a.datefin, e.member_code, e.dues_waived_until, LOWER(c.label) AS role FROM ".$p."categorie AS c INNER JOIN ".$p."categorie_member AS cm ON cm.fk_categorie = c.rowid INNER JOIN ".$p."adherent AS a ON a.rowid = cm.fk_member LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid WHERE c.type = ".((int) Categorie::TYPE_MEMBER)." AND LOWER(c.label) IN (".implode(',', $in).") AND c.entity IN (".getEntity('category').") AND a.entity IN (".getEntity('adherent').") AND a.statut = 1 ORDER BY a.rowid ASC");
+		$out = array();
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			if (!isset($out[(int) $o->rowid])) {
+				$o->roles = array();
+				$out[(int) $o->rowid] = $o;
+			}
+			$out[(int) $o->rowid]->roles[] = (string) $o->role;
+		}
+		return array_values($out);
+	}
+
+	/**
+	 * @param string[] $roles Tag names
+	 * @return string[] Their holders' emails, lower case, each once
+	 */
+	public function roleEmails($roles)
 	{
 		$out = array();
-		foreach (preg_split('/[\s,;]+/', (string) $list) as $e) {
-			$e = OnboardingService::cleanEmail($e);
+		foreach ($this->roleMembers($roles) as $m) {
+			$e = OnboardingService::cleanEmail($m->email);
 			if ($e !== '' && strpos($e, '@') !== false) {
 				$out[$e] = $e;
 			}
@@ -109,24 +159,118 @@ class OnboardingPurchase
 	}
 
 	/**
-	 * @return string Treasurer's email, lower case, or empty
+	 * @return string[] Treasurers' emails (normally one)
 	 */
-	public function treasurer()
+	public function treasurers()
 	{
-		$e = self::emails(getDolGlobalString('ONBOARDING_PURCHASE_TREASURER_EMAIL'));
-		return $e ? $e[0] : '';
+		return $this->roleEmails(array(self::ROLE_TREASURER));
 	}
 
 	/**
-	 * @return string[] The treasurer and the other directors who may approve, lower case
+	 * @return string[] Everyone on the board who may approve a big request, treasurer included
 	 */
 	public function directors()
 	{
-		$all = self::emails(getDolGlobalString('ONBOARDING_PURCHASE_DIRECTOR_EMAILS'));
-		if ($this->treasurer() !== '') {
-			array_unshift($all, $this->treasurer());
+		return $this->roleEmails(self::BOARD_ROLES);
+	}
+
+	/**
+	 * @param string $zone Zone
+	 * @return object[] Its bosses
+	 */
+	public function leadsOf($zone)
+	{
+		return $this->roleMembers(array(self::bossRole($zone)));
+	}
+
+	/**
+	 * Make the role tags, under a Roles tag, so they only have to be given out.
+	 *
+	 * @return string Summary
+	 */
+	public function installRoleTags()
+	{
+		if (!isModEnabled('categorie')) {
+			return 'Tags (the Categories module) are turned off, so roles cannot be tagged.';
 		}
-		return array_values(array_unique($all));
+		require_once DOL_DOCUMENT_ROOT.'/categories/class/categorie.class.php';
+		$parent = $this->ensureTag(self::ROLES_PARENT, 0, 'Who holds which role. Tag a member with a role to give it to them; remove the tag to take it away.');
+		if (!$parent) {
+			return 'The Roles tag could not be created.';
+		}
+		$labels = self::BOARD_ROLES;
+		foreach ($this->training->zones() as $z) {
+			$labels[] = self::bossRole($z);
+		}
+		$made = 0;
+		foreach ($labels as $label) {
+			$cat = new Categorie($this->db);
+			if ($cat->fetch(0, $label, Categorie::TYPE_MEMBER) <= 0) {
+				if ($this->ensureTag($label, (int) $parent->id, 'Role: '.$label)) {
+					$made++;
+				}
+			}
+		}
+		return $made.' role tags created, '.(count($labels) - $made).' already there.';
+	}
+
+	/**
+	 * @param string $label Tag label
+	 * @param int $parentId Parent tag, 0 for none
+	 * @param string $description Description for a new tag
+	 * @return Categorie|null Found or created member tag
+	 */
+	private function ensureTag($label, $parentId, $description)
+	{
+		$cat = new Categorie($this->db);
+		if ($cat->fetch(0, $label, Categorie::TYPE_MEMBER) > 0) {
+			return $cat;
+		}
+		$cat = new Categorie($this->db);
+		$cat->label = $label;
+		$cat->type = Categorie::TYPE_MEMBER;
+		$cat->fk_parent = $parentId;
+		$cat->description = $description;
+		$cat->visible = 0;
+		if ($cat->create($this->svc->actor()) <= 0) {
+			dol_syslog('Onboarding: could not create tag '.$label.': '.$cat->error, LOG_ERR);
+			return null;
+		}
+		return $cat;
+	}
+
+	/**
+	 * For the setup page: every role, what it does, and who holds it right now.
+	 *
+	 * @return array<int,array{role:string,what:string,holders:array<int,array{name:string,email:string,code:bool}>}>
+	 */
+	public function roleTable()
+	{
+		$what = array(
+			'president' => 'Files for any zone or the General fund. Approves big requests as a director.',
+			'vice-president' => 'Approves big requests as a director.',
+			'secretary' => 'Approves big requests as a director.',
+			'treasurer' => 'Files for any zone or the General fund. Approves big requests, and is told when one is ready to pay.',
+			'director' => 'Any other director who may approve big requests.',
+		);
+		$roles = array();
+		foreach (self::BOARD_ROLES as $r) {
+			$roles[$r] = $what[$r];
+		}
+		foreach ($this->training->zones() as $z) {
+			$roles[self::bossRole($z)] = 'Files for '.$z.' only, and decides its small requests.';
+		}
+		$held = array();
+		foreach ($this->roleMembers(array_keys($roles)) as $m) {
+			foreach ($m->roles as $r) {
+				$held[$r][] = array('name' => trim($m->firstname.' '.$m->lastname), 'email' => (string) $m->email, 'code' => self::codeDigits($m->member_code) !== '');
+			}
+		}
+		$out = array();
+		foreach ($roles as $role => $text) {
+			$out[] = array('role' => $role, 'what' => $text, 'holders' => isset($held[$role]) ? $held[$role] : array());
+		}
+		return $out;
 	}
 
 	// ---------------------------------------------------------------- who is asking
@@ -197,19 +341,6 @@ class OnboardingPurchase
 	public static function money($n)
 	{
 		return '$'.number_format((float) $n, 2);
-	}
-
-	/**
-	 * @param string $name First and last name, or an email address
-	 * @return object|null
-	 */
-	public function memberByNameOrEmail($name)
-	{
-		$name = trim((string) $name);
-		if (strpos($name, '@') !== false) {
-			return $this->memberByEmail($name);
-		}
-		return $this->memberWhere("LOWER(CONCAT(a.firstname, ' ', a.lastname)) = '".$this->db->escape(strtolower(preg_replace('/\s+/', ' ', $name)))."'");
 	}
 
 	/**
@@ -289,28 +420,6 @@ class OnboardingPurchase
 	// ---------------------------------------------------------------- zones and money
 
 	/**
-	 * @return array<string,object|null> Zone name => its lead's member row
-	 */
-	public function zoneLeads()
-	{
-		$text = getDolGlobalString('ONBOARDING_PURCHASE_ZONE_LEADS');
-		if (trim($text) === '') {
-			$text = self::DEFAULT_LEADS;
-		}
-		$out = array();
-		foreach (preg_split('/\r\n|\r|\n/', $text) as $line) {
-			if (strpos($line, '=') === false) {
-				continue;
-			}
-			list($zone, $who) = array_map('trim', explode('=', $line, 2));
-			if ($zone !== '' && $who !== '') {
-				$out[$zone] = $this->memberByNameOrEmail($who);
-			}
-		}
-		return $out;
-	}
-
-	/**
 	 * @return string[] Every zone, then the General fund: what a request can name
 	 */
 	public function zoneNames()
@@ -319,30 +428,16 @@ class OnboardingPurchase
 	}
 
 	/**
-	 * @return int[] Members who may file for any zone or the General fund: the people
-	 *               named in the "any zone" setting (the president and treasurer) and
-	 *               whoever has the treasurer's email.
+	 * @return int[] Members who may file for any zone or the General fund: whoever holds
+	 *               the president or treasurer tag
 	 */
 	public function anyZoneMembers()
 	{
-		$text = getDolGlobalString('ONBOARDING_PURCHASE_ANY_ZONE');
-		if (trim($text) === '') {
-			$text = self::DEFAULT_ANY_ZONE;
-		}
 		$ids = array();
-		foreach (preg_split('/\r\n|\r|\n|;/', $text) as $who) {
-			$m = trim($who) !== '' ? $this->memberByNameOrEmail($who) : null;
-			if ($m) {
-				$ids[(int) $m->rowid] = true;
-			}
+		foreach ($this->roleMembers(array(self::ROLE_PRESIDENT, self::ROLE_TREASURER)) as $m) {
+			$ids[] = (int) $m->rowid;
 		}
-		if ($this->treasurer() !== '') {
-			$m = $this->memberByEmail($this->treasurer());
-			if ($m) {
-				$ids[(int) $m->rowid] = true;
-			}
-		}
-		return array_keys($ids);
+		return $ids;
 	}
 
 	/**
@@ -358,9 +453,11 @@ class OnboardingPurchase
 			return $this->zoneNames();
 		}
 		$own = array();
-		foreach ($this->zoneLeads() as $zone => $lead) {
-			if ($lead && (int) $lead->rowid === (int) $m->rowid) {
-				$own[] = $zone;
+		foreach ($this->training->zones() as $zone) {
+			foreach ($this->leadsOf($zone) as $lead) {
+				if ((int) $lead->rowid === (int) $m->rowid) {
+					$own[] = $zone;
+				}
 			}
 		}
 		return $own;
@@ -623,12 +720,17 @@ class OnboardingPurchase
 			return array('ok' => false, 'error' => 'receipt', 'http' => 400);
 		}
 		$member = $this->memberById((int) $row->fk_adherent);
-		$leads = $this->zoneLeads();
-		$lead = isset($leads[$row->zone]) ? $leads[$row->zone] : null;
+		$leads = $this->leadsOf($row->zone);
+		$asking = false;
+		foreach ($leads as $lead) {
+			if ($member && (int) $lead->rowid === (int) $member->rowid) {
+				$asking = true;
+			}
+		}
 		$board = (float) $row->amount > self::leadLimit()
 			|| (float) $row->amount > $this->available($row->zone)
-			|| !$lead
-			|| ($member && $lead && OnboardingService::cleanEmail($lead->email) === OnboardingService::cleanEmail($member->email));
+			|| !$leads
+			|| $asking;
 		$this->save($row->rowid, array('status' => 'pending', 'need_board' => $board ? 1 : 0, 'approvals' => '[]', 'date_submitted' => $this->db->idate(OnboardingService::now())));
 		$row = $this->fetch($row->rowid);
 
@@ -661,14 +763,18 @@ class OnboardingPurchase
 		$own = $member ? OnboardingService::cleanEmail($member->email) : '';
 		$out = array();
 		if (!$row->need_board) {
-			$leads = $this->zoneLeads();
-			$lead = isset($leads[$row->zone]) ? $leads[$row->zone] : null;
-			if ($lead && $lead->email) {
-				$out[] = array('email' => OnboardingService::cleanEmail($lead->email), 'name' => trim($lead->firstname.' '.$lead->lastname), 'role' => 'lead');
+			foreach ($this->leadsOf($row->zone) as $lead) {
+				if ($lead->email) {
+					$out[] = array('email' => OnboardingService::cleanEmail($lead->email), 'name' => trim($lead->firstname.' '.$lead->lastname), 'role' => 'lead');
+				}
 			}
 		} else {
-			foreach ($this->directors() as $e) {
-				$out[] = array('email' => $e, 'name' => $e, 'role' => $e === $this->treasurer() ? 'treasurer' : 'director');
+			$treasurers = $this->treasurers();
+			foreach ($this->roleMembers(self::BOARD_ROLES) as $d) {
+				$e = OnboardingService::cleanEmail($d->email);
+				if ($e !== '') {
+					$out[] = array('email' => $e, 'name' => trim($d->firstname.' '.$d->lastname), 'role' => in_array($e, $treasurers, true) ? 'treasurer' : 'director');
+				}
 			}
 		}
 		return array_values(array_filter($out, function ($a) use ($own) {
@@ -786,17 +892,19 @@ class OnboardingPurchase
 		if ($row->need_board) {
 			// The treasurer and one other director. If the treasurer is the one asking,
 			// any two other directors do.
-			$treasurer = $this->treasurer();
+			$treasurers = $this->treasurers();
 			$own = $member ? OnboardingService::cleanEmail($member->email) : '';
 			$has = array_map(function ($a) {
 				return $a['email'];
 			}, $approvals);
-			$done = count($has) >= 2 && ($treasurer === '' || $treasurer === $own || in_array($treasurer, $has, true));
+			$done = count($has) >= 2 && (!$treasurers || in_array($own, $treasurers, true) || array_intersect($treasurers, $has));
 		}
 		$this->save($row->rowid, array('approvals' => json_encode($approvals), 'status' => $done ? 'approved' : 'pending'));
 		if ($done) {
 			$this->svc->mail($member ? $member->email : '', $row->ref.': approved', "Good news. Your request ".$row->ref." for ".self::money($row->amount)." from the ".$row->zone." budget was approved. ".($row->kind == 'purchase' ? "The treasurer will order it." : "The treasurer will pay you back by ".(isset(self::PAY_METHODS[$row->pay_method]) ? self::PAY_METHODS[$row->pay_method] : 'the method you chose').'.'));
-			$this->svc->mail($this->treasurer(), $row->ref.' is approved, ready to pay', "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from ".$row->zone." is approved. ".($row->kind == 'purchase' ? 'Buy it: '.$row->link : 'Pay '.(isset(self::PAY_METHODS[$row->pay_method]) ? self::PAY_METHODS[$row->pay_method] : '').' '.$row->pay_handle.'.')."\nThen press Mark paid on the Purchase requests page in Dolibarr.");
+			foreach ($this->treasurers() as $tmail) {
+				$this->svc->mail($tmail, $row->ref.' is approved, ready to pay', "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from ".$row->zone." is approved. ".($row->kind == 'purchase' ? 'Buy it: '.$row->link : 'Pay '.(isset(self::PAY_METHODS[$row->pay_method]) ? self::PAY_METHODS[$row->pay_method] : '').' '.$row->pay_handle.'.')."\nThen press Mark paid on the Purchase requests page in Dolibarr.");
+			}
 		}
 		return $done ? 'approved' : 'done';
 	}

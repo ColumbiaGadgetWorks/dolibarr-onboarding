@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.6.0';
+		$this->version = '0.6.1';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
@@ -274,6 +274,10 @@ class modOnboarding extends DolibarrModules
 		}
 		// Members are created by the module with their email as login.
 		OnboardingService::installMemberTypes($this->db, $user);
+		// The role tags (president, treasurer, woodworking-boss and so on) that purchase requests read.
+		dol_include_once('/onboarding/class/purchase.class.php');
+		$purchase = new OnboardingPurchase($this->db);
+		$purchase->installRoleTags();
 
 		return $this->_init(array(), $options);
 	}

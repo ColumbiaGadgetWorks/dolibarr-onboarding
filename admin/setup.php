@@ -56,10 +56,6 @@ $sections = array(
 		'ONBOARDING_MAIL_TRAINED_BODY' => array('Trained email text', 'area', 'Sent to the person who paid. Placeholders: {firstname} {tool} {zone} {trainer} {lookup_url} {org}'),
 	),
 	'Purchase requests' => array(
-		'ONBOARDING_PURCHASE_ANY_ZONE' => array('May file for any zone or the General fund', 'area', 'One per line: member name (as on the member card) or email. Empty means the president and treasurer, as shown here. The treasurer email below is always included. Zone leads may file only for their own zone. Nobody else can file.'),
-		'ONBOARDING_PURCHASE_ZONE_LEADS' => array('Zone leads', 'area', 'One per line: Zone = member name (as on the member card) or email. The lead decides requests from their zone up to the limit below. Empty means the list shown here. Zone names must match the Zones above.'),
-		'ONBOARDING_PURCHASE_TREASURER_EMAIL' => array('Treasurer email', 'text', 'Approves bigger requests and is told when one is ready to pay. Needs no Dolibarr login to approve.'),
-		'ONBOARDING_PURCHASE_DIRECTOR_EMAILS' => array('Other directors email addresses', 'area', 'Comma or line separated. Any one of them, with the treasurer, approves a request the zone lead cannot. Nobody approves their own request.'),
 		'ONBOARDING_PURCHASE_LEAD_LIMIT' => array('Zone lead limit', 'text', 'Largest request a zone lead may approve alone, in dollars.'),
 		'ONBOARDING_PURCHASE_RECEIPT_DAYS' => array('Receipt within (days)', 'text', 'A reimbursement must be filed within this many days of buying. Keeps reimbursements tax free for the member under the IRS accountable plan rules.'),
 	),
@@ -110,9 +106,12 @@ if ($action == 'save') {
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
-if ($action == 'runsync' || $action == 'rundaily' || $action == 'connect') {
+if ($action == 'runsync' || $action == 'rundaily' || $action == 'connect' || $action == 'roletags') {
 	if ($action == 'connect') {
 		$out = $svc->connectGivebutter();
+	} elseif ($action == 'roletags') {
+		dol_include_once('/onboarding/class/purchase.class.php');
+		$out = (new OnboardingPurchase($db, $svc))->installRoleTags();
 	} else {
 		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->cleanup();
 	}
@@ -136,6 +135,22 @@ print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import.php
 print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import-emails.php', 1).'">Import email list</a>';
 print '</div>';
 
+dol_include_once('/onboarding/class/purchase.class.php');
+$purchase = new OnboardingPurchase($db, $svc);
+print '<br><table class="noborder centpercent">';
+print '<tr class="liste_titre"><td colspan="3">Purchase request roles</td></tr>';
+print '<tr class="oddeven"><td colspan="3">Give someone a role by tagging their member card: open the member, go to the Tags/Categories tab and tick the role. The role follows the tag, so its email and member code come from that card, and moving the tag when the job changes hands moves everything. Zones come from the Zones setting below; a zone with no boss sends its requests to the board. ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=roletags&token='.newToken().'">Create the role tags</a></td></tr>';
+print '<tr class="liste_titre"><td>Tag</td><td>What it does</td><td>Held by now</td></tr>';
+foreach ($purchase->roleTable() as $r) {
+	$who = array();
+	foreach ($r['holders'] as $h) {
+		$who[] = dol_escape_htmltag($h['name']).' <span class="opacitymedium">('.dol_escape_htmltag($h['email']).')</span>'.($h['code'] ? '' : ' <span class="warning">no member code, cannot file</span>');
+	}
+	print '<tr class="oddeven"><td><code>'.dol_escape_htmltag($r['role']).'</code></td><td>'.dol_escape_htmltag($r['what']).'</td><td>'.($who ? implode('<br>', $who) : '<span class="opacitymedium">nobody</span>').'</td></tr>';
+}
+print '</table>';
+
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="save">';
@@ -147,14 +162,6 @@ foreach ($sections as $title => $fields) {
 		print '<tr class="oddeven"><td class="titlefield tdtop">'.dol_escape_htmltag($def[0]).'</td><td>';
 		if ($def[1] == 'area') {
 			$shown = $value;
-			if ($name == 'ONBOARDING_PURCHASE_ANY_ZONE' && trim($value) === '') {
-				dol_include_once('/onboarding/class/purchase.class.php');
-				$shown = OnboardingPurchase::DEFAULT_ANY_ZONE;
-			}
-			if ($name == 'ONBOARDING_PURCHASE_ZONE_LEADS' && trim($value) === '') {
-				dol_include_once('/onboarding/class/purchase.class.php');
-				$shown = OnboardingPurchase::DEFAULT_LEADS;
-			}
 			if ($name == 'ONBOARDING_WAIVER_TEXT' && $value === '') {
 				$shown = $docs['waiver']['text'];
 			}

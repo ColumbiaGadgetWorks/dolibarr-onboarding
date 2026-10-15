@@ -11,7 +11,7 @@
  *   php tick.php training link TRAINING REGISTRATION | expire
  *   php tick.php deadlines 8     run deadline reminders as if it were 8 days from now
  *   php tick.php deadline setup STAMP | task JSON | link TASK USER | show TASK | find LABEL
- *   php tick.php purchase const NAME VALUE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
+ *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -179,6 +179,21 @@ if ($job == 'daily') {
 		$adh->validate($user);
 		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = '".$db->idate(dol_now() + 365 * 86400)."' WHERE rowid = ".((int) $id));
 		echo $id."\n";
+	} elseif ($what == 'roletags') {
+		echo $pu->installRoleTags()."\n";
+	} elseif ($what == 'tag' || $what == 'untag') {
+		// tag|untag EMAIL ROLE: give a member a role, or take it away
+		require_once DOL_DOCUMENT_ROOT.'/categories/class/categorie.class.php';
+		$pu->installRoleTags();
+		$m = $pu->memberByEmail($argv[3]);
+		$cat = new Categorie($db);
+		if (!$m || $cat->fetch(0, $argv[4], Categorie::TYPE_MEMBER) <= 0) {
+			fwrite(STDERR, 'no such member or role: '.$argv[3].' '.$argv[4]."\n");
+			exit(1);
+		}
+		$adh = new Adherent($db);
+		$adh->fetch((int) $m->rowid);
+		echo ($what == 'tag' ? $cat->add_type($adh, Categorie::TYPE_MEMBER) : $cat->del_type($adh, Categorie::TYPE_MEMBER))."\n";
 	} elseif ($what == 'budget') {
 		echo ($pu->training->post('zone', $argv[3], (float) $argv[4], 'allocation', 0, 'test budget', 0, (int) $user->id) ? 'ok' : 'failed')."\n";
 	} elseif ($what == 'bank') {

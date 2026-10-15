@@ -73,12 +73,16 @@ sh('member', pres, 'CGW-05', 'Pres', `Asker${ts}`);
 sh('member', lockee, 'CGW-52', 'Lock', `Ee${ts}`);
 sh('member', boss, 'CGW-06', 'Bo', `Boss${ts}`);
 sh('member', plain, 'CGW-60', 'Pat', `Plain${ts}`);
-// pres is the president: may file for any zone and the General fund. boss leads
-// Crafting only. plain is a paying member who is nobody's lead.
-sh('const', 'ONBOARDING_PURCHASE_ANY_ZONE', pres);
-sh('const', 'ONBOARDING_PURCHASE_ZONE_LEADS', `Woodworking = ${leadEmail}\nCrafting = ${boss}`);
-sh('const', 'ONBOARDING_PURCHASE_TREASURER_EMAIL', treasurer);
-sh('const', 'ONBOARDING_PURCHASE_DIRECTOR_EMAILS', `${dir1}, ${dir2}`);
+sh('member', treasurer, 'CGW-70', 'Tess', `Treasurer${ts}`);
+sh('member', dir1, 'CGW-71', 'Vic', `VicePres${ts}`);
+sh('member', dir2, 'CGW-72', 'Dee', `Director${ts}`);
+// Roles are tags on member cards. pres is the president: may file for any zone and the
+// General fund. boss leads Crafting only, lead leads Woodworking. plain is a paying
+// member with no role. The module reads emails and codes from the cards.
+console.log(sh('roletags'));
+for (const [who, role] of [[pres, 'president'], [treasurer, 'treasurer'], [dir1, 'vice-president'], [dir2, 'director'], [leadEmail, 'woodworking-boss'], [boss, 'crafting-boss']]) {
+  sh('tag', who, role);
+}
 const bank = Number(sh('bank', `Sandbox Card ${ts}`));
 assert.ok(bank > 0, `bank account created: ${bank}`);
 
@@ -284,6 +288,28 @@ await press(r7.id, treasurer, 'approve');
 assert.equal(show(r7.id).status, 'approved');
 assert.match(sh('pay', String(r7.id), String(bank)), /marked paid/);
 assert.ok(!(await zones()).some((z) => z.zone === 'General fund'), 'the General fund is not a zone budget');
+
+step('roles follow the tag: move the Woodworking boss tag and the new person gets everything');
+const newlead = `newlead-${ts}@example.test`;
+sh('member', newlead, 'CGW-80', 'Nia', `NewLead${ts}`);
+sh('untag', leadEmail, 'woodworking-boss');
+sh('tag', newlead, 'woodworking-boss');
+const oldBoss = await ask({ email: leadEmail, pin: '41', zone: 'Woodworking' });
+assert.equal(oldBoss.error, 'notallowed', 'the old boss can no longer file for the zone');
+assert.deepEqual(oldBoss.allowed, [], 'and has no other zone');
+const newBoss = await ask({ email: newlead, pin: '80', zone: 'Woodworking', amount: 15, vendor: 'Lowes', description: 'Screws' });
+assert.equal(newBoss.ok, true, 'the new boss can');
+const r8 = await ask({ amount: 12, vendor: 'Lowes', description: 'Washers' });
+await receipt(r8);
+assert.equal((await finish(r8)).needs, 'lead');
+assert.ok(await heard(newlead, `Please decide: ${r8.ref}`), 'a small Woodworking request now goes to the new boss');
+assert.ok(!(await heard(leadEmail, `Please decide: ${r8.ref}`)), 'and not to the old one');
+await press(r8.id, leadEmail, 'approve', 403);
+assert.equal(show(r8.id).status, 'pending', 'the old boss cannot approve it either');
+assert.match(await press(r8.id, newlead, 'approve'), /fully approved/);
+
+step('PayPal is not a way to be paid back');
+assert.equal((await ask({ pay_method: 'paypal', pay_handle: 'a@b.test' })).field, 'pay_method');
 
 step('guessing: five wrong tries lock an email for the day, even for the right code');
 for (let i = 0; i < 5; i++) {

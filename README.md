@@ -197,8 +197,8 @@ entered it.
 
 Zone leads, the president and the treasurer ask to spend from a zone's budget, or from the
 **General fund**, on the website's **/budget** page. The form makes them pick the zone. The
-president and treasurer (the people in the setup page's "may file for any zone" list, plus
-whoever has the treasurer's email) can file for any zone or the General fund; a zone lead
+president and treasurer (whoever holds those role tags, see below) can file for any zone or
+the General fund; a zone boss
 can file only for their own zone and is told which one it is if they try another; every
 other member is turned away. The General fund has no budget to check, so a request for it
 always needs the treasurer and one other director, and paying it spends no zone's budget.
@@ -206,7 +206,7 @@ Two kinds of request, and only two:
 
 - **Reimburse me**: already bought. At least one receipt (PDF, JPG, PNG, WEBP or HEIC, up
   to 5 files of 5 MB) is required, the purchase must be within 60 days (setting), and the
-  member says how to be paid (Venmo, PayPal or check).
+  member says how to be paid (Venmo or check).
 - **Request for purchase**: the treasurer buys it. It needs a web link and the total price.
 
 The member proves who they are with the email on their member card and the two digits of
@@ -225,9 +225,17 @@ shows the request, a button decides):
   themselves: the **treasurer and one other director** (if the treasurer is the one asking,
   any two other directors). Nobody ever approves their own request.
 
-Set the zone leads (one `Zone = Name or email` line each), the treasurer's email and the
-other directors' emails on the setup page, under Purchase requests. The zone leads default to
-the current six. Approved requests wait under Members, Onboarding, **Purchase requests**,
+**Roles are tags on member cards**, so nobody is hard-coded. Open a member, go to the
+Tags/Categories tab and tick the role: `president`, `vice-president`, `secretary`, `treasurer`
+or `director` for the board, and `<zone>-boss` for a zone, in lower case with hyphens
+(`woodworking-boss`, `digital-fab-boss`, `crafting-boss`). The module reads who holds each tag
+every time, taking their email and member code from their card, so when a job changes hands you
+move the tag and everything follows: the new person gets the approval emails and may file, the
+old one stops. Several people may hold a role. The setup page lists every role tag with who
+holds it right now, flags a holder with no member code, and has a **Create the role tags**
+button (enabling the module also creates them). Only validated members count. A zone with no
+boss sends its requests to the board; if nobody holds `treasurer`, any two directors approve.
+The board is everyone tagged with a board role. Approved requests wait under Members, Onboarding, **Purchase requests**,
 where the treasurer presses **Mark paid** and chooses the account it was paid from. That puts
 the money out of that Dolibarr bank account (a bank line linked to the member) and out of the
 zone's budget, both naming the request. Until then an approved or waiting request counts as
