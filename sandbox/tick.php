@@ -192,7 +192,11 @@ if ($job == 'daily') {
 		$a->country_id = 1;
 		$a->date_solde = dol_now();
 		$a->solde = 0;
-		echo $a->create($user)."\n";
+		$made = $a->create($user);
+		if ($made <= 0) {
+			fwrite(STDERR, 'bank create failed: '.$a->error.' '.implode('; ', (array) $a->errors)."\n");
+		}
+		echo $made."\n";
 	} elseif ($what == 'pay') {
 		echo $pu->markPaid((int) $argv[3], (int) $argv[4], $user)."\n";
 	} elseif ($what == 'link') {

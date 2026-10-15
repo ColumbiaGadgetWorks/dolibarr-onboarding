@@ -56,6 +56,7 @@ $sections = array(
 		'ONBOARDING_MAIL_TRAINED_BODY' => array('Trained email text', 'area', 'Sent to the person who paid. Placeholders: {firstname} {tool} {zone} {trainer} {lookup_url} {org}'),
 	),
 	'Purchase requests' => array(
+		'ONBOARDING_PURCHASE_ANY_ZONE' => array('May file for any zone or the General fund', 'area', 'One per line: member name (as on the member card) or email. Empty means the president and treasurer, as shown here. The treasurer email below is always included. Zone leads may file only for their own zone. Nobody else can file.'),
 		'ONBOARDING_PURCHASE_ZONE_LEADS' => array('Zone leads', 'area', 'One per line: Zone = member name (as on the member card) or email. The lead decides requests from their zone up to the limit below. Empty means the list shown here. Zone names must match the Zones above.'),
 		'ONBOARDING_PURCHASE_TREASURER_EMAIL' => array('Treasurer email', 'text', 'Approves bigger requests and is told when one is ready to pay. Needs no Dolibarr login to approve.'),
 		'ONBOARDING_PURCHASE_DIRECTOR_EMAILS' => array('Other directors email addresses', 'area', 'Comma or line separated. Any one of them, with the treasurer, approves a request the zone lead cannot. Nobody approves their own request.'),
@@ -146,6 +147,10 @@ foreach ($sections as $title => $fields) {
 		print '<tr class="oddeven"><td class="titlefield tdtop">'.dol_escape_htmltag($def[0]).'</td><td>';
 		if ($def[1] == 'area') {
 			$shown = $value;
+			if ($name == 'ONBOARDING_PURCHASE_ANY_ZONE' && trim($value) === '') {
+				dol_include_once('/onboarding/class/purchase.class.php');
+				$shown = OnboardingPurchase::DEFAULT_ANY_ZONE;
+			}
 			if ($name == 'ONBOARDING_PURCHASE_ZONE_LEADS' && trim($value) === '') {
 				dol_include_once('/onboarding/class/purchase.class.php');
 				$shown = OnboardingPurchase::DEFAULT_LEADS;

@@ -195,8 +195,14 @@ entered it.
 
 ### Purchase requests
 
-Members ask to spend a zone's budget on the website's **/budget** page. Two kinds of
-request, and only two:
+Zone leads, the president and the treasurer ask to spend from a zone's budget, or from the
+**General fund**, on the website's **/budget** page. The form makes them pick the zone. The
+president and treasurer (the people in the setup page's "may file for any zone" list, plus
+whoever has the treasurer's email) can file for any zone or the General fund; a zone lead
+can file only for their own zone and is told which one it is if they try another; every
+other member is turned away. The General fund has no budget to check, so a request for it
+always needs the treasurer and one other director, and paying it spends no zone's budget.
+Two kinds of request, and only two:
 
 - **Reimburse me**: already bought. At least one receipt (PDF, JPG, PNG, WEBP or HEIC, up
   to 5 files of 5 MB) is required, the purchase must be within 60 days (setting), and the

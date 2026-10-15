@@ -18,6 +18,9 @@ dol_include_once('/onboarding/class/training.class.php');
  * and a locked email stays locked for a day. Nothing is paid without a person
  * approving it and the treasurer pressing Mark paid.
  *
+ * Who may file: the president and treasurer for any zone or the General fund, a zone
+ * lead for their own zone, nobody else (see allowedZones).
+ *
  * Who approves: the zone lead, up to the lead limit and while the zone has the
  * money. Anything bigger, over budget, from a zone with no lead, or from the lead
  * themselves needs the treasurer and one other director. Nobody approves their own.
@@ -32,7 +35,11 @@ class OnboardingPurchase
 	const BAD_EMAIL_LIMIT = 5;
 	const BAD_IP_LIMIT = 20;
 	const BAD_ALL_LIMIT = 100;
-	const DEFAULT_LEADS = "Woodworking = Peter Tipton\nMachining = Jeff Thiele\nMetalworking = Jim Fieser\nDigital Fab = Will Smith\nCrafting = Madison Pawlicsak\nElectronics = Isaiah Davis-Stober";
+	// Not a zone: money the organization keeps for itself. Anyone allowed to file for
+	// any zone may file for it, it has no budget to check, and it always needs the board.
+	const GENERAL = 'General fund';
+	const DEFAULT_ANY_ZONE = "Adam Brown\nDavid Kotval";
+	const DEFAULT_LEADS ="Woodworking = Peter Tipton\nMachining = Jeff Thiele\nMetalworking = Jim Fieser\nDigital Fab = Will Smith\nCrafting = Madison Pawlicsak\nElectronics = Isaiah Davis-Stober";
 
 	/** @var DoliDB */
 	public $db;
@@ -304,6 +311,62 @@ class OnboardingPurchase
 	}
 
 	/**
+	 * @return string[] Every zone, then the General fund: what a request can name
+	 */
+	public function zoneNames()
+	{
+		return array_merge($this->training->zones(), array(self::GENERAL));
+	}
+
+	/**
+	 * @return int[] Members who may file for any zone or the General fund: the people
+	 *               named in the "any zone" setting (the president and treasurer) and
+	 *               whoever has the treasurer's email.
+	 */
+	public function anyZoneMembers()
+	{
+		$text = getDolGlobalString('ONBOARDING_PURCHASE_ANY_ZONE');
+		if (trim($text) === '') {
+			$text = self::DEFAULT_ANY_ZONE;
+		}
+		$ids = array();
+		foreach (preg_split('/\r\n|\r|\n|;/', $text) as $who) {
+			$m = trim($who) !== '' ? $this->memberByNameOrEmail($who) : null;
+			if ($m) {
+				$ids[(int) $m->rowid] = true;
+			}
+		}
+		if ($this->treasurer() !== '') {
+			$m = $this->memberByEmail($this->treasurer());
+			if ($m) {
+				$ids[(int) $m->rowid] = true;
+			}
+		}
+		return array_keys($ids);
+	}
+
+	/**
+	 * What this member may file for: the president and treasurer, any zone and the
+	 * General fund; a zone lead, only their own zone; everyone else, nothing.
+	 *
+	 * @param object $m Member row
+	 * @return string[] Zone names
+	 */
+	public function allowedZones($m)
+	{
+		if (in_array((int) $m->rowid, $this->anyZoneMembers(), true)) {
+			return $this->zoneNames();
+		}
+		$own = array();
+		foreach ($this->zoneLeads() as $zone => $lead) {
+			if ($lead && (int) $lead->rowid === (int) $m->rowid) {
+				$own[] = $zone;
+			}
+		}
+		return $own;
+	}
+
+	/**
 	 * @param string $zone Zone
 	 * @return float Requests approved or waiting, not yet paid
 	 */
@@ -411,7 +474,7 @@ class OnboardingPurchase
 		if (!isset(self::KINDS[$kind])) {
 			return $bad('kind');
 		}
-		if (!in_array($zone, $this->training->zones(), true)) {
+		if (!in_array($zone, $this->zoneNames(), true)) {
 			return $bad('zone');
 		}
 		if ($amount <= 0 || $amount > self::MAX_AMOUNT) {
@@ -463,6 +526,12 @@ class OnboardingPurchase
 			$this->recordFailure($email, $ip);
 			// One answer for every reason, so the form cannot be used to find out who is a member.
 			return array('ok' => false, 'error' => 'member', 'http' => 403);
+		}
+		// Proved who they are. Now: may they file for this zone? Only now is it safe to say
+		// which zones they may use, because they are who they say.
+		$allowed = $this->allowedZones($m);
+		if (!in_array($zone, $allowed, true)) {
+			return array('ok' => false, 'error' => 'notallowed', 'allowed' => $allowed, 'http' => 403);
 		}
 
 		$token = bin2hex(random_bytes(24));
@@ -765,7 +834,9 @@ class OnboardingPurchase
 		if ($member) {
 			$acc->add_url_line($line, (int) $member->rowid, DOL_URL_ROOT.'/adherents/card.php?rowid=', $who, 'member');
 		}
-		$this->training->post('zone', $row->zone, -abs((float) $row->amount), 'spend', 0, $row->ref.' '.($row->vendor !== '' ? $row->vendor : 'purchase').($who !== '' ? ' ('.$who.')' : ''), 0, (int) $user->id);
+		if ($row->zone !== self::GENERAL) {
+			$this->training->post('zone', $row->zone, -abs((float) $row->amount), 'spend', 0, $row->ref.' '.($row->vendor !== '' ? $row->vendor : 'purchase').($who !== '' ? ' ('.$who.')' : ''), 0, (int) $user->id);
+		}
 		$this->save($row->rowid, array('status' => 'paid', 'fk_bank_line' => (int) $line, 'paid_from' => $acc->label, 'paid_at' => $this->db->idate(OnboardingService::now()), 'fk_user_paid' => (int) $user->id));
 		$this->svc->mail($member ? $member->email : '', $row->ref.': paid', "Your request ".$row->ref." for ".self::money($row->amount)." was paid from ".$acc->label.". Thank you.");
 		return $row->ref.' marked paid: '.self::money($row->amount).' out of '.$acc->label.' and the '.$row->zone.' budget.';

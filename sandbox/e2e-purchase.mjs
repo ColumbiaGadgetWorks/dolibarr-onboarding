@@ -58,7 +58,9 @@ const step = (name) => console.log(`\n== ${name}`);
 const day = (offset) => new Date(Date.now() + offset * 86400e3).toISOString().slice(0, 10);
 
 const leadEmail = `lead-${ts}@example.test`;
-const rita = `rita-${ts}@example.test`;
+const pres = `pres-${ts}@example.test`;
+const boss = `boss-${ts}@example.test`;
+const plain = `plain-${ts}@example.test`;
 const lockee = `locked-${ts}@example.test`;
 const treasurer = `treasurer-${ts}@example.test`;
 const dir1 = `director1-${ts}@example.test`;
@@ -67,9 +69,14 @@ const IP = '198.51.100.7';
 
 step('setup: members, zone leads, approvers, a bank account');
 sh('member', leadEmail, 'CGW-41', 'Lena', `Lead${ts}`);
-sh('member', rita, 'CGW-05', 'Rita', `Asker${ts}`);
+sh('member', pres, 'CGW-05', 'Pres', `Asker${ts}`);
 sh('member', lockee, 'CGW-52', 'Lock', `Ee${ts}`);
-sh('const', 'ONBOARDING_PURCHASE_ZONE_LEADS', `Woodworking = ${leadEmail}\nCrafting = ${rita}`);
+sh('member', boss, 'CGW-06', 'Bo', `Boss${ts}`);
+sh('member', plain, 'CGW-60', 'Pat', `Plain${ts}`);
+// pres is the president: may file for any zone and the General fund. boss leads
+// Crafting only. plain is a paying member who is nobody's lead.
+sh('const', 'ONBOARDING_PURCHASE_ANY_ZONE', pres);
+sh('const', 'ONBOARDING_PURCHASE_ZONE_LEADS', `Woodworking = ${leadEmail}\nCrafting = ${boss}`);
 sh('const', 'ONBOARDING_PURCHASE_TREASURER_EMAIL', treasurer);
 sh('const', 'ONBOARDING_PURCHASE_DIRECTOR_EMAILS', `${dir1}, ${dir2}`);
 const bank = Number(sh('bank', `Sandbox Card ${ts}`));
@@ -79,8 +86,8 @@ const zones = async () => (await api('budget')).zones;
 const zone = async (name) => (await zones()).find((z) => z.zone === name);
 
 const ask = (over = {}) => api('purchase', {
-  email: rita, pin: '05', zone: 'Woodworking', kind: 'reimburse', amount: 40, vendor: 'Home Depot',
-  purchase_date: day(-1), description: 'Clamps for the bench', pay_method: 'venmo', pay_handle: '@rita', ack_tax: true, ip: IP, ...over,
+  email: pres, pin: '05', zone: 'Woodworking', kind: 'reimburse', amount: 40, vendor: 'Home Depot',
+  purchase_date: day(-1), description: 'Clamps for the bench', pay_method: 'venmo', pay_handle: '@pres', ack_tax: true, ip: IP, ...over,
 });
 const receipt = (r, data = png().toString('base64')) => api('purchasefile', { id: r.id, token: r.token, data });
 const finish = (r) => api('purchasefinish', { id: r.id, token: r.token });
@@ -103,7 +110,7 @@ const w1 = await zone('Woodworking');
 assert.equal(Math.round((w1.available - w0.available) * 100), 25000, 'budget added shows as available');
 assert.equal(w1.committed, w0.committed);
 const raw = JSON.stringify(await api('budget'));
-assert.ok(!raw.includes('@') && !raw.includes(`Lead${ts}`) && !raw.includes('Rita'), 'no names or emails');
+assert.ok(!raw.includes('@') && !raw.includes(`Lead${ts}`) && !raw.includes('Pres'), 'no names or emails');
 assert.equal((await api('budget').then((r) => r.status)), 200);
 
 step('wrong key is refused');
@@ -137,6 +144,20 @@ for (const r of [wrongPin, unknown, noPin]) {
 }
 assert.deepEqual(Object.keys(wrongPin).sort(), Object.keys(unknown).sort(), 'the answers look the same');
 
+step('who may file for what: the president any zone, a zone boss only their own, nobody else');
+const denied = await ask({ email: boss, pin: '06', zone: 'Woodworking' });
+assert.equal(denied.status, 403);
+assert.equal(denied.error, 'notallowed');
+assert.deepEqual(denied.allowed, ['Crafting'], 'a boss is told which zone is theirs');
+const generalDenied = await ask({ email: boss, pin: '06', zone: 'General fund' });
+assert.equal(generalDenied.error, 'notallowed', 'a boss cannot file for the General fund');
+const nobody = await ask({ email: plain, pin: '60' });
+assert.equal(nobody.error, 'notallowed', 'a paying member who leads no zone cannot file');
+assert.deepEqual(nobody.allowed, []);
+assert.equal((await ask({ email: boss, pin: '06', zone: 'Crafting' })).ok, true, 'a boss can file for their own zone');
+assert.equal((await ask({ zone: 'Machining' })).ok, true, 'the president can file for any zone');
+assert.equal((await ask({ email: plain, pin: '99' })).error, 'member', 'a wrong code is still just "member"');
+
 step('the code can be typed three ways');
 for (const pin of ['05', 'CGW-05', '140405']) {
   const r = await ask({ pin });
@@ -160,7 +181,7 @@ assert.equal(show(r1.id).status, 'pending');
 assert.equal((await finish(r1)).status, 404, 'cannot be submitted twice');
 
 step('the lead and the member are emailed; the budget holds the money back');
-assert.ok(await heard(rita, `${r1.ref}: we have your request`));
+assert.ok(await heard(pres, `${r1.ref}: we have your request`));
 assert.ok(await heard(leadEmail, `Please decide: ${r1.ref}`), 'the lead is asked');
 assert.ok(!(await heard(treasurer, r1.ref)), 'the treasurer is not asked for a small one');
 const w2 = await zone('Woodworking');
@@ -184,7 +205,7 @@ assert.equal((await fetch(receiptUrl.replace(/k=\w+/, 'k=0000'))).status, 403);
 assert.match(await press(r1.id, leadEmail, 'approve'), /fully approved/);
 assert.equal(show(r1.id).status, 'approved');
 assert.match(await press(r1.id, leadEmail, 'approve'), /Already decided/);
-assert.ok(await heard(rita, `${r1.ref}: approved`), 'the member is told');
+assert.ok(await heard(pres, `${r1.ref}: approved`), 'the member is told');
 assert.ok(await heard(treasurer, `${r1.ref} is approved, ready to pay`), 'the treasurer is told to pay');
 
 step('paid: the zone budget is spent and a bank line is made');
@@ -198,7 +219,7 @@ assert.equal(Math.round((w3.spent - w1.spent) * 100), 4000, 'spent');
 assert.equal(w3.committed, w1.committed, 'no longer held back');
 assert.equal(Math.round((w1.available - w3.available) * 100), 4000, 'available stays down by the amount');
 assert.match(sh('pay', String(r1.id), String(bank)), /^Error/, 'cannot be paid twice');
-assert.ok(await heard(rita, `${r1.ref}: paid`));
+assert.ok(await heard(pres, `${r1.ref}: paid`));
 
 step('a big request needs the treasurer and one other director');
 const r2 = await ask({ amount: 150, vendor: 'Rockler', description: 'A router table' });
@@ -225,15 +246,15 @@ await receipt(r3);
 await finish(r3);
 assert.match(await press(r3.id, leadEmail, 'reject'), /rejected/i);
 assert.equal(show(r3.id).status, 'rejected');
-assert.ok(await heard(rita, `${r3.ref}: not approved`));
+assert.ok(await heard(pres, `${r3.ref}: not approved`));
 assert.equal((await zone('Woodworking')).committed, w4.committed, 'a rejected request holds nothing back');
 
 step('a zone lead asking for their own zone, and a zone with no lead, go to the board');
-const r4 = await ask({ zone: 'Crafting', amount: 30, vendor: 'Joann', description: 'Fabric' });
+const r4 = await ask({ email: boss, pin: '06', zone: 'Crafting', amount: 30, vendor: 'Joann', description: 'Fabric', pay_handle: '@boss' });
 await receipt(r4);
 assert.equal((await finish(r4)).needs, 'board', 'nobody approves their own');
-assert.ok(!(await heard(rita, `Please decide: ${r4.ref}`)), 'not sent to the person who asked');
-await press(r4.id, rita, 'approve', 403);
+assert.ok(!(await heard(boss, `Please decide: ${r4.ref}`)), 'not sent to the person who asked');
+await press(r4.id, boss, 'approve', 403);
 assert.equal(show(r4.id).status, 'pending');
 const r5 = await ask({ zone: 'Machining', amount: 10, vendor: 'Grainger', description: 'Drill bits' });
 await receipt(r5);
@@ -250,6 +271,19 @@ assert.equal(p6.kind, 'purchase');
 assert.equal(p6.link, 'https://www.example.com/p/clamps');
 await press(r6.id, leadEmail, 'approve');
 assert.match(sh('pay', String(r6.id), String(bank)), /marked paid/);
+
+step('the General fund: no budget to check, so it always goes to the board, and spends no zone');
+const r7 = await ask({ zone: 'General fund', amount: 25, vendor: 'Staples', description: 'Printer paper' });
+assert.equal(r7.ok, true, JSON.stringify(r7));
+await receipt(r7);
+assert.equal((await finish(r7)).needs, 'board');
+assert.ok(!(await heard(leadEmail, `Please decide: ${r7.ref}`)), 'no zone lead involved');
+await press(r7.id, dir1, 'approve');
+assert.equal(show(r7.id).status, 'pending');
+await press(r7.id, treasurer, 'approve');
+assert.equal(show(r7.id).status, 'approved');
+assert.match(sh('pay', String(r7.id), String(bank)), /marked paid/);
+assert.ok(!(await zones()).some((z) => z.zone === 'General fund'), 'the General fund is not a zone budget');
 
 step('guessing: five wrong tries lock an email for the day, even for the right code');
 for (let i = 0; i < 5; i++) {
