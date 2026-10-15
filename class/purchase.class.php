@@ -130,14 +130,14 @@ class OnboardingPurchase
 			return array();
 		}
 		$p = $this->db->prefix();
-		$res = $this->db->query("SELECT a.rowid, a.firstname, a.lastname, a.email, a.statut, a.datefin, e.member_code, e.dues_waived_until, LOWER(c.label) AS role FROM ".$p."categorie AS c INNER JOIN ".$p."categorie_member AS cm ON cm.fk_categorie = c.rowid INNER JOIN ".$p."adherent AS a ON a.rowid = cm.fk_member LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid WHERE c.type = ".((int) Categorie::TYPE_MEMBER)." AND LOWER(c.label) IN (".implode(',', $in).") AND c.entity IN (".getEntity('category').") AND a.entity IN (".getEntity('adherent').") AND a.statut = 1 ORDER BY a.rowid ASC");
+		$res = $this->db->query("SELECT a.rowid, a.firstname, a.lastname, a.email, a.statut, a.datefin, e.member_code, e.dues_waived_until, LOWER(c.label) AS rolename FROM ".$p."categorie AS c INNER JOIN ".$p."categorie_member AS cm ON cm.fk_categorie = c.rowid INNER JOIN ".$p."adherent AS a ON a.rowid = cm.fk_member LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid WHERE LOWER(c.label) IN (".implode(',', $in).") AND c.entity IN (".getEntity('category').") AND a.entity IN (".getEntity('adherent').") AND a.statut = 1 ORDER BY a.rowid ASC");
 		$out = array();
 		while ($res && ($o = $this->db->fetch_object($res))) {
 			if (!isset($out[(int) $o->rowid])) {
 				$o->roles = array();
 				$out[(int) $o->rowid] = $o;
 			}
-			$out[(int) $o->rowid]->roles[] = (string) $o->role;
+			$out[(int) $o->rowid]->roles[] = (string) $o->rolename;
 		}
 		return array_values($out);
 	}
