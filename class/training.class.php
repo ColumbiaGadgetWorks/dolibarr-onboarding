@@ -98,56 +98,17 @@ class OnboardingTraining
 		return $zone !== '' ? dol_trunc($zone, 100, 'right', 'UTF-8', 1) : 'Unassigned';
 	}
 
-	/**
-	 * The answers to the checkout questions, found by their titles: the one
-	 * mentioning "zone", the one mentioning "trainer", and the one mentioning
-	 * "tool", "equipment" or "machine".
-	 *
-	 * @param array $t Transaction
-	 * @return array{zone:string,trainer:string,tool:string}
-	 */
-	public static function answers($t)
-	{
-		$out = array('zone' => '', 'trainer' => '', 'tool' => '');
-		$fields = isset($t['custom_fields']) && is_array($t['custom_fields']) ? $t['custom_fields'] : array();
-		foreach ($fields as $f) {
-			if (!is_array($f)) {
-				continue;
-			}
-			$title = strtolower((string) (isset($f['title']) ? $f['title'] : (isset($f['name']) ? $f['name'] : '')));
-			$value = isset($f['value']) ? $f['value'] : (isset($f['answer']) ? $f['answer'] : '');
-			if (is_array($value)) {
-				$value = implode(', ', $value);
-			}
-			$value = trim((string) $value);
-			if ($value === '') {
-				continue;
-			}
-			if (strpos($title, 'zone') !== false) {
-				$key = 'zone';
-			} elseif (strpos($title, 'trainer') !== false) {
-				$key = 'trainer';
-			} elseif (preg_match('/tool|equipment|machine/', $title)) {
-				$key = 'tool';
-			} else {
-				continue;
-			}
-			if ($out[$key] === '') {
-				$out[$key] = $value;
-			}
-		}
-		return $out;
-	}
-
 	// ---------------------------------------------------------------- recording
 
 	/**
-	 * Record a training-campaign transaction. Safe to call again for the same one.
+	 * A training-campaign transaction. Safe to call again for the same one.
 	 *
-	 * The tool, zone and trainer come from the registration made on the website
-	 * just before paying, matched by email. Without one they come from the
-	 * Givebutter checkout questions if the campaign still has them; failing that
-	 * the payment waits on the Trainings page for someone to link it.
+	 * Normally it pays for a booking made on the website's booking page, found
+	 * by the email and the amount (see OnboardingBooking::matchPayment); the
+	 * training itself is recorded later, when the trainer says it happened. A
+	 * payment for a registration from the old pay-after-training page is still
+	 * recorded straight away. Anything else waits on the Trainings page for the
+	 * secretary to link it.
 	 *
 	 * @param array $t TransactionResource, already known to be succeeded
 	 * @return string What was done, for the log
@@ -159,22 +120,33 @@ class OnboardingTraining
 		$txid = isset($t['id']) ? (string) $t['id'] : '';
 		$table = $this->db->prefix().'onboarding_training';
 		$res = $this->db->query("SELECT rowid FROM ".$table." WHERE gb_transaction_id = '".$this->db->escape($txid)."' AND entity = ".((int) $conf->entity));
+		if ($txid === '' || ($res && $this->db->fetch_object($res))) {
+			return 'duplicate';
+		}
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_booking WHERE gb_transaction_id = '".$this->db->escape($txid)."' AND entity = ".((int) $conf->entity));
 		if ($res && $this->db->fetch_object($res)) {
 			return 'duplicate';
+		}
+		dol_include_once('/onboarding/class/booking.class.php');
+		$booking = new OnboardingBooking($this->db, $this->svc);
+		$done = $booking->matchPayment($t);
+		if ($done !== '') {
+			return $done;
 		}
 
 		// The gift itself, not a fee the payer chose to cover.
 		$amount = isset($t['donated']) && is_numeric($t['donated']) && (float) $t['donated'] > 0 ? (float) $t['donated'] : (float) (isset($t['amount']) ? $t['amount'] : 0);
+		$net = self::net($t);
 		$email = OnboardingService::cleanEmail(isset($t['email']) ? $t['email'] : '');
 		$when = !empty($t['transacted_at']) ? strtotime((string) $t['transacted_at']) : 0;
 		$trunc = function ($k, $max) use ($t) {
 			return dol_trunc((string) (isset($t[$k]) ? $t[$k] : ''), $max, 'right', 'UTF-8', 1);
 		};
 
-		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, trainer_name, amount, zone_amount, trainer_amount, transacted_at, status, datec) VALUES (";
+		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, trainer_name, amount, amount_net, zone_amount, trainer_amount, transacted_at, status, datec) VALUES (";
 		$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($email)."', '".$this->db->escape($trunc('first_name', 100))."', '".$this->db->escape($trunc('last_name', 100))."', ";
 		$trainee = $this->memberByEmail($email);
-		$sql .= ($trainee ? (int) $trainee : 'NULL').", '', '', '', ".price2num($amount).", 0, 0, ";
+		$sql .= ($trainee ? (int) $trainee : 'NULL').", '', '', '', ".price2num($amount).", ".price2num($net).", 0, 0, ";
 		$sql .= "'".$this->db->idate($when ? $when : OnboardingService::now())."', 'unregistered', '".$this->db->idate(OnboardingService::now())."')";
 		if (!$this->db->query($sql)) {
 			return 'duplicate'; // Lost a race with another delivery.
@@ -182,24 +154,96 @@ class OnboardingTraining
 		$id = (int) $this->db->last_insert_id($table);
 
 		$reg = $this->findRegistration($email, $amount);
-		if (!$reg) {
-			$a = self::answers($t);
-			if ($a['zone'] !== '' || $a['tool'] !== '') {
-				$zone = self::zoneName($a['zone']);
-				$reg = (object) array('rowid' => 0, 'tool' => $a['tool'] !== '' ? $a['tool'] : $zone, 'zone' => $zone, 'trainer_name' => $a['trainer'], 'trainer_member' => '');
-			}
-		}
 		if (!$reg || !$this->apply($id, $reg)) {
-			$this->svc->mail(
-				getDolGlobalString('ONBOARDING_STAFF_EMAIL'),
-				'Training payment without a registration',
-				trim($trunc('first_name', 100).' '.$trunc('last_name', 100)).' <'.$email.'> paid '.price($amount)." for a training, but registered no tool on the website with that email.\n\nLink it to their registration under Members, Onboarding, Trainings.\n".dol_buildpath('/onboarding/trainings.php', 2)
-			);
-			return 'training '.$id.' paid without a registration';
+			$booking->mailTpl('staff_unmatched', $booking->staffEmails(), array(
+				'who' => trim($trunc('first_name', 100).' '.$trunc('last_name', 100)).' <'.$email.'>',
+				'paid' => price($amount),
+				'tx' => $txid,
+				'card' => dol_buildpath('/onboarding/trainings.php', 2),
+			));
+			return 'training '.$id.' paid without a booking';
 		}
 		$res = $this->db->query("SELECT status, trainer_name FROM ".$table." WHERE rowid = ".$id);
 		$row = $res ? $this->db->fetch_object($res) : null;
 		return 'training '.$id.' recorded'.($row && $row->status == 'trainer_unmatched' ? ', trainer "'.$row->trainer_name.'" not matched' : '');
+	}
+
+	/**
+	 * @param array $t TransactionResource
+	 * @return float What arrives after Givebutter's fee
+	 */
+	public static function net($t)
+	{
+		$amount = (float) (isset($t['amount']) ? $t['amount'] : 0);
+		$fee = isset($t['fee']) && is_numeric($t['fee']) ? (float) $t['fee'] : 0;
+		return round(max(0, $amount - $fee), 2);
+	}
+
+	/**
+	 * Write a training row and its ledger shares (used for bookings, free
+	 * trainings and imports).
+	 *
+	 * @param array<string,mixed> $in tx, email, firstname, lastname, fk_adherent, zone, tool, fk_tool, trainer_name, fk_trainer, amount, trainer_amount, zone_amount, when, status, source, fk_booking, free_reason, fk_user
+	 * @return int New training row, 0 on failure
+	 */
+	public function insertRecord($in)
+	{
+		global $conf;
+		$table = $this->db->prefix().'onboarding_training';
+		$get = function ($k, $max) use ($in) {
+			return $this->db->escape(dol_trunc((string) (isset($in[$k]) ? $in[$k] : ''), $max, 'right', 'UTF-8', 1));
+		};
+		$int = function ($k) use ($in) {
+			return !empty($in[$k]) ? (int) $in[$k] : 'NULL';
+		};
+		$trainerAmount = (float) (isset($in['trainer_amount']) ? $in['trainer_amount'] : 0);
+		$zoneAmount = (float) (isset($in['zone_amount']) ? $in['zone_amount'] : 0);
+		$status = isset($in['status']) ? (string) $in['status'] : 'recorded';
+		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, fk_tool, trainer_name, fk_trainer, amount, amount_net, zone_amount, trainer_amount, transacted_at, status, source, fk_booking, free_reason, fk_user, datec) VALUES (";
+		$sql .= ((int) $conf->entity).", '".$get('tx', 64)."', '".$this->db->escape(OnboardingService::cleanEmail(isset($in['email']) ? $in['email'] : ''))."', '".$get('firstname', 100)."', '".$get('lastname', 100)."', ".$int('fk_adherent').", ";
+		$sql .= "'".$get('zone', 100)."', '".$get('tool', 150)."', ".$int('fk_tool').", '".$get('trainer_name', 150)."', ".$int('fk_trainer').", ";
+		$sql .= price2num((float) (isset($in['amount']) ? $in['amount'] : 0)).", ".price2num($trainerAmount + $zoneAmount).", ".price2num($zoneAmount).", ".price2num($trainerAmount).", ";
+		$sql .= "'".$this->db->idate(!empty($in['when']) ? (int) $in['when'] : OnboardingService::now())."', '".$this->db->escape($status)."', '".$get('source', 10)."', ".$int('fk_booking').", ";
+		$sql .= (isset($in['free_reason']) && $in['free_reason'] !== '' ? "'".$get('free_reason', 255)."'" : 'NULL').", ".$int('fk_user').", '".$this->db->idate(OnboardingService::now())."')";
+		if (!$this->db->query($sql)) {
+			dol_syslog('Onboarding: training insert failed: '.$this->db->lasterror(), LOG_ERR);
+			return 0;
+		}
+		$id = (int) $this->db->last_insert_id($table);
+		$tool = isset($in['tool']) ? (string) $in['tool'] : '';
+		$this->post('zone', isset($in['zone']) ? (string) $in['zone'] : '', $zoneAmount, 'training', $id, ($status == 'no_show' ? 'Training fee kept (no-show), ' : 'Training fee, ').$tool);
+		if (!empty($in['fk_trainer'])) {
+			if ($this->post('trainer', (int) $in['fk_trainer'], $trainerAmount, 'training', $id, ($status == 'no_show' ? 'No-show fee: ' : 'Trained ').trim((isset($in['firstname']) ? $in['firstname'] : '').' '.(isset($in['lastname']) ? $in['lastname'] : '')).' on '.$tool)) {
+				$this->checkCredit((int) $in['fk_trainer']);
+			}
+		}
+		return $id;
+	}
+
+	/**
+	 * Give a payment that matched no booking the booking it pays for (the payer
+	 * typed another email at Givebutter, or paid after the seat was let go).
+	 *
+	 * @param int $trainingId Training row with status unregistered
+	 * @param int $bookingId Booking waiting for payment or let go of unpaid
+	 * @return string Result for the page
+	 */
+	public function linkBooking($trainingId, $bookingId)
+	{
+		global $conf;
+		$res = $this->db->query("SELECT * FROM ".$this->db->prefix()."onboarding_training WHERE rowid = ".((int) $trainingId)." AND entity = ".((int) $conf->entity)." AND status = 'unregistered'");
+		$o = $res ? $this->db->fetch_object($res) : null;
+		dol_include_once('/onboarding/class/booking.class.php');
+		$booking = new OnboardingBooking($this->db, $this->svc);
+		$b = $booking->booking($bookingId);
+		if (!$o || !$b || $b->gb_transaction_id || !in_array($b->status, array('held', 'expired'), true)) {
+			return 'Pick a payment without a booking and a booking that is not paid.';
+		}
+		$net = $o->amount_net !== null ? (float) $o->amount_net : (float) $o->amount;
+		// The booking takes over the payment; the placeholder row goes.
+		$this->db->query("DELETE FROM ".$this->db->prefix()."onboarding_training WHERE rowid = ".((int) $o->rowid)." AND status = 'unregistered'");
+		$r = $booking->applyPayment($b, array('id' => $o->gb_transaction_id, 'amount' => (float) $o->amount, 'fee' => (float) $o->amount - $net, 'transacted_at' => gmdate('Y-m-d\TH:i:s\Z', $this->db->jdate($o->transacted_at))));
+		return $r !== '' ? 'Linked: '.$b->ref.' ('.$b->tool.' for '.trim($b->firstname.' '.$b->lastname).') is paid.' : 'That booking was just paid by another payment.';
 	}
 
 	/**
@@ -233,8 +277,10 @@ class OnboardingTraining
 		if (!$trainer) {
 			$trainer = $this->matchTrainer($reg->trainer_name);
 		}
-		$trainerAmount = round((float) $tr->amount * self::trainerShare(), 2);
-		$zoneAmount = round((float) $tr->amount - $trainerAmount, 2);
+		// Split what arrived, after Givebutter's fee.
+		$net = $tr->amount_net !== null ? (float) $tr->amount_net : (float) $tr->amount;
+		$trainerAmount = round($net * self::trainerShare(), 2);
+		$zoneAmount = round($net - $trainerAmount, 2);
 		$tool = dol_trunc((string) $reg->tool, 150, 'right', 'UTF-8', 1);
 		$zone = dol_trunc((string) $reg->zone, 100, 'right', 'UTF-8', 1);
 		$trainerName = dol_trunc((string) $reg->trainer_name, 150, 'right', 'UTF-8', 1);
@@ -486,6 +532,8 @@ class OnboardingTraining
 				}
 			}
 		}
+		dol_include_once('/onboarding/class/booking.class.php');
+		(new OnboardingBooking($this->db, $this->svc))->afterRecord((string) $tr->email, (int) $tr->fk_adherent, (int) $tr->fk_trainer);
 		return true;
 	}
 
@@ -589,8 +637,8 @@ class OnboardingTraining
 	// ---------------------------------------------------------------- zones and the catalog
 
 	/**
-	 * Every zone: the setting's list first, then zones in the website's training
-	 * catalog, then any other zone with ledger entries.
+	 * Every zone: the setting's list first, then the zones of the training
+	 * tools, then any other zone with ledger entries.
 	 *
 	 * @return string[]
 	 */
@@ -598,49 +646,21 @@ class OnboardingTraining
 	{
 		global $conf;
 		$out = array();
-		$catalog = $this->catalog(false);
-		$lists = array(explode(',', getDolGlobalString('ONBOARDING_TRAINING_ZONES', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting')), $catalog ? $catalog['zones'] : array());
-		foreach ($lists as $list) {
-			foreach ($list as $z) {
-				$z = trim((string) $z);
-				if ($z !== '') {
-					$out[$z] = true;
+		foreach (explode(',', getDolGlobalString('ONBOARDING_TRAINING_ZONES', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting')) as $z) {
+			$z = trim((string) $z);
+			if ($z !== '') {
+				$out[$z] = true;
+			}
+		}
+		foreach (array('onboarding_tool' => 'zone', 'onboarding_ledger' => 'account_key') as $table => $col) {
+			$res = $this->db->query("SELECT DISTINCT ".$col." AS z FROM ".$this->db->prefix().$table." WHERE entity = ".((int) $conf->entity).($table == 'onboarding_ledger' ? " AND account_type = 'zone'" : '')." ORDER BY ".$col);
+			while ($res && ($obj = $this->db->fetch_object($res))) {
+				if ((string) $obj->z !== '') {
+					$out[(string) $obj->z] = true;
 				}
 			}
 		}
-		$res = $this->db->query("SELECT DISTINCT account_key AS z FROM ".$this->db->prefix()."onboarding_ledger WHERE entity = ".((int) $conf->entity)." AND account_type = 'zone' ORDER BY account_key");
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$out[(string) $obj->z] = true;
-		}
 		return array_keys($out);
-	}
-
-	/**
-	 * The website's training catalog (data/training.yaml in the website repo, as
-	 * published at ONBOARDING_TRAINING_CATALOG_URL): zones, fees, trainers, tools.
-	 * The last copy fetched is kept, so pages work while the site is unreachable.
-	 *
-	 * @param bool $fetch Fetch a fresh copy first
-	 * @return array{zones:string[],fees:float[],trainers:array,tools:array,fetched:int}|null
-	 */
-	public function catalog($fetch = true)
-	{
-		global $conf;
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-		$url = getDolGlobalString('ONBOARDING_TRAINING_CATALOG_URL');
-		if ($fetch && $url !== '') {
-			require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
-			$r = getURLContent($url, 'GET', '', 1, array('Accept: application/json'), array('http', 'https'), 2);
-			$json = !empty($r['http_code']) && $r['http_code'] == 200 ? json_decode($r['content'], true) : null;
-			if (is_array($json) && isset($json['tools']) && is_array($json['tools'])) {
-				$json['fetched'] = OnboardingService::now();
-				dolibarr_set_const($this->db, 'ONBOARDING_TRAINING_CATALOG_CACHE', json_encode($json), 'chaine', 0, '', $conf->entity);
-				return $json + array('zones' => array(), 'fees' => array(), 'trainers' => array());
-			}
-			dol_syslog('Onboarding: training catalog '.$url.' returned '.(isset($r['http_code']) ? $r['http_code'] : '?'), LOG_WARNING);
-		}
-		$cached = json_decode(getDolGlobalString('ONBOARDING_TRAINING_CATALOG_CACHE'), true);
-		return is_array($cached) ? $cached + array('zones' => array(), 'fees' => array(), 'trainers' => array(), 'tools' => array(), 'fetched' => 0) : null;
 	}
 
 	/**

@@ -91,6 +91,8 @@ services:
           --var GIVEBUTTER_WEBHOOK_SECRET:sandbox-signature
     environment:
       WEBSITE_REF: ${WEBSITE_REF:-main}
+      # Training fees go to the fake Givebutter's training campaign, paid once.
+      HUGO_PARAMS_GIVEBUTTERTRAINING: "http://${SANDBOX_HOST:-localhost}:8090/checkout?campaign=TRAINING&frequency=once"
       CI: "1"
       WRANGLER_SEND_METRICS: "false"
     ports:

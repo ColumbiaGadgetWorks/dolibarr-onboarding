@@ -7,8 +7,10 @@
 //      resume it, each firing its webhook.
 //   3. Answers the two API calls the module makes: GET /v1/transactions and
 //      GET /v1/plans/{id}.
-//   4. /control/pay also takes custom_fields (the checkout questions, as
-//      [{title, value}]) and a campaign, for training fees.
+//   4. /control/pay also takes a campaign (training fees) and a fee (what
+//      Givebutter keeps; 0 unless given).
+//   5. Stands in for GitHub: serves the waiver and agreement at /legal/*.md,
+//      changed with POST /control/doc {doc, text}.
 //
 // Environment:
 //   WEBHOOK_URL        where webhooks go
@@ -30,7 +32,12 @@ const RETURN_URL = process.env.RETURN_URL || '';
 const plans = new Map();
 const transactions = [];
 const deliveries = [];
-let seq = 1000;
+const legal = {
+  waiver: '---\ntitle: Liability waiver\n---\nSandbox waiver. Tools are sharp. I use the shop at my own risk and follow the posted safety rules.',
+  agreement: '---\ntitle: Membership agreement\n---\nSandbox agreement. I follow the shop rules and keep my dues current.',
+};
+// Ids keep growing across restarts, so a restarted sandbox never repeats one.
+let seq = Math.floor(Date.now() / 1000);
 
 const iso = () => new Date().toISOString();
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -63,6 +70,7 @@ function charge(plan, campaign = CAMPAIGN) {
     status: 'succeeded',
     amount: Number(plan.amount),
     donated: Number(plan.amount),
+    fee: Number(plan.fee || 0),
     custom_fields: plan.custom_fields || [],
     currency: 'USD',
     transacted_at: iso(),
@@ -73,7 +81,7 @@ function charge(plan, campaign = CAMPAIGN) {
   return t;
 }
 
-async function pay({ email, first_name, last_name, amount, frequency, campaign, silent, custom_fields }) {
+async function pay({ email, first_name, last_name, amount, frequency, campaign, silent, custom_fields, fee }) {
   const plan = {
     id: `plan_${++seq}`,
     contact_id: `contact_${++seq}`,
@@ -88,6 +96,7 @@ async function pay({ email, first_name, last_name, amount, frequency, campaign, 
     updated_at: iso(),
     canceled_at: null,
     custom_fields: Array.isArray(custom_fields) ? custom_fields : [],
+    fee: Number(fee || 0),
   };
   if (plan.recurring) plans.set(plan.id, plan);
   const transaction = charge(plan, campaign);
@@ -117,11 +126,13 @@ td,th{border-bottom:1px solid #ccc;padding:.4rem;text-align:left;vertical-align:
 <div class="banner">SANDBOX. This is a fake Givebutter. No money moves.</div>${body}`;
 
 function checkoutPage(q) {
-  return page('Fake Givebutter checkout', `<h1>Membership dues</h1>
+  const campaign = q.get('campaign') || CAMPAIGN;
+  return page('Fake Givebutter checkout', `<h1>${campaign === CAMPAIGN ? 'Membership dues' : `Campaign ${esc(campaign)}`}</h1>
 <form method="post" action="/checkout">
-<label>Email</label><input name="email" type="email" required value="${esc(q.get('email') || '')}">
-<label>First name</label><input name="first_name" value="Test">
-<label>Last name</label><input name="last_name" value="Payer">
+<input type="hidden" name="campaign" value="${esc(campaign)}">
+<label>Email</label><input name="email" type="email" required value="${esc(q.get('gb_email') || q.get('email') || '')}">
+<label>First name</label><input name="first_name" value="${esc(q.get('gb_first_name') || 'Test')}">
+<label>Last name</label><input name="last_name" value="${esc(q.get('gb_last_name') || 'Payer')}">
 <label>Amount (USD)</label><input name="amount" type="number" value="${esc(q.get('amount') || '50')}">
 <label>Frequency</label><select name="frequency">${['monthly', 'quarterly', 'yearly', 'once'].map((f) => `<option${(q.get('frequency') || 'monthly') === f ? ' selected' : ''}>${f}</option>`).join('')}</select>
 <p><button type="submit">Pay (pretend)</button></p></form>
@@ -172,12 +183,9 @@ http.createServer(async (req, res) => {
       return json(res, 404, { message: 'Not found.' });
     }
     if (path === '/health') return json(res, 200, { ok: true });
-    // Stands in for the website's /training/catalog/index.json.
-    if (path === '/training-catalog.json') return json(res, 200, {
-      zones: ['Digital Fab', 'Machining'], fees: [5, 10, 15, 20],
-      trainers: [{ id: 'pia', name: 'Pia P.', member: 'CGW-NOBODY' }, { id: 'gus', name: 'Gus Ghost', member: 'CGW-GHOST' }],
-      tools: [{ id: 'clausing-lathe', name: 'Clausing lathe', zone: 'Machining', fee: 15, trainers: ['pia', 'gus'] }],
-    });
+    let lm = path.match(/^\/legal\/(waiver|agreement)\.md$/);
+    if (lm && req.method === 'GET') return send(res, 200, legal[lm[1]], 'text/plain; charset=utf-8');
+    if (path === '/control/doc' && req.method === 'POST') { const b = await readBody(req); if (legal[b.doc] !== undefined) legal[b.doc] = String(b.text || ''); return json(res, 200, { ok: true }); }
     if (path === '/' && req.method === 'GET') return send(res, 200, controlPage());
     if (path === '/checkout' && req.method === 'GET') return send(res, 200, checkoutPage(url.searchParams));
     if (path === '/checkout' && req.method === 'POST') {

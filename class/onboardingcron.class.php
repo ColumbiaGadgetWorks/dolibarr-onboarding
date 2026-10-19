@@ -34,6 +34,11 @@ class OnboardingCron
 	{
 		$svc = new OnboardingService($this->db);
 		$this->output = $svc->reconcile();
+		if (strpos($this->output, 'failed') !== false) {
+			$svc->alert('givebutter-sync', 'The hourly Givebutter sync is failing', 'The hourly sync with Givebutter said: '.$this->output."\n\nPayments still reach Dolibarr by webhook, but a missed one is not caught until this works. Check the Givebutter API key on the module setup page.");
+		} elseif (getDolGlobalString('ONBOARDING_GB_API_KEY') !== '') {
+			$svc->alertClear('givebutter-sync', 'The hourly Givebutter sync works again.');
+		}
 		return 0;
 	}
 
@@ -48,10 +53,31 @@ class OnboardingCron
 		$svc = new OnboardingService($this->db);
 		dol_include_once('/onboarding/class/training.class.php');
 		$training = new OnboardingTraining($this->db, $svc);
-		$training->catalog(true);
 		dol_include_once('/onboarding/class/purchase.class.php');
 		$purchase = new OnboardingPurchase($this->db, $svc);
-		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations().'; '.$purchase->purge();
+		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations().'; '.$purchase->purge().'; '.$svc->fetchDocs();
+		return 0;
+	}
+
+	/**
+	 * Every 15 minutes: training bookings (holds, the trainer's confirmation,
+	 * reminders, the questions after a session, group classes) and the check
+	 * that the website has the current catalog.
+	 *
+	 * @return int 0 if OK
+	 */
+	public function bookings()
+	{
+		dol_include_once('/onboarding/class/booking.class.php');
+		$booking = new OnboardingBooking($this->db);
+		try {
+			$this->output = $booking->run();
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			$booking->svc->alert('cron-bookings', 'The training booking job failed', 'The scheduled job "Onboarding: training bookings" stopped with: '.$e->getMessage()."\n\nReminders and confirmations are not going out until it runs cleanly. See Home, Admin tools, Scheduled jobs.");
+			return 1;
+		}
+		$booking->svc->alertClear('cron-bookings', 'The training booking job runs cleanly again.');
 		return 0;
 	}
 

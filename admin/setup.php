@@ -44,16 +44,36 @@ $sections = array(
 		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'A payment of at least this much makes the member a Supporter.'),
 	),
 	'Training fees' => array(
-		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on (through the widget on the website\'s /training/pay/ page), for example the code at the end of its link. Leave empty to turn training tracking off.'),
-		'ONBOARDING_TRAINING_CATALOG_URL' => array('Training catalog', 'text', 'The website\'s catalog of tools, zones, fees and trainers as JSON, e.g. https://columbiagadgetworks.org/training/catalog/index.json . Shown under Training tools; refreshed daily.'),
-		'ONBOARDING_TRAINING_CATALOG_EDIT_URL' => array('Edit the catalog at', 'text', 'Link shown under Training tools, e.g. https://github.com/ColumbiaGadgetWorks/website/edit/main/data/training.yaml'),
-		'ONBOARDING_TRAINING_TRAINER_SHARE' => array('Trainer\'s share (percent)', 'text', 'Credited to the trainer. The rest of each fee goes to the zone\'s budget.'),
+		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on (through the widget on the website\'s /training/book/ page), for example the code at the end of its link. Give it no checkout questions: the booking carries the tool, zone, trainer and time. Leave empty to turn training tracking off.'),
+		'ONBOARDING_TRAINING_TRAINER_SHARE' => array('Trainer\'s share (percent)', 'text', 'Of what arrives after Givebutter\'s fee, credited to the trainer. The rest goes to the zone\'s budget. A tool can set its own.'),
 		'ONBOARDING_TRAINING_CREDIT_THRESHOLD' => array('Credit for a month of dues', 'text', 'When a trainer\'s credit reaches this, a dues refund waits for approval under Training accounts, and the membership team is emailed.'),
-		'ONBOARDING_TRAINING_ZONES' => array('Zones', 'text', 'Comma separated, e.g. Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting. Each has a budget under Training accounts. Zones in the training catalog are added to these.'),
+		'ONBOARDING_TRAINING_ZONES' => array('Zones', 'text', 'Comma separated, e.g. Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting. Each has a budget under Training accounts. Zones of the training tools are added to these.'),
 		'ONBOARDING_TRAINED_TAG' => array('Trained tag', 'text', 'Trainees get a tag "<this>: <tool>" on their member and contact cards.'),
 		'ONBOARDING_TRAINING_LOOKUP_URL' => array('Training lookup page', 'text', 'The website page where people check what they are trained on, for example https://columbiagadgetworks.org/training/ . Put in the email sent after a training.'),
 		'ONBOARDING_MAIL_TRAINED_SUBJECT' => array('Trained email subject', 'text', 'Placeholders: {tool}'),
 		'ONBOARDING_MAIL_TRAINED_BODY' => array('Trained email text', 'area', 'Sent to the person who paid. Placeholders: {firstname} {tool} {zone} {trainer} {lookup_url} {org}'),
+	),
+	'Training bookings' => array(
+		'ONBOARDING_WEBSITE_URL' => array('Website', 'text', 'e.g. https://columbiagadgetworks.org . Dolibarr sends it the training catalog and the lookup copy whenever they change. Empty: nothing is sent and the website only picks changes up every 15 minutes.'),
+		'ONBOARDING_TRAINING_BOOK_URL' => array('Booking page', 'text', 'Empty: <website>/training/book/ . The signing link in emails opens it.'),
+		'ONBOARDING_ALERT_EMAIL' => array('Alerts go to', 'text', 'Problems between Dolibarr, the website and Givebutter. Empty: whoever holds the secretary tag.'),
+		'ONBOARDING_TRAINING_TZ' => array('Time zone', 'text', 'Trainers\' times are on this clock, e.g. America/Chicago.'),
+		'ONBOARDING_TRAINING_WEEKS_AHEAD' => array('Bookable weeks ahead', 'text', 'Default 6.'),
+		'ONBOARDING_TRAINING_CLOSE_HOURS' => array('Booking closes (hours before)', 'text', 'Default 48, so the trainer has a day to confirm.'),
+		'ONBOARDING_TRAINING_HOLD_MINUTES' => array('Seat held while paying (minutes)', 'text', 'Default 30. A payment that arrives up to a day later still finds the booking if the seat is free.'),
+		'ONBOARDING_TRAINING_CONFIRM_HOURS' => array('Trainer must confirm (hours before)', 'text', 'Default 24. Not confirmed by then: the session is cancelled and the trainee is asked to reschedule, ask for a refund, or tell us something else.'),
+		'ONBOARDING_TRAINING_CONFIRM_REMIND_HOURS' => array('Remind the trainer to confirm after (hours)', 'text', 'Default 24 after the payment.'),
+		'ONBOARDING_TRAINING_CANCEL_HOURS' => array('Trainee can cancel until (hours before)', 'text', 'Default 2. Cancelling in time means a full refund or a new date.'),
+		'ONBOARDING_TRAINING_FREE_REBOOKS' => array('Free new dates after a no-show', 'text', 'Default 1. After that the fee is kept and split as usual.'),
+		'ONBOARDING_TRAINING_REBOOK_DAYS' => array('Free new date must be picked within (days)', 'text', 'Default 60.'),
+		'ONBOARDING_TRAINING_DAYOF_HOUR' => array('Day-of reminder at (hour)', 'text', 'Default 9, on the shop\'s clock.'),
+		'ONBOARDING_TRAINING_AFTER_REMINDERS' => array('Ask the trainer again after (hours)', 'text', 'After a session the trainer is asked whether it happened; again this many hours after the end. Default 1,24.'),
+		'ONBOARDING_TRAINING_TRAINEE_FOLLOWUP_HOURS' => array('Ask the trainee after (hours)', 'text', 'Trainer still silent this long after the end: the trainee gets "My trainer didn\'t show up" and the secretary is told. Default 48.'),
+		'ONBOARDING_TRAINING_CLASS_OPEN_BEFORE' => array('Class code works from (minutes before)', 'text', 'Default 30.'),
+		'ONBOARDING_TRAINING_CLASS_OPEN_AFTER' => array('Class code works until (minutes after the end)', 'text', 'Default 180.'),
+		'ONBOARDING_TRAINING_MIN_AGE' => array('Youngest trainee', 'text', 'Default 12. Under 18, a parent or guardian signs the waiver.'),
+		'ONBOARDING_TRAINING_GUARDIAN_PRESENT' => array('Guardian must come with a minor (1 or 0)', 'text', 'Default 1. Said in the trainer\'s and trainee\'s emails.'),
+		'ONBOARDING_TRAINER_TAG' => array('Trainer tag', 'text', 'Trainers get a tag "<this>: <tool>". Default Trainer.'),
 	),
 	'Purchase requests' => array(
 		'ONBOARDING_PURCHASE_LEAD_LIMIT' => array('Zone lead limit', 'text', 'Largest request a zone lead may approve alone, in dollars.'),
@@ -72,8 +92,10 @@ $sections = array(
 		'ONBOARDING_MAIL_RESUME_BODY' => array('Signup link text', 'area', 'Sent after step 1. Placeholders: {firstname} {org} {link}'),
 	),
 	'Documents' => array(
-		'ONBOARDING_WAIVER_TEXT' => array('Liability waiver', 'area', 'Plain text. Shown as a placeholder until you save your own wording. Editing it creates a new version; existing signatures keep the text they signed. Current version: '.$docs['waiver']['version']),
-		'ONBOARDING_AGREEMENT_TEXT' => array('Membership agreement', 'area', 'Current version: '.$docs['agreement']['version']),
+		'ONBOARDING_WAIVER_URL' => array('Liability waiver from', 'text', 'The raw file in GitHub, e.g. https://raw.githubusercontent.com/ColumbiaGadgetWorks/website/main/content/legal/waiver.md . Read nightly and by "Check GitHub now"; each new wording is kept as a new version. Put your current wording in that file BEFORE setting this, or the file\'s wording becomes the one people sign.'),
+		'ONBOARDING_AGREEMENT_URL' => array('Membership agreement from', 'text', 'e.g. https://raw.githubusercontent.com/ColumbiaGadgetWorks/website/main/content/legal/agreement.md'),
+		'ONBOARDING_WAIVER_TEXT' => array('Liability waiver (no GitHub)', 'area', 'Used only when the address above is empty. Saving new wording keeps it as a new version; existing signatures keep the text they signed.'),
+		'ONBOARDING_AGREEMENT_TEXT' => array('Membership agreement (no GitHub)', 'area', 'Used only when the address above is empty.'),
 	),
 	'Housekeeping' => array(
 		'ONBOARDING_DRAFT_DAYS' => array('Delete abandoned signups after (days)', 'text', '0 keeps them forever.'),
@@ -100,14 +122,26 @@ if ($action == 'save') {
 			}
 		}
 	}
+	// Wording typed here (no GitHub address) becomes a version like a GitHub one.
+	foreach (OnboardingService::DOCS as $doc => $title) {
+		$text = getDolGlobalString('ONBOARDING_'.strtoupper($doc).'_TEXT');
+		if (getDolGlobalString('ONBOARDING_'.strtoupper($doc).'_URL') === '' && $text !== '') {
+			$svc->addDocVersion($doc, $title, $text, 'setup page');
+		}
+	}
 	if (!$errors) {
 		setEventMessages('Saved', null);
 	}
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
-if ($action == 'runsync' || $action == 'rundaily' || $action == 'connect' || $action == 'roletags') {
-	if ($action == 'connect') {
+if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetchdocs', 'runbookings'), true)) {
+	if ($action == 'fetchdocs') {
+		$out = $svc->fetchDocs();
+	} elseif ($action == 'runbookings') {
+		dol_include_once('/onboarding/class/booking.class.php');
+		$out = (new OnboardingBooking($db, $svc))->run();
+	} elseif ($action == 'connect') {
 		$out = $svc->connectGivebutter();
 	} elseif ($action == 'roletags') {
 		dol_include_once('/onboarding/class/purchase.class.php');
@@ -151,6 +185,21 @@ foreach ($purchase->roleTable() as $r) {
 }
 print '</table>';
 
+print '<br><table class="noborder centpercent">';
+print '<tr class="liste_titre"><td colspan="4">Waiver and agreement versions <a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=fetchdocs&token='.newToken().'">Check GitHub now</a></td></tr>';
+print '<tr class="oddeven"><td colspan="4">People sign the newest version below. Each signature records its version, and the words of every version are kept here, so a change in GitHub never changes what someone already signed. Before booking a training, someone who signed an older version is not asked again.</td></tr>';
+print '<tr class="liste_titre"><td>Document</td><td>Version</td><td>Since</td><td>From</td></tr>';
+foreach (OnboardingService::DOCS as $doc => $title) {
+	$versions = $svc->docVersions($doc);
+	if (!$versions) {
+		print '<tr class="oddeven"><td>'.dol_escape_htmltag($title).'</td><td><code>'.dol_escape_htmltag($docs[$doc]['version']).'</code></td><td></td><td>'.dol_escape_htmltag($docs[$doc]['source']).'</td></tr>';
+	}
+	foreach ($versions as $i => $v) {
+		print '<tr class="oddeven"><td>'.($i ? '' : dol_escape_htmltag($title)).'</td><td><code>'.dol_escape_htmltag($v->version).'</code>'.($i ? '' : ' <span class="badge badge-status4">signed now</span>').'</td><td>'.dol_print_date($db->jdate($v->datec), 'dayhour').'</td><td class="small">'.dol_escape_htmltag($v->source).'</td></tr>';
+	}
+}
+print '</table>';
+
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="save">';
@@ -184,8 +233,9 @@ foreach ($sections as $title => $fields) {
 print '<br><div class="center"><input type="submit" class="button button-save" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
 
-print '<br><div class="opacitymedium">The two scheduled jobs run on their own once Dolibarr\'s scheduled jobs are set up. To run them now: ';
+print '<br><div class="opacitymedium">The scheduled jobs run on their own once Dolibarr\'s scheduled jobs are set up. To run them now: ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runsync&token='.newToken().'">Sync Givebutter now</a> ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runbookings&token='.newToken().'">Run training bookings now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=rundaily&token='.newToken().'">Run reminders now</a></div>';
 
 llxFooter();

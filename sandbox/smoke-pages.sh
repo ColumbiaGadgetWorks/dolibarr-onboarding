@@ -32,8 +32,26 @@ check 'purchases.php' 'PR-0'
 check 'purchases.php' 'Paid'
 check 'admin/setup.php' 'Purchase request roles'
 check 'admin/setup.php' 'Create the role tags'
-check 'training-tools.php' 'Clausing lathe'
-check 'training-tools.php' 'no member match'
+check 'training-tools.php' '3D printers'
+check 'training-tools.php' 'Closed days'
+TOOL=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT fk_tool FROM llx_onboarding_trainer_slot ORDER BY rowid DESC LIMIT 1")
+check "training-tools.php?action=edit&id=$TOOL" 'Trainers and their times'
+check 'trainings.php' 'Upcoming'
+check 'trainings.php' 'Mark trained (no fee)'
+check 'trainings.php' 'Bookings that need someone'
+BK=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT rowid FROM llx_onboarding_booking ORDER BY rowid DESC LIMIT 1")
+check "trainings.php?booking=$BK" 'TR-'
+CL=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT rowid FROM llx_onboarding_class ORDER BY rowid DESC LIMIT 1")
+check 'class.php' 'Create the class'
+check "class.php?id=$CL" 'Sign-in code'
+check "class.php?id=$CL" '<svg'
+MEM=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT fk_adherent FROM llx_onboarding_training WHERE fk_adherent IS NOT NULL AND source = 'class' ORDER BY rowid DESC LIMIT 1")
+check "member-training.php?id=$MEM" 'Trained on'
+CT=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT fk_socpeople FROM llx_onboarding_booking WHERE fk_socpeople IS NOT NULL ORDER BY rowid DESC LIMIT 1")
+check "member-training.php?contact=$CT" 'Bookings'
+check 'applicants.php?filter=training' 'Training only'
+check 'admin/setup.php' 'Waiver and agreement versions'
+check 'admin/setup.php' 'Training bookings'
 # Zone budgets: a starting budget for every zone, then a purchase against one.
 before=$(docker compose exec -T -u www-data dolibarr php /var/www/html/custom/onboarding/sandbox/tick.php training balance zone Metalworking)
 T4=$(curl -s -b "$JAR" "$BASE/custom/onboarding/training-accounts.php" | grep -o 'name="token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')

@@ -49,6 +49,8 @@ jobs:
       - run: node e2e.mjs
       - name: Purchase requests
         run: node e2e-purchase.mjs
+      - name: Training bookings
+        run: node e2e-training.mjs
       - name: Staff pages render
         run: bash smoke-pages.sh
       - name: Logs
