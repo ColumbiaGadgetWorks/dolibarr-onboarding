@@ -249,25 +249,151 @@ class OnboardingService
 		return $actor;
 	}
 
+	/** The two documents people sign, with the title used when the source has none. */
+	const DOCS = array('waiver' => 'Liability waiver', 'agreement' => 'Membership agreement');
+
 	/**
-	 * The waiver and agreement as currently configured. The version is a hash of
-	 * the text, so a signature always points at the exact words that were shown.
+	 * The waiver and agreement as offered for signing now: the newest version
+	 * copied from GitHub (see fetchDocs), else the text on the setup page, else
+	 * placeholder wording. The version is a hash of the text, so a signature
+	 * always points at the exact words that were shown.
 	 *
-	 * @return array<string,array{title:string,text:string,version:string}>
+	 * @return array<string,array{title:string,text:string,version:string,source:string,since:string}>
 	 */
 	public function docs()
 	{
+		global $conf;
 		$out = array();
 		$defaults = array(
-			'waiver' => array('Liability waiver', "I understand that Columbia Gadget Works is a shared workshop with tools and machines that can cause serious injury. I choose to use the space and its equipment at my own risk.\n\nI will not use a tool I have not been trained on, I will follow posted safety rules, and I will wear appropriate protective equipment.\n\nTo the extent the law allows, I release Columbia Gadget Works, its volunteers, board and members from liability for injury or property damage arising from my use of the space."),
-			'agreement' => array('Membership agreement', "As a member of Columbia Gadget Works I agree to:\n\n- Follow the shop rules and the code of conduct.\n- Clean up after myself and leave tools and benches ready for the next person.\n- Report damage or unsafe conditions right away.\n- Be responsible for any guests I bring.\n- Keep my dues current. I can cancel at any time.\n\nI understand that membership and badge access can be suspended for unsafe behavior or unpaid dues."),
+			'waiver' => "I understand that Columbia Gadget Works is a shared workshop with tools and machines that can cause serious injury. I choose to use the space and its equipment at my own risk.\n\nI will not use a tool I have not been trained on, I will follow posted safety rules, and I will wear appropriate protective equipment.\n\nTo the extent the law allows, I release Columbia Gadget Works, its volunteers, board and members from liability for injury or property damage arising from my use of the space.",
+			'agreement' => "As a member of Columbia Gadget Works I agree to:\n\n- Follow the shop rules and the code of conduct.\n- Clean up after myself and leave tools and benches ready for the next person.\n- Report damage or unsafe conditions right away.\n- Be responsible for any guests I bring.\n- Keep my dues current. I can cancel at any time.\n\nI understand that membership and badge access can be suspended for unsafe behavior or unpaid dues.",
 		);
-		foreach ($defaults as $key => $def) {
-			$text = getDolGlobalString('ONBOARDING_'.strtoupper($key).'_TEXT', $def[1]);
-			$text = str_replace("\r\n", "\n", $text);
-			$out[$key] = array('title' => $def[0], 'text' => $text, 'version' => substr(hash('sha256', $text), 0, 16));
+		foreach (self::DOCS as $key => $title) {
+			$res = $this->db->query("SELECT title, text, version, source, datec FROM ".$this->db->prefix()."onboarding_doc_version WHERE entity = ".((int) $conf->entity)." AND doc = '".$key."' ORDER BY rowid DESC LIMIT 1");
+			$row = $res ? $this->db->fetch_object($res) : null;
+			if ($row) {
+				$out[$key] = array('title' => (string) ($row->title ?: $title), 'text' => (string) $row->text, 'version' => (string) $row->version, 'source' => (string) $row->source, 'since' => dol_print_date($this->db->jdate($row->datec), '%Y-%m-%d'));
+				continue;
+			}
+			$text = str_replace("\r\n", "\n", getDolGlobalString('ONBOARDING_'.strtoupper($key).'_TEXT', $defaults[$key]));
+			$out[$key] = array('title' => $title, 'text' => $text, 'version' => self::docVersion($text), 'source' => getDolGlobalString('ONBOARDING_'.strtoupper($key).'_TEXT') !== '' ? 'setup page' : 'placeholder', 'since' => '');
 		}
 		return $out;
+	}
+
+	/**
+	 * @param string $text Document text
+	 * @return string Its version: the first 16 hex of its SHA-256
+	 */
+	public static function docVersion($text)
+	{
+		return substr(hash('sha256', (string) $text), 0, 16);
+	}
+
+	/**
+	 * @param string $doc waiver or agreement
+	 * @param string $version Version a signature names
+	 * @return object|null That version's title and text, if Dolibarr has it
+	 */
+	public function docAt($doc, $version)
+	{
+		global $conf;
+		$res = $this->db->query("SELECT * FROM ".$this->db->prefix()."onboarding_doc_version WHERE entity = ".((int) $conf->entity)." AND doc = '".$this->db->escape($doc)."' AND version = '".$this->db->escape($version)."' LIMIT 1");
+		return $res ? ($this->db->fetch_object($res) ?: null) : null;
+	}
+
+	/**
+	 * @param string $doc waiver or agreement
+	 * @return object[] Every version, newest first
+	 */
+	public function docVersions($doc)
+	{
+		global $conf;
+		$out = array();
+		$res = $this->db->query("SELECT rowid, version, title, source, datec, LENGTH(text) AS size FROM ".$this->db->prefix()."onboarding_doc_version WHERE entity = ".((int) $conf->entity)." AND doc = '".$this->db->escape($doc)."' ORDER BY rowid DESC");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$out[] = $o;
+		}
+		return $out;
+	}
+
+	/**
+	 * Keep a new version of a document, unless it is the newest one already.
+	 *
+	 * @param string $doc waiver or agreement
+	 * @param string $title Title
+	 * @param string $text Text
+	 * @param string $source Where it came from
+	 * @return bool A new version was added
+	 */
+	public function addDocVersion($doc, $title, $text, $source)
+	{
+		global $conf;
+		$text = trim(str_replace("\r\n", "\n", (string) $text));
+		if (!isset(self::DOCS[$doc]) || $text === '') {
+			return false;
+		}
+		$version = self::docVersion($text);
+		$docs = $this->docs();
+		if ($docs[$doc]['version'] === $version && $docs[$doc]['source'] !== 'placeholder' && $docs[$doc]['source'] !== 'setup page') {
+			return false;
+		}
+		if ($this->docAt($doc, $version)) {
+			// Going back to an older wording: it becomes the newest again. Signatures
+			// name the version, not the row, so its text stays the same.
+			$this->db->query("DELETE FROM ".$this->db->prefix()."onboarding_doc_version WHERE entity = ".((int) $conf->entity)." AND doc = '".$doc."' AND version = '".$version."'");
+		}
+		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_doc_version (entity, doc, version, title, text, source, datec) VALUES (".((int) $conf->entity).", '".$doc."', '".$version."', '".$this->db->escape(dol_trunc($title !== '' ? $title : self::DOCS[$doc], 200, 'right', 'UTF-8', 1))."', '".$this->db->escape($text)."', '".$this->db->escape(dol_trunc($source, 255, 'right', 'UTF-8', 1))."', '".$this->db->idate(self::now())."')";
+		return (bool) $this->db->query($sql);
+	}
+
+	/**
+	 * Copy the waiver and agreement from GitHub (the setup page's document
+	 * addresses), keeping a new version whenever the words changed. A Markdown
+	 * file may start with front matter; its title is used and the rest dropped.
+	 *
+	 * @return string Summary
+	 */
+	public function fetchDocs()
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
+		$out = array();
+		foreach (self::DOCS as $doc => $title) {
+			$url = getDolGlobalString('ONBOARDING_'.strtoupper($doc).'_URL');
+			if ($url === '') {
+				$out[] = $doc.': no address set';
+				continue;
+			}
+			$r = getURLContent($url, 'GET', '', 1, array('Accept: text/plain'), array('http', 'https'), 2);
+			if (empty($r['http_code']) || $r['http_code'] != 200 || trim((string) $r['content']) === '') {
+				$out[] = $doc.': could not read '.$url.' (HTTP '.(isset($r['http_code']) ? $r['http_code'] : '?').')';
+				$this->alert('docs-'.$doc, 'Dolibarr cannot read the '.strtolower($title).' from GitHub', 'Dolibarr tried to read the '.strtolower($title).' from '.$url.' and got HTTP '.(isset($r['http_code']) ? $r['http_code'] : '?').'. People still sign the last version Dolibarr has. Check the address on the module setup page.');
+				continue;
+			}
+			$this->alertClear('docs-'.$doc, 'Dolibarr can read the '.strtolower($title).' from GitHub again.');
+			list($t, $text) = self::splitFrontMatter((string) $r['content']);
+			$added = $this->addDocVersion($doc, $t !== '' ? $t : $title, $text, $url);
+			$docs = $this->docs();
+			$out[] = $doc.': '.($added ? 'new version '.$docs[$doc]['version'] : 'unchanged ('.$docs[$doc]['version'].')');
+		}
+		return implode('; ', $out);
+	}
+
+	/**
+	 * @param string $raw File contents
+	 * @return array{0:string,1:string} Title from the front matter, and the text after it
+	 */
+	public static function splitFrontMatter($raw)
+	{
+		$raw = str_replace("\r\n", "\n", ltrim((string) $raw, "\xEF\xBB\xBF"));
+		$title = '';
+		if (preg_match('/^---\n(.*?)\n---\n?(.*)$/s', $raw, $m)) {
+			if (preg_match('/^title:\s*["\']?(.*?)["\']?\s*$/m', $m[1], $t)) {
+				$title = trim($t[1]);
+			}
+			$raw = $m[2];
+		}
+		return array($title, trim($raw));
 	}
 
 	/**
@@ -376,6 +502,13 @@ class OnboardingService
 	public function refreshStage($id)
 	{
 		$app = $this->fetch($id);
+		// A row made only to hold training paperwork (a non-member who came to
+		// train, or an existing member signing before a booking) has no signup
+		// stage to move through; only the signature dates go to the cards.
+		if (!empty($app->training_only)) {
+			$this->syncExtraFields($app);
+			return $app;
+		}
 		$paid = in_array($app->payment_state, array('active', 'past_due', 'cancelled'));
 		$stage = 'details';
 		if (self::paperworkDone($app)) {
@@ -491,6 +624,9 @@ class OnboardingService
 			'id_verified' => empty($app->id_uploaded_at) ? 0 : 1,
 			'payment_state' => (string) $app->payment_state,
 		);
+		if (!empty($app->training_only)) {
+			$values = array_intersect_key($values, array_flip(array('waiver_date', 'agreement_date')));
+		}
 		$targets = array();
 		if ($app->fk_socpeople > 0) {
 			$targets[] = array(new Contact($this->db), (int) $app->fk_socpeople);
@@ -518,21 +654,32 @@ class OnboardingService
 	/**
 	 * Send a plain text email. A failure is logged, never fatal.
 	 *
-	 * @param string $to Recipient
+	 * @param string $to Recipient(s), comma separated
 	 * @param string $subject Subject
 	 * @param string $body Body
+	 * @param string $cc Copy to, comma separated
+	 * @param string $replyTo Reply-to, comma separated
 	 * @return bool
 	 */
-	public function mail($to, $subject, $body)
+	public function mail($to, $subject, $body, $cc = '', $replyTo = '')
 	{
 		global $conf;
 		if (empty($to)) {
 			return false;
 		}
+		// Dolibarr refuses an email with more than ten recipients; send several.
+		$all = array_values(array_filter(array_map('trim', explode(',', (string) $to)), 'strlen'));
+		if (count($all) > 8) {
+			$ok = true;
+			foreach (array_chunk($all, 8) as $chunk) {
+				$ok = $this->mail(implode(', ', $chunk), $subject, $body, $cc, $replyTo) && $ok;
+			}
+			return $ok;
+		}
 		require_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
 		$from = getDolGlobalString('ONBOARDING_MAIL_FROM', getDolGlobalString('MAIN_MAIL_EMAIL_FROM', 'noreply@localhost'));
 		try {
-			$mail = new CMailFile($subject, $to, $from, $body, array(), array(), array(), '', '', 0, 0, '', '', 'onboarding', '', 'standard');
+			$mail = new CMailFile($subject, $to, $from, $body, array(), array(), array(), $cc, '', 0, 0, '', '', 'onboarding', '', 'standard', $replyTo);
 			$ok = $mail->sendfile();
 			if (!$ok) {
 				dol_syslog('Onboarding: mail to '.$to.' failed: '.$mail->error, LOG_WARNING);
@@ -542,6 +689,69 @@ class OnboardingService
 			dol_syslog('Onboarding: mail to '.$to.' failed: '.$e->getMessage(), LOG_WARNING);
 			return false;
 		}
+	}
+
+	/**
+	 * Who hears about problems between Dolibarr, the website and Givebutter:
+	 * the alerts address on the setup page, else whoever holds the secretary
+	 * tag, else the membership team.
+	 *
+	 * @return string Comma separated addresses
+	 */
+	public function alertTo()
+	{
+		$to = getDolGlobalString('ONBOARDING_ALERT_EMAIL');
+		if ($to === '') {
+			dol_include_once('/onboarding/class/purchase.class.php');
+			$p = new OnboardingPurchase($this->db, $this);
+			$to = implode(', ', $p->roleEmails(array('secretary')));
+		}
+		return $to !== '' ? $to : getDolGlobalString('ONBOARDING_STAFF_EMAIL');
+	}
+
+	/**
+	 * Email the alerts address about a problem: at most once an hour for the
+	 * same problem, and once more when it clears (alertClear).
+	 *
+	 * @param string $key Short name of the problem
+	 * @param string $subject Subject
+	 * @param string $body What is wrong and what to check
+	 * @return void
+	 */
+	public function alert($key, $subject, $body)
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		$name = 'ONBOARDING_ALERT_'.strtoupper(preg_replace('/[^a-z0-9]+/i', '_', $key));
+		$last = getDolGlobalInt($name);
+		$now = self::now();
+		dol_syslog('Onboarding alert '.$key.': '.$subject, LOG_WARNING);
+		if ($last > 0 && $now - $last < 3600) {
+			return;
+		}
+		dolibarr_set_const($this->db, $name, $now, 'chaine', 0, 'Last alert email about '.$key, $conf->entity);
+		$this->mail($this->alertTo(), '[Alert] '.$subject, $body."
+
+You get at most one email an hour about this, and one more when it is fixed.");
+	}
+
+	/**
+	 * A problem reported by alert() has gone: say so once.
+	 *
+	 * @param string $key Short name of the problem
+	 * @param string $message What is working again
+	 * @return void
+	 */
+	public function alertClear($key, $message)
+	{
+		global $conf;
+		$name = 'ONBOARDING_ALERT_'.strtoupper(preg_replace('/[^a-z0-9]+/i', '_', $key));
+		if (getDolGlobalInt($name) <= 0) {
+			return;
+		}
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		dolibarr_del_const($this->db, $name, $conf->entity);
+		$this->mail($this->alertTo(), '[Fixed] '.$message, $message);
 	}
 
 	/**
@@ -612,6 +822,11 @@ class OnboardingService
 		// A known address never gets a token back in the browser: whoever typed it
 		// may not own it. The link goes to the inbox instead.
 		$existing = $this->findByEmail($email);
+		if ($existing && !empty($existing->training_only) && $existing->stage != 'complete') {
+			// Came for a training, now joining: the signup carries on from what they signed.
+			$this->save($existing->rowid, array('training_only' => 0));
+			$existing = $this->refreshStage($existing->rowid);
+		}
 		if ($existing) {
 			if ($existing->stage == 'complete') {
 				$this->mail($existing->email, $this->template('ONBOARDING_MAIL_ALREADY_SUBJECT', 'You are already a {org} member', $existing), $this->template('ONBOARDING_MAIL_ALREADY_BODY', "Hi {firstname},\n\nSomeone started a membership signup with this email address, but you are already a member, so nothing was changed.", $existing));
@@ -679,6 +894,9 @@ class OnboardingService
 			'agreement' => !empty($app->agreement_signed_at) && $app->agreement_version == $docs['agreement']['version'],
 			'id' => !empty($app->id_uploaded_at),
 			'paid' => $app->payment_state == 'active',
+			'training_only' => !empty($app->training_only),
+			'birthdate' => !empty($app->birthdate),
+			'needs' => $this->trainingNeeds($app),
 			'checkout' => array(
 				'url' => getDolGlobalString('ONBOARDING_CHECKOUT_URL'),
 				'standard' => (float) getDolGlobalString('ONBOARDING_DUES_STANDARD', '50'),
@@ -688,17 +906,35 @@ class OnboardingService
 	}
 
 	/**
+	 * @param object $app Applicant row
+	 * @return string[] What they still have to sign before booking a training
+	 */
+	public function trainingNeeds($app)
+	{
+		dol_include_once('/onboarding/class/booking.class.php');
+		$b = new OnboardingBooking($this->db, $this);
+		$p = $b->person($app->email);
+		return $p['needs'];
+	}
+
+	/**
 	 * Step 2a/2b. Record a signature on the waiver or the agreement.
+	 *
+	 * Someone signing to book a training also gives their date of birth. Under
+	 * 18, a parent or guardian signs the waiver for them: the typed name is the
+	 * guardian's, and the record says whose waiver it is. Under the minimum age
+	 * (setting) nobody can sign online.
 	 *
 	 * @param object $app Applicant row
 	 * @param string $doc 'waiver' or 'agreement'
-	 * @param string $name Typed full name
+	 * @param string $name Typed full name (the guardian's, for a minor)
 	 * @param string $version Version the browser showed
 	 * @param string $ip Signer's address
 	 * @param string $signature The drawn signature, PNG bytes
+	 * @param array<string,string> $extra birthdate (Y-m-d), guardian_name, guardian_relation, guardian_email
 	 * @return array<string,mixed>
 	 */
-	public function sign($app, $doc, $name, $version, $ip, $signature = '')
+	public function sign($app, $doc, $name, $version, $ip, $signature = '', $extra = array())
 	{
 		$docs = $this->docs();
 		$name = trim(dol_string_nohtmltag((string) $name));
@@ -714,7 +950,46 @@ class OnboardingService
 			return array('ok' => false, 'error' => 'signature', 'http' => 400);
 		}
 		$now = self::now();
-		$this->save($app->rowid, array(
+		$fields = array();
+		$guardian = '';
+		if ($doc == 'waiver') {
+			$birth = isset($extra['birthdate']) ? trim((string) $extra['birthdate']) : '';
+			if ($birth === '' && !empty($app->birthdate)) {
+				$birth = substr((string) $app->birthdate, 0, 10);
+			}
+			if ($birth === '' && !empty($app->training_only)) {
+				return array('ok' => false, 'error' => 'birthdate', 'http' => 400);
+			}
+			if ($birth !== '') {
+				$bd = DateTime::createFromFormat('!Y-m-d', $birth);
+				if (!$bd || $bd->format('Y-m-d') !== $birth || $bd->getTimestamp() > $now) {
+					return array('ok' => false, 'error' => 'birthdate', 'http' => 400);
+				}
+				$age = (int) $bd->diff(new DateTime('@'.$now))->y;
+				if ($age < (int) getDolGlobalString('ONBOARDING_TRAINING_MIN_AGE', '12')) {
+					return array('ok' => false, 'error' => 'too_young', 'http' => 400);
+				}
+				$fields['birthdate'] = $birth;
+				if ($age < 18) {
+					$gname = trim(dol_string_nohtmltag(isset($extra['guardian_name']) ? (string) $extra['guardian_name'] : ''));
+					$grel = trim(dol_string_nohtmltag(isset($extra['guardian_relation']) ? (string) $extra['guardian_relation'] : ''));
+					$gmail = self::cleanEmail(isset($extra['guardian_email']) ? $extra['guardian_email'] : '');
+					if (strlen($gname) < 3 || $grel === '' || ($gmail !== '' && !isValidEmail($gmail))) {
+						return array('ok' => false, 'error' => 'guardian', 'http' => 400);
+					}
+					$name = $gname;
+					$fields['guardian_name'] = dol_trunc($gname, 200, 'right', 'UTF-8', 1);
+					$fields['guardian_relation'] = dol_trunc($grel, 50, 'right', 'UTF-8', 1);
+					$fields['guardian_email'] = $gmail;
+					$guardian = "Signed by: ".$gname." (".$grel.") as parent or guardian of ".$app->firstname.' '.$app->lastname.", born ".$birth.($gmail !== '' ? ", guardian email ".$gmail : '')."\n";
+				}
+			}
+		}
+		// The words signed are kept in Dolibarr whatever happens to the source later.
+		if (!$this->docAt($doc, $version)) {
+			$this->addDocVersion($doc, $docs[$doc]['title'], $docs[$doc]['text'], $docs[$doc]['source']);
+		}
+		$this->save($app->rowid, $fields + array(
 			$doc.'_signed_at' => $this->db->idate($now),
 			$doc.'_name' => substr($name, 0, 200),
 			$doc.'_version' => $version,
@@ -723,10 +998,14 @@ class OnboardingService
 
 		$record = $docs[$doc]['title']."\n".str_repeat('=', 60)."\n\n".$docs[$doc]['text']."\n\n".str_repeat('-', 60)."\n";
 		$record .= "Signed electronically by: ".$name."\n";
+		$record .= $guardian;
 		$record .= "Account: ".$app->firstname.' '.$app->lastname.' <'.$app->email.">\n";
+		if (!empty($fields['birthdate']) && $guardian === '') {
+			$record .= "Date of birth: ".$fields['birthdate']."\n";
+		}
 		$record .= "Date: ".dol_print_date($now, '%Y-%m-%d %H:%M:%S', 'gmt')." UTC\n";
 		$record .= "IP address: ".$ip."\n";
-		$record .= "Document version: ".$version."\n";
+		$record .= "Document version: ".$version.($docs[$doc]['source'] !== '' ? ' ('.$docs[$doc]['source'].')' : '')."\n";
 		$dir = $this->dir($app);
 		file_put_contents($dir.'/'.$doc.'.txt', $record);
 		file_put_contents($dir.'/'.$doc.'-signature.png', $signature);

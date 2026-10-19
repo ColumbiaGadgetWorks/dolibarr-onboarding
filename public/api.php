@@ -12,7 +12,9 @@
  *   Body    JSON
  *
  * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter, trainings,
- * trainingstart, budget, purchase, purchasefile, purchasefinish
+ * trainingstart, budget, purchase, purchasefile, purchasefinish,
+ * catalog, slots, trainee, traineenew, signlink, book, bookingstatus, lookup,
+ * closeddays, notifyback, classinfo, classjoin
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -111,6 +113,65 @@ if ($action == 'trainings') {
 	onboarding_reply(array('ok' => true, 'trainings' => $training->trainedOn(isset($in['email']) ? (string) $in['email'] : '')));
 }
 
+if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signlink', 'book', 'bookingstatus', 'lookup', 'closeddays', 'notifyback', 'classinfo', 'classjoin'), true)) {
+	// Training bookings (class/booking.class.php). Turnstile and per-IP limits are
+	// the Worker's. Answers about a person say only what the booking page needs:
+	// member or not, what is left to sign, a masked name for the lookup.
+	dol_include_once('/onboarding/class/booking.class.php');
+	$booking = new OnboardingBooking($db, $svc);
+	if ($action == 'catalog') {
+		// The Worker fetches this every 15 minutes, so from now it holds this version.
+		$cat = $booking->catalog();
+		$booking->websiteHas((int) $cat['version']);
+		onboarding_reply(array('ok' => true, 'catalog' => $cat));
+	}
+	if ($action == 'slots') {
+		$tool = isset($in['tool']) ? $booking->toolByRef((string) $in['tool']) : null;
+		$rows = $booking->available($tool ? (int) $tool->rowid : 0);
+		foreach ($rows as &$r) {
+			unset($r['ts']);
+		}
+		unset($r);
+		onboarding_reply(array('ok' => true, 'slots' => $rows));
+	}
+	if ($action == 'trainee') {
+		onboarding_reply($booking->trainee(isset($in['email']) ? (string) $in['email'] : ''));
+	}
+	if ($action == 'traineenew') {
+		onboarding_reply($booking->newTrainee($in));
+	}
+	if ($action == 'signlink') {
+		onboarding_reply($booking->sendSignLink(isset($in['email']) ? (string) $in['email'] : ''));
+	}
+	if ($action == 'book') {
+		onboarding_reply($booking->book($in));
+	}
+	if ($action == 'bookingstatus') {
+		onboarding_reply($booking->status(isset($in['ref']) ? (string) $in['ref'] : '', isset($in['key']) ? (string) $in['key'] : ''));
+	}
+	if ($action == 'lookup') {
+		onboarding_reply(array('ok' => true) + $booking->lookup(isset($in['email']) ? (string) $in['email'] : ''));
+	}
+	if ($action == 'closeddays') {
+		onboarding_reply($booking->setCalendarClosures(isset($in['days']) && is_array($in['days']) ? $in['days'] : array()));
+	}
+	if ($action == 'notifyback') {
+		// People who asked, while Dolibarr was down, to hear when booking reopens.
+		$n = 0;
+		foreach ((isset($in['emails']) && is_array($in['emails']) ? array_slice($in['emails'], 0, 200) : array()) as $e) {
+			$e = OnboardingService::cleanEmail($e);
+			if (isValidEmail($e) && $svc->mail($e, 'Training booking is open again', "Hi,\n\nYou asked us to tell you when training booking was working again. It is:\n\n".$booking->bookUrl()."\n\nSorry for the wait.")) {
+				$n++;
+			}
+		}
+		onboarding_reply(array('ok' => true, 'sent' => $n));
+	}
+	if ($action == 'classinfo') {
+		onboarding_reply($booking->classInfo(isset($in['code']) ? (string) $in['code'] : ''));
+	}
+	onboarding_reply($booking->classJoin($in));
+}
+
 if ($action == 'trainingstart') {
 	// A training registered on the website's /training/pay/ page, just before the
 	// trainee pays. Only adds a row that a later payment from the same email uses.
@@ -163,13 +224,20 @@ if ($action == 'status') {
 }
 
 if ($action == 'sign') {
+	$extra = array();
+	foreach (array('birthdate', 'guardian_name', 'guardian_relation', 'guardian_email') as $k) {
+		if (isset($in[$k])) {
+			$extra[$k] = (string) $in[$k];
+		}
+	}
 	onboarding_reply($svc->sign(
 		$app,
 		isset($in['doc']) ? (string) $in['doc'] : '',
 		isset($in['name']) ? (string) $in['name'] : '',
 		isset($in['version']) ? (string) $in['version'] : '',
 		isset($in['ip']) ? (string) $in['ip'] : '',
-		(string) base64_decode(isset($in['signature']) ? (string) $in['signature'] : '', true)
+		(string) base64_decode(isset($in['signature']) ? (string) $in['signature'] : '', true),
+		$extra
 	));
 }
 

@@ -50,6 +50,7 @@ $filters = array(
 	'problem' => 'Payment problem',
 	'nobadge' => 'Paying, no active badge',
 	'badgeon' => 'Not paying, badge still active',
+	'training' => 'Came for training',
 );
 $canid = $user->hasRight('onboarding', 'idphoto', 'read');
 
@@ -60,7 +61,9 @@ $sql .= " LEFT JOIN ".$db->prefix()."adherent AS m ON m.rowid = a.fk_adherent";
 $sql .= " LEFT JOIN ".$ef." AS e ON e.fk_object = a.fk_adherent";
 $sql .= " WHERE a.entity = ".((int) $conf->entity);
 if ($filter == 'open') {
-	$sql .= " AND a.stage <> 'complete'";
+	$sql .= " AND a.stage <> 'complete' AND a.training_only = 0";
+} elseif ($filter == 'training') {
+	$sql .= " AND a.training_only = 1";
 } elseif ($filter == 'problem') {
 	$sql .= " AND a.payment_state IN ('past_due', 'cancelled')";
 } elseif ($filter == 'nobadge') {
@@ -102,7 +105,7 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 	print '<td>'.dol_escape_htmltag($o->email).'</td>';
 	print '<td>'.dol_escape_htmltag($o->discord).'</td>';
 	print '<td>'.dol_print_date($db->jdate($o->datec), 'day').'</td>';
-	print '<td>'.(isset($stages[$o->stage]) ? $stages[$o->stage] : dol_escape_htmltag($o->stage)).'</td>';
+	print '<td>'.($o->training_only && $o->stage != 'complete' ? 'Training only' : (isset($stages[$o->stage]) ? $stages[$o->stage] : dol_escape_htmltag($o->stage))).'</td>';
 	print '<td class="center">'.($o->waiver_signed_at ? '<a href="'.$doc.'waiver" target="_blank" rel="noopener">'.$yes.'</a>' : $no).'</td>';
 	print '<td class="center">'.($o->agreement_signed_at ? '<a href="'.$doc.'agreement" target="_blank" rel="noopener">'.$yes.'</a>' : $no).'</td>';
 	if (!$o->id_uploaded_at) {

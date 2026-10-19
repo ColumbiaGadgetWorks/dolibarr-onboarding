@@ -351,11 +351,11 @@ assert.ok(dumpOf(paidEmail).applicant, 'still there');
 
 // ---------------------------------------------------------------- training fees
 {
-const train = async (amount, zone, tool, trainer, who = email, extra = {}) => mock('/control/pay', {
-  email: who, amount, frequency: 'once', campaign: 'TRAINING', first_name: 'Ada', last_name: 'Tester',
-  custom_fields: [{ title: 'Training Zone?', value: zone }, { title: 'Tool or equipment', value: tool }, { title: "Trainer's name", value: trainer }],
-  ...extra,
-});
+// A training paid for on the old pay-after-training page: registered first, then paid.
+const train = async (amount, zone, tool, trainer, who = email, extra = {}) => {
+  await api('trainingstart', { email: who, firstname: 'Ada', lastname: 'Tester', tool, zone: zone.replace(/\s*\(.*$/, ''), fee: amount, trainer_name: trainer });
+  return mock('/control/pay', { email: who, amount, frequency: 'once', campaign: 'TRAINING', first_name: 'Ada', last_name: 'Tester', ...extra });
+};
 const trainingId = (delivery) => Number((delivery.status.match(/training (\d+) recorded/) || [])[1]);
 const training = (...args) => tick('training', ...args);
 const balance = (type, key) => Number(training('balance', type, String(key)));
@@ -458,8 +458,8 @@ assert.ok((await mailTo(regEmail)).includes('You are trained on the Clausing lat
 
 step('registration: used once; a second payment waits to be linked by hand');
 const p2 = await payOnce(regEmail, 15);
-assert.match(p2.delivery.status, /paid without a registration/);
-assert.ok((await mailTo('membership-team@example.test')).includes('Training payment without a registration'));
+assert.match(p2.delivery.status, /paid without a booking/);
+assert.ok((await mailTo('membership-team@example.test')).includes('Training payment without a booking'));
 assert.deepEqual((await api('trainings', { email: regEmail })).trainings.map((t) => t.tool), ['Clausing lathe'], 'nothing recorded for it yet');
 const orphan = Number(p2.delivery.status.match(/training (\d+) paid/)[1]);
 const other = `e2e-reg-other-${stamp}@example.test`;

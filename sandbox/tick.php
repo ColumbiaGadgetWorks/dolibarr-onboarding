@@ -11,6 +11,11 @@
  *   php tick.php training link TRAINING REGISTRATION | expire
  *   php tick.php deadlines 8     run deadline reminders as if it were 8 days from now
  *   php tick.php deadline setup STAMP | task JSON | link TASK USER | show TASK | find LABEL
+ *   php tick.php reinit          disable and enable the module (new tables, fields, jobs)
+ *   php tick.php bookings MINUTES   run the training booking job as if it were MINUTES from now
+ *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
+ *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
+ *   php tick.php docs            read the waiver and agreement from their addresses now
  *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
 
@@ -222,6 +227,68 @@ if ($job == 'daily') {
 			unset($row->token);
 		}
 		echo json_encode($row)."\n";
+	}
+} elseif ($job == 'reinit') {
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+	// Enabling again runs the module's init: new tables, columns, fields, jobs.
+	$user = new User($db);
+	$user->fetch(0, getenv('DOLI_ADMIN_LOGIN') ?: 'admin');
+	$user->getrights();
+	$r = activateModule('modOnboarding');
+	echo empty($r['errors']) ? "ok\n" : implode('; ', $r['errors'])."\n";
+} elseif ($job == 'docs') {
+	echo $svc->fetchDocs()."\n";
+} elseif ($job == 'bookings') {
+	dol_include_once('/onboarding/class/booking.class.php');
+	OnboardingService::$now = dol_now() + ((int) (isset($argv[2]) ? $argv[2] : 0)) * 60;
+	echo (new OnboardingBooking($db, $svc))->run()."\n";
+} elseif ($job == 'booking') {
+	dol_include_once('/onboarding/class/booking.class.php');
+	$bk = new OnboardingBooking($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	$byRef = function ($ref) use ($bk, $db) {
+		$rows = $bk->bookingsWhere("ref = '".$db->escape($ref)."'");
+		return $rows ? $rows[0] : null;
+	};
+	if ($what == 'tool') {
+		$in = json_decode($argv[3], true);
+		$t = $bk->toolByRef($in['ref']);
+		echo json_encode($bk->saveTool($in, $user, $t ? (int) $t->rowid : 0))."\n";
+	} elseif ($what == 'slot') {
+		$t = $bk->toolByRef($argv[3]);
+		echo json_encode($bk->addSlot($t ? (int) $t->rowid : 0, (int) $argv[4], (int) $argv[5], $argv[6], 0, isset($argv[7]) ? (int) $argv[7] : 0, $user))."\n";
+	} elseif ($what == 'show') {
+		echo json_encode($byRef($argv[3]))."\n";
+	} elseif ($what == 'link') {
+		echo $bk->link($byRef($argv[3]), $argv[4])."\n";
+	} elseif ($what == 'answer') {
+		OnboardingService::$now = dol_now() + ((int) (isset($argv[5]) ? $argv[5] : 0)) * 60;
+		echo json_encode($bk->answer($byRef($argv[3]), $argv[4], 'from the test'))."\n";
+	} elseif ($what == 'free') {
+		echo json_encode($bk->free(json_decode($argv[3], true), $user))."\n";
+	} elseif ($what == 'class') {
+		echo json_encode($bk->createClass(json_decode($argv[3], true), $user))."\n";
+	} elseif ($what == 'classfinish') {
+		$c = $bk->klass((int) $argv[3]);
+		$ids = array();
+		foreach ($bk->bookingsWhere("fk_class = ".((int) $argv[3])." AND status = 'confirmed'") as $b) {
+			$ids[] = (int) $b->rowid;
+		}
+		echo $bk->classFinish($c, $ids, (int) $user->id)."\n";
+	} elseif ($what == 'close') {
+		echo $bk->closeDay($argv[3], 'test', $user)."\n";
+	} elseif ($what == 'calendar') {
+		echo json_encode($bk->setCalendarClosures(json_decode($argv[3], true)))."\n";
+	} elseif ($what == 'lookup') {
+		echo json_encode($bk->lookup($argv[3]))."\n";
+	} elseif ($what == 'person') {
+		$p = $bk->person($argv[3]);
+		echo json_encode(array('kind' => $p['kind'], 'needs' => $p['needs'], 'member' => $p['member'] ? (int) $p['member']->rowid : 0, 'contact' => $p['contact'], 'applicant' => $p['applicant']))."\n";
+	} elseif ($what == 'sign') {
+		// The signing token, as the emailed link would carry it.
+		$p = $bk->person($argv[3]);
+		$app = $bk->applicantFor($p);
+		echo ($app ? $svc->issueToken($app, false) : '')."\n";
 	}
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');

@@ -35,4 +35,21 @@ const st = await post(`${SITE}/api/join/status`, { token: started.token });
 assert.equal(st.paid, true, JSON.stringify(st));
 const bad = await fetch(`${SITE}/api/givebutter-webhook`, { method: 'POST', headers: { Signature: 'wrong' }, body: '{}' });
 assert.equal(bad.status, 401);
+
+// Training booking through the Worker, when the website branch has it.
+const cat = await fetch(`${SITE}/api/training/catalog`);
+if (cat.status === 404) {
+  console.log('(this website branch has no training booking yet; skipped)');
+} else {
+  const c = await cat.json();
+  assert.ok(Array.isArray(c.tools), 'the Worker serves a training catalog');
+  assert.match(await (await fetch(`${SITE}/training/book/`)).text(), /id="?tb-email/, 'booking page is served');
+  const t = await post(`${SITE}/api/training/trainee`, { email: `stack-train-${Date.now()}@example.test` });
+  assert.equal(t.kind, 'new', JSON.stringify(t));
+  assert.ok(t.session, 'a session for the next steps');
+  const slots = await (await fetch(`${SITE}/api/training/slots?tool=3d-printers`)).json();
+  assert.equal(slots.ok, true, JSON.stringify(slots));
+  const look = await post(`${SITE}/api/training/lookup`, { email: 'nobody@example.test' });
+  assert.equal(look.found, false);
+}
 console.log('STACK OK');
