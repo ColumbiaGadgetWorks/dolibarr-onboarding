@@ -37,7 +37,7 @@ $sections = array(
 	),
 	'Givebutter' => array(
 		'ONBOARDING_GB_API_KEY' => array('Givebutter API key', 'secret', 'Settings, Integrations, API Keys in Givebutter. Used for the hourly sync and for the Connect button below.'),
-		'ONBOARDING_PUBLIC_URL' => array('This Dolibarr\'s public address', 'text', 'The address Givebutter can reach, for example https://dolibarr.example.org . Leave empty if Dolibarr\'s own address setting is already the public one.'),
+		'ONBOARDING_PUBLIC_URL' => array('This Dolibarr\'s public address', 'text', 'The address the website and Givebutter reach this Dolibarr at, for example https://records.example.org (a tunnel hostname). Leave empty if Dolibarr\'s own address setting is already the public one.'),
 		'ONBOARDING_GB_CAMPAIGN_CODE' => array('Membership campaign code', 'text', 'Only payments to this campaign count as dues. It is the code at the end of the campaign link, for example kxk2FA. Leave empty to count every payment.'),
 		'ONBOARDING_CHECKOUT_URL' => array('Dues payment page', 'text', 'Where the signup sends people to pay, for example https://givebutter.com/kxk2FA .'),
 		'ONBOARDING_GB_API_BASE' => array('Givebutter API address', 'text', 'Only change this to point at the sandbox.'),
@@ -161,7 +161,7 @@ llxHeader('', 'Member onboarding setup');
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans('BackToModuleList').'</a>';
 print load_fiche_titre('Member onboarding setup', $linkback, 'title_setup');
 
-$endpoint = dol_buildpath('/onboarding/public/api.php', 2);
+$endpoint = OnboardingService::publicUrl('api.php');
 print '<div class="info">The website talks to Dolibarr at <strong>'.dol_escape_htmltag($endpoint).'</strong>. In the website Worker, set the secret <code>DOLIBARR_URL</code> to <strong>'.dol_escape_htmltag(preg_replace('/\/custom\/onboarding\/public\/api\.php$/', '', $endpoint)).'</strong> and <code>DOLIBARR_API_KEY</code> to the key below.</div>';
 
 $connected = getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID') !== '';
