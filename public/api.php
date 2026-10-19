@@ -213,6 +213,7 @@ if ($action == 'givebutter') {
 	$event = isset($in['event']) ? (string) $in['event'] : '';
 	$result = $svc->handleEvent($event, isset($in['data']) ? $in['data'] : null);
 	dol_syslog('Onboarding: Givebutter '.$event.' => '.$result);
+	$svc->noteWebhook($event.': '.$result.' (through the website)');
 	onboarding_reply(array('ok' => true, 'result' => $result));
 }
 
