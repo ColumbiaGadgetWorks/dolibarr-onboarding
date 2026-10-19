@@ -677,7 +677,12 @@ class OnboardingService
 			return $ok;
 		}
 		require_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
-		$from = getDolGlobalString('ONBOARDING_MAIL_FROM', getDolGlobalString('MAIN_MAIL_EMAIL_FROM', 'noreply@localhost'));
+		$from = trim(getDolGlobalString('ONBOARDING_MAIL_FROM', getDolGlobalString('MAIN_MAIL_EMAIL_FROM', 'noreply@localhost')));
+		// A bare address shows as its first half ("mail"); show the organization's name.
+		$name = trim(str_replace(array('"', '<', '>', "\r", "\n"), '', getDolGlobalString('ONBOARDING_MAIL_FROM_NAME', getDolGlobalString('MAIN_INFO_SOCIETE_NOM'))));
+		if ($name !== '' && strpos($from, '<') === false) {
+			$from = '"'.$name.'" <'.$from.'>';
+		}
 		try {
 			$mail = new CMailFile($subject, $to, $from, $body, array(), array(), array(), $cc, '', 0, 0, '', '', 'onboarding', '', 'standard', $replyTo);
 			$ok = $mail->sendfile();
@@ -1425,6 +1430,92 @@ You get at most one email an hour about this, and one more when it is fixed.");
 
 		dolibarr_set_const($this->db, 'ONBOARDING_GB_LAST_SYNC', $started, 'chaine', 0, '', $conf->entity);
 		return $seen.' transactions seen, '.$applied.' applied, '.$plans.' plans checked';
+	}
+
+	/**
+	 * Ask Givebutter for the payments of the last hour and apply any not seen
+	 * yet. Called while someone waits on the booking page and by the 15-minute
+	 * job when a booking is waiting for payment, so a lost webhook delays a
+	 * confirmation by seconds, not an hour. At most once every 20 seconds.
+	 *
+	 * @return int Payments applied by this call
+	 */
+	public function quickSync()
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		if (!getDolGlobalString('ONBOARDING_GB_API_KEY')) {
+			return 0;
+		}
+		$now = self::now();
+		$last = getDolGlobalInt('ONBOARDING_GB_QUICK_SYNC');
+		if ($last > 0 && $last <= $now && $now - $last < 20) {
+			return 0;
+		}
+		dolibarr_set_const($this->db, 'ONBOARDING_GB_QUICK_SYNC', $now, 'chaine', 0, '', $conf->entity);
+		$json = $this->gbGet('/transactions?updatedAfter='.rawurlencode(gmdate('Y-m-d\TH:i:s\Z', $now - 3600)));
+		$applied = 0;
+		foreach ((isset($json['data']) && is_array($json['data']) ? $json['data'] : array()) as $t) {
+			$r = $this->processTransaction($t);
+			if (strpos($r, 'applied') === 0 || preg_match('/^booking .* paid/', $r) || preg_match('/recorded/', $r)) {
+				$applied++;
+				$this->noteMissedWebhook();
+			}
+		}
+		return $applied;
+	}
+
+	/**
+	 * Remember a Givebutter call, for the setup page and the missed-webhook alert.
+	 *
+	 * @param string $result What was done, or why it was refused
+	 * @param bool $refused The call was refused (bad signature, not connected)
+	 * @return void
+	 */
+	public function noteWebhook($result, $refused = false)
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		$name = $refused ? 'ONBOARDING_GB_WEBHOOK_REFUSED' : 'ONBOARDING_GB_WEBHOOK_LAST';
+		dolibarr_set_const($this->db, $name, self::now().' '.dol_trunc((string) $result, 200, 'right', 'UTF-8', 1), 'chaine', 0, '', $conf->entity);
+		if (!$refused) {
+			dolibarr_del_const($this->db, 'ONBOARDING_GB_MISSED', $conf->entity);
+			$this->alertClear('givebutter-webhook', 'Givebutter webhooks reach Dolibarr again.');
+		}
+	}
+
+	/**
+	 * @param string $name ONBOARDING_GB_WEBHOOK_LAST or ONBOARDING_GB_WEBHOOK_REFUSED
+	 * @return array{0:int,1:string} When, and what happened
+	 */
+	public static function webhookNote($name)
+	{
+		$v = getDolGlobalString($name);
+		$sp = strpos($v, ' ');
+		return $v === '' ? array(0, '') : array((int) ($sp === false ? $v : substr($v, 0, $sp)), $sp === false ? '' : substr($v, $sp + 1));
+	}
+
+	/**
+	 * A payment was picked up by asking Givebutter: its webhook did not arrive.
+	 * Three in a row with no webhook in between emails the alerts address.
+	 *
+	 * @return void
+	 */
+	public function noteMissedWebhook()
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		$n = getDolGlobalInt('ONBOARDING_GB_MISSED') + 1;
+		dolibarr_set_const($this->db, 'ONBOARDING_GB_MISSED', $n, 'chaine', 0, '', $conf->entity);
+		if ($n >= 3 && getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID') !== '') {
+			list($when, $what) = self::webhookNote('ONBOARDING_GB_WEBHOOK_LAST');
+			list($rwhen, $rwhat) = self::webhookNote('ONBOARDING_GB_WEBHOOK_REFUSED');
+			$this->alert('givebutter-webhook', 'Givebutter webhooks are not reaching Dolibarr', 'The last '.$n.' Givebutter payments were found by asking Givebutter, not reported by its webhook. Confirmations still go out, but later than they should.'
+				."\n\nThe webhook points at: ".$this->webhookUrl()
+				."\nLast webhook received: ".($when ? dol_print_date($when, 'dayhour').' ('.$what.')' : 'never')
+				."\nLast webhook refused: ".($rwhen ? dol_print_date($rwhen, 'dayhour').' ('.$rwhat.')' : 'none')
+				."\n\nCheck Givebutter's webhook delivery log (Settings, Developers, Webhooks). If that address is internal or behind a login or a Cloudflare challenge, set \"This Dolibarr's public address\" on the setup page and press Reconnect, or point the webhook at the website (https://columbiagadgetworks.org/api/givebutter-webhook), which passes it on.");
+		}
 	}
 
 	/**

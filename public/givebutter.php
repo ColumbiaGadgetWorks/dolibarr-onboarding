@@ -50,6 +50,9 @@ header('Cache-Control: no-store');
 
 $secret = getDolGlobalString('ONBOARDING_GB_WEBHOOK_SECRET');
 if (!isModEnabled('onboarding') || $secret === '') {
+	if (isModEnabled('onboarding')) {
+		(new OnboardingService($db))->noteWebhook('refused: no signing secret stored; press Reconnect on the setup page', true);
+	}
 	http_response_code(503);
 	echo json_encode(array('ok' => false, 'error' => 'not connected'));
 	exit;
@@ -60,6 +63,7 @@ $given = isset($_SERVER['HTTP_SIGNATURE']) ? (string) $_SERVER['HTTP_SIGNATURE']
 // Givebutter sends the signing secret itself; an HMAC of the body is accepted
 // too in case they move to signing properly.
 if (!hash_equals($secret, $given) && !hash_equals(hash_hmac('sha256', $raw, $secret), strtolower($given))) {
+	(new OnboardingService($db))->noteWebhook('refused: signature did not match'.($given === '' ? ' (none sent)' : ''), true);
 	http_response_code(401);
 	echo json_encode(array('ok' => false, 'error' => 'bad signature'));
 	exit;
@@ -71,4 +75,5 @@ $user = $svc->actor();
 $event = is_array($in) && isset($in['event']) ? (string) $in['event'] : '';
 $result = $svc->handleEvent($event, is_array($in) && isset($in['data']) ? $in['data'] : null);
 dol_syslog('Onboarding: Givebutter '.$event.' => '.$result);
+$svc->noteWebhook($event.': '.$result);
 echo json_encode(array('ok' => true, 'result' => $result));

@@ -11,6 +11,10 @@
  *   GET  .../custom/onboarding/public/booking.php?b=BOOKING&w=trainer|trainee&k=SIGNATURE[&a=ACTION]
  *   GET  .../custom/onboarding/public/booking.php?c=CLASS&k=SIGNATURE
  *   POST the same, with do=ACTION and the action's fields
+ *
+ * Emails link to the website's /training/link/ with the same query, which passes
+ * the request here with the website key and shows the answer inside the website
+ * (see onboarding_booking_page). Opening this file directly works too.
  */
 
 if (!defined('NOLOGIN')) {
@@ -60,6 +64,18 @@ dol_include_once('/onboarding/class/booking.class.php');
 function onboarding_booking_page($title, $html, $code = 200)
 {
 	global $db;
+	// Shown inside the website (its /training/link/ passes clicks through with
+	// the website key): the website wraps the body in its own page.
+	$key = getDolGlobalString('ONBOARDING_API_KEY');
+	$given = isset($_SERVER['HTTP_X_ONBOARDING_KEY']) ? (string) $_SERVER['HTTP_X_ONBOARDING_KEY'] : '';
+	if ($key !== '' && hash_equals($key, $given)) {
+		http_response_code(200);
+		header('Content-Type: application/json; charset=utf-8');
+		header('Cache-Control: no-store');
+		echo json_encode(array('ok' => true, 'status' => $code, 'title' => $title, 'html' => $html));
+		$db->close();
+		exit;
+	}
 	http_response_code($code);
 	header('Content-Type: text/html; charset=utf-8');
 	header('X-Robots-Tag: noindex');
@@ -89,7 +105,8 @@ function onboarding_booking_page($title, $html, $code = 200)
  */
 function onboarding_booking_form($hidden, $do, $label, $extra = '', $class = '')
 {
-	$h = '<form method="post" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
+	// Posts back to the address it was opened at: this file, or the website's /training/link/.
+	$h = '<form method="post" action="">';
 	foreach ($hidden as $k => $v) {
 		$h .= '<input type="hidden" name="'.dol_escape_htmltag($k).'" value="'.dol_escape_htmltag($v).'">';
 	}

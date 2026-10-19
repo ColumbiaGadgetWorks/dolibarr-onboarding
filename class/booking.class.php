@@ -1317,6 +1317,11 @@ class OnboardingBooking
 			return array('ok' => false, 'error' => 'invalid', 'http' => 404);
 		}
 		$b = $rows[0];
+		// The trainee is waiting on the page: if the webhook has not brought the
+		// payment yet, ask Givebutter (at most every 20 seconds, for everyone).
+		if (in_array($b->status, array('held', 'expired'), true) && $this->svc->quickSync()) {
+			$b = $this->booking((int) $b->rowid);
+		}
 		return array('ok' => true, 'status' => (string) $b->status, 'paid' => in_array($b->status, array('paid', 'confirmed', 'trained'), true));
 	}
 
@@ -1800,6 +1805,10 @@ class OnboardingBooking
 		$now = OnboardingService::now();
 		$n = array('expired' => 0, 'reminded' => 0, 'unconfirmed' => 0, 'dayof' => 0, 'after' => 0, 'followup' => 0, 'classes' => 0);
 
+		// Someone paying, or let go of in the last day: pick up a payment the webhook missed.
+		if ($this->bookingsWhere("gb_transaction_id IS NULL AND (status = 'held' OR (status = 'expired' AND hold_until >= '".$this->db->idate($now - 86400)."'))")) {
+			$this->svc->quickSync();
+		}
 		$res = $this->db->query("UPDATE ".$this->db->prefix()."onboarding_booking SET status = 'expired' WHERE status = 'held' AND hold_until < '".$this->db->idate($now)."'");
 		$n['expired'] = $res ? $this->db->affected_rows($res) : 0;
 
@@ -2540,7 +2549,24 @@ class OnboardingBooking
 	 */
 	public function link($b, $who, $action = '')
 	{
-		return dol_buildpath('/onboarding/public/booking.php', 2).'?b='.((int) $b->rowid).'&w='.$who.'&k='.$this->sign('booking:'.((int) $b->rowid).':'.$who).($action !== '' ? '&a='.$action : '');
+		return $this->linkBase().'?b='.((int) $b->rowid).'&w='.$who.'&k='.$this->sign('booking:'.((int) $b->rowid).':'.$who).($action !== '' ? '&a='.$action : '');
+	}
+
+	/**
+	 * Where the email buttons point: the website's /training/link/, which shows
+	 * public/booking.php inside the website, or public/booking.php itself when no
+	 * website is set or ONBOARDING_LINKS_VIA_WEBSITE is 0. Both stay valid, so
+	 * links already sent keep working whichever is chosen.
+	 *
+	 * @return string
+	 */
+	public function linkBase()
+	{
+		$site = rtrim(getDolGlobalString('ONBOARDING_WEBSITE_URL'), '/');
+		if ($site !== '' && getDolGlobalString('ONBOARDING_LINKS_VIA_WEBSITE', '1') !== '0') {
+			return $site.'/training/link/';
+		}
+		return dol_buildpath('/onboarding/public/booking.php', 2);
 	}
 
 	/**
@@ -2549,7 +2575,7 @@ class OnboardingBooking
 	 */
 	public function classLink($c)
 	{
-		return dol_buildpath('/onboarding/public/booking.php', 2).'?c='.((int) $c->rowid).'&k='.$this->sign('class:'.((int) $c->rowid));
+		return $this->linkBase().'?c='.((int) $c->rowid).'&k='.$this->sign('class:'.((int) $c->rowid));
 	}
 
 	/**
@@ -2707,6 +2733,7 @@ class OnboardingBooking
 		$key = 'ONBOARDING_MAIL_BK_'.strtoupper($name);
 		$subject = getDolGlobalString($key.'_SUBJECT', $all[$name][0]);
 		$body = getDolGlobalString($key.'_BODY', $all[$name][1]);
+		$vars += array('org' => getDolGlobalString('MAIN_INFO_SOCIETE_NOM', 'the makerspace'));
 		$map = array();
 		foreach ($vars as $k => $v) {
 			$map['{'.$k.'}'] = (string) $v;

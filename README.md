@@ -199,7 +199,17 @@ alerts address.
    days; a second keeps the fee (split as usual) and records no training.
 
 Every email link is signed for one booking and one person, and opening it changes
-nothing until a button is pressed. Refunds are made by the treasurer in Givebutter (its API
+nothing until a button is pressed. The links open on the website
+(`https://columbiagadgetworks.org/training/link/?…`), which passes the click to
+`public/booking.php` with the website key and shows the answer inside the site; set
+"Email buttons on the website" to 0 to link to Dolibarr directly. Both addresses keep
+working, so links already sent never break.
+
+Payments are matched within seconds: Givebutter's webhook brings them, and while a trainee
+waits on the booking page Dolibarr also asks Givebutter for the last hour's payments (at
+most every 20 seconds), as does the 15-minute job whenever a booking waits for payment. The
+setup page shows when the last webhook arrived and the last one refused; when payments keep
+being found by asking instead, the alerts address is emailed with what to check. Refunds are made by the treasurer in Givebutter (its API
 cannot refund), then **Mark refunded** on the booking. Every time above is a setting
 (Training bookings on the setup page), and every email's wording can be replaced with
 `ONBOARDING_MAIL_BK_<NAME>_SUBJECT` / `_BODY` (names in `class/booking.class.php`, `mails()`).

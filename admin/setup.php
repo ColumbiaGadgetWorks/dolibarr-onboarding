@@ -32,6 +32,7 @@ $sections = array(
 		'ONBOARDING_JOIN_URL' => array('Join page address', 'text', 'For example https://columbiagadgetworks.org/membership/join/ . Used for the "pick up where you left off" email.'),
 		'ONBOARDING_STAFF_EMAIL' => array('Membership team email', 'text', 'Told when someone becomes a paying member (needs a badge) or stops paying (badge off).'),
 		'ONBOARDING_MAIL_FROM' => array('Send emails from', 'text', 'Leave empty to use Dolibarr\'s default sender.'),
+		'ONBOARDING_MAIL_FROM_NAME' => array('Sender name', 'text', 'Shown as who the email is from, e.g. Columbia Gadget Works. Empty: the company name in Dolibarr (Setup, Company).'),
 		'ONBOARDING_UPDATES_TAG' => array('Email updates tag', 'text', 'Contacts who ask for email updates on the website get this tag. To send an update, create an emailing in Tools, EMailing and add recipients from Contacts filtered by this tag. If you rename it here, rename the tag in Tags/Categories too.'),
 	),
 	'Givebutter' => array(
@@ -56,6 +57,7 @@ $sections = array(
 	'Training bookings' => array(
 		'ONBOARDING_WEBSITE_URL' => array('Website', 'text', 'e.g. https://columbiagadgetworks.org . Dolibarr sends it the training catalog and the lookup copy whenever they change. Empty: nothing is sent and the website only picks changes up every 15 minutes.'),
 		'ONBOARDING_TRAINING_BOOK_URL' => array('Booking page', 'text', 'Empty: <website>/training/book/ . The signing link in emails opens it.'),
+		'ONBOARDING_LINKS_VIA_WEBSITE' => array('Email buttons on the website (1 or 0)', 'text', 'Default 1: the buttons in training emails open <website>/training/link/, which shows the page inside the website. 0: they open this Dolibarr directly. Links sent either way keep working.'),
 		'ONBOARDING_ALERT_EMAIL' => array('Alerts go to', 'text', 'Problems between Dolibarr, the website and Givebutter, including the website not reaching Dolibarr. Empty: whoever holds the secretary tag.'),
 		'ONBOARDING_TRAINING_CHECKIN_ALERT_MINUTES' => array('Alert when the website is silent for (minutes)', 'text', 'The website fetches the catalog every 15 minutes. Default 30.'),
 		'ONBOARDING_TRAINING_TZ' => array('Time zone', 'text', 'Trainers\' times are on this clock, e.g. America/Chicago.'),
@@ -166,6 +168,21 @@ $connected = getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID') !== '';
 print '<div class="'.($connected ? 'ok' : 'warning').'">';
 print $connected ? 'Givebutter is connected: it reports payments and cancelled plans to <strong>'.dol_escape_htmltag($svc->webhookUrl()).'</strong>. ' : 'Givebutter is not connected yet, so payments are only noticed by the hourly sync. Save the API key below, then press Connect. ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=connect&token='.newToken().'">'.($connected ? 'Reconnect' : 'Connect Givebutter').'</a>';
+if ($connected) {
+	list($when, $what) = OnboardingService::webhookNote('ONBOARDING_GB_WEBHOOK_LAST');
+	list($rwhen, $rwhat) = OnboardingService::webhookNote('ONBOARDING_GB_WEBHOOK_REFUSED');
+	print '<br><span class="small">Last webhook received: <strong>'.($when ? dol_print_date($when, 'dayhour').'</strong> ('.dol_escape_htmltag($what).')' : 'none yet</strong>').'.';
+	if ($rwhen) {
+		print ' Last refused: <strong>'.dol_print_date($rwhen, 'dayhour').'</strong> ('.dol_escape_htmltag($rwhat).').';
+	}
+	if (getDolGlobalInt('ONBOARDING_GB_MISSED') > 0) {
+		print ' <span class="warning">'.getDolGlobalInt('ONBOARDING_GB_MISSED').' payment(s) since then were found by asking Givebutter instead.</span>';
+	}
+	if (preg_match('#^https?://(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^/]*\.local\b|[^/.:]+(:\d+)?/)#i', $svc->webhookUrl())) {
+		print ' <span class="warning">That address looks internal, so Givebutter cannot reach it: set "This Dolibarr\'s public address" below and press Reconnect.</span>';
+	}
+	print ' If payments arrive late, check the delivery log in Givebutter (Settings, Developers, Webhooks).</span>';
+}
 print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import.php', 1).'">Import existing members</a>';
 print ' <a class="butAction" href="'.dol_buildpath('/onboarding/admin/import-emails.php', 1).'">Import email list</a>';
 print '</div>';

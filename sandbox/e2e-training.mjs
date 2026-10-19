@@ -46,7 +46,8 @@ async function lastText(addr, includes) {
   return (await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json()).Text;
 }
 // The links in emails point at Dolibarr's own address; reach it from here.
-const local = (link) => link.replace(/^https?:\/\/[^/]+/, DOLI);
+// Website links (/training/link/) are opened at Dolibarr's own page, which they pass through to.
+const local = (link) => link.replace(/^https?:\/\/[^/]+\/training\/link\//, `${DOLI}/custom/onboarding/public/booking.php`).replace(/^https?:\/\/[^/]+/, DOLI);
 const page = async (link) => (await fetch(local(link))).text();
 async function press(link, fields) {
   const [url, query] = local(link).split('?');
@@ -141,6 +142,9 @@ assert.equal(refused.error, 'paperwork');
 
 step('signing: the link comes by email; a date of birth is needed; an adult signs for themselves');
 assert.equal((await api('signlink', { email: nina })).sent, true);
+const signMail = (await mails(nina)).find((m) => m.Subject.includes('Sign to book'));
+assert.doesNotMatch(signMail.Subject, /\{/, 'placeholders filled in');
+assert.ok(signMail.From.Name, 'the sender has a name');
 const token = ((await lastText(nina, 'Sign to book')).match(/#s=([a-f0-9]{48})/) || [])[1];
 const d0 = await docs();
 assert.equal((await api('sign', { token, doc: 'waiver', name: 'Nina Newcomer', version: d0.waiver.version, signature: png(48) })).error, 'birthdate');
@@ -168,7 +172,7 @@ assert.ok(await heard(trainerEmail, `Training booked: ${toolName}`));
 assert.match((await mock('/control/resend')).status, /duplicate/, 'the same webhook twice changes nothing');
 
 step('trainer confirms from the email; opening the link alone changes nothing');
-const confirmLink = ((await lastText(trainerEmail, 'Training booked')).match(/https?:\/\/\S+public\/booking\.php\?\S+a=confirm/) || [])[0];
+const confirmLink = ((await lastText(trainerEmail, 'Training booked')).match(/https?:\/\/\S+(?:public\/booking\.php|training\/link\/)\?\S+a=confirm/) || [])[0];
 assert.ok(confirmLink);
 assert.equal((await fetch(local(confirmLink).replace(/k=\w+/, 'k=0000'))).status, 403, 'a changed link is refused');
 assert.match(await page(confirmLink), /Will you be there\?/);
@@ -207,6 +211,17 @@ assert.ok(await heard(wally, 'did not match your booking'));
 assert.ok(await heard(secretary, `Training paid with the wrong amount: ${bw.ref}`));
 bk('show', bw.ref);
 sql(`UPDATE llx_onboarding_booking SET status = 'cancelled' WHERE ref = '${bw.ref}'`);
+
+step('no webhook: the booking page asking for the status finds the payment in Givebutter');
+const quiet = `quiet-${ts}@example.test`;
+await ready(quiet, 'Qui', 'Et');
+const bq = await api('book', { email: quiet, tool, slot: s3.slot, start: s3.start });
+await mock('/control/pay', { email: quiet, amount: 10, frequency: 'once', campaign: 'TRAINING', silent: true });
+tick('purchase', 'const', 'ONBOARDING_GB_QUICK_SYNC', '0');
+assert.equal((await api('bookingstatus', { ref: bq.ref, key: bq.key })).paid, true);
+assert.ok(await heard(quiet, 'You are booked'), 'the confirmation went out straight away');
+assert.match(bk('link', bq.ref, 'trainee'), /\/training\/link\/\?b=|public\/booking\.php\?b=/);
+sql(`UPDATE llx_onboarding_booking SET status = 'cancelled' WHERE ref = '${bq.ref}'`);
 
 step('a full session is not offered');
 assert.ok(!(await api('slots', { tool })).slots.some((s) => s.start === s1.start), 'two seats, two bookings');
