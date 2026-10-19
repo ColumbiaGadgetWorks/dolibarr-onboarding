@@ -137,7 +137,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -367,6 +367,51 @@ reports how long it lasted, and Dolibarr emails that too. The website sends no e
 5. In Givebutter, remove the zone, trainer and tool questions from the training campaign.
 6. Deploy the website branch with the booking page, then press **Send to the website now**.
 7. When the waiver and agreement files hold your wording, set their GitHub addresses.
+
+## Member votes
+
+Bylaw changes and the board election at the annual meeting (bylaws section 4; the steps are in
+`policies/how-we-decide.md` in the bylaws repository). Nobody logs in: the Secretary and the
+President work the vote from buttons in their emails, and every voter gets a personal ballot
+link. Their links open `public/vote.php` inside the website at `/voting/link/`, and each works
+only while its holder still has the `secretary` or `president` tag.
+
+| When | What happens |
+|---|---|
+| 60 days before the meeting | The vote for the second Thursday of April is made, with one question per board seat (and, the first time, the question to ratify the bylaws). The officers get its panel link to add bylaw questions and the pull request members discuss them on |
+| 21, 16 and 14 days before | Emails to the officers: **Send notice**. The notice goes to every full member who will have been a member for 30 days by the meeting, with a **Run for a board seat** button. Dolibarr refuses it less than 14 or more than 60 days before |
+| 7 days before | **Send reminder**: the candidates so far and the discussion link |
+| The meeting day, 5 pm | **Open voting**, pressed during the meeting after floor nominations. Dolibarr tags the pull request's latest commit `ballot/<date>`, takes the roll, and emails each voter their ballot |
+| 6 days after | **Remind non-voters** |
+| 8 days after | Voting closes by itself. The result (eligible voters, ballots, quorum, totals, outcome) is emailed to the officers and posted on the pull request, or as an issue in the governance repository |
+
+- **Who votes**: validated members of the full member types (Standard and Supporter unless set
+  otherwise) who joined at least 30 days before voting opens. Joining is their first subscription,
+  else the date they were validated.
+- **Candidates**: full members, 18 or older (from the birth date on the card, else they tick a box),
+  one seat each. A seat with one candidate is Yes, No or Abstain; with none it is reported vacant.
+- **Counting**: quorum is 10% of the roll, at least 5 ballots; abstentions count toward quorum but
+  not as votes cast. Bylaw questions need two-thirds (or a majority, if set). A tie goes to the
+  President as buttons in an email; to the Secretary when the President is tied; by lot when both are.
+  At the first annual meeting the election counts only if the bylaws are ratified.
+- **Secret ballot**: there is no table of ballots. Casting marks the member voted, with a date only,
+  and adds one to each chosen answer in the same transaction. The totals stay hidden until voting closes.
+- **Lost ballot email**: the website's `/voting/` page asks for the email and the last two digits of
+  the member number (from `member_code`, else the member id) and emails the link again, at most every
+  10 minutes, with the same answer whether or not the email can vote.
+- **Practice vote**: Members, Onboarding, Member votes, **Start a practice vote**. The board members
+  are the voters, the date rules are skipped, and nothing goes to GitHub.
+- **GitHub**: set a fine-grained token on the setup page (Member votes), for the governance repository,
+  with Contents, Issues and Pull requests set to Read and write. Dolibarr warns a month before it expires.
+
+### Updating to 0.8
+
+1. Update the module and disable and enable **Member onboarding** once (new tables and the
+   Member votes permission; the votes run in the existing 15-minute job).
+2. Give the board user group "See member votes". Check someone holds `secretary` and `president`.
+3. On the setup page, under Member votes, paste the GitHub token. Check the full member types and seats.
+4. Deploy the website branch with the `/voting/` pages.
+5. In January, start a practice vote with the board.
 
 ## Deadline reminders
 

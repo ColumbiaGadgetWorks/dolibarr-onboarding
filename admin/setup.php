@@ -78,6 +78,16 @@ $sections = array(
 		'ONBOARDING_TRAINING_GUARDIAN_PRESENT' => array('Guardian must come with a minor (1 or 0)', 'text', 'Default 1. Said in the trainer\'s and trainee\'s emails.'),
 		'ONBOARDING_TRAINER_TAG' => array('Trainer tag', 'text', 'Trainers get a tag "<this>: <tool>". Default Trainer.'),
 	),
+	'Member votes' => array(
+		'ONBOARDING_VOTE_TYPES' => array('Full member types', 'text', 'Member type ids whose members vote and may run for the board, comma separated. Empty: Standard and Supporter. Hardship and Legacy members do not vote.'),
+		'ONBOARDING_VOTE_SEATS' => array('Board seats', 'text', 'In ballot order. Default President,Vice President,Secretary,Treasurer.'),
+		'ONBOARDING_VOTE_MEETING_TIME' => array('Annual meeting starts at', 'text', 'The meeting is the second Thursday of April. Default 18:00, on the shop\'s clock.'),
+		'ONBOARDING_VOTE_PLACE' => array('Meeting place', 'text', 'Default 1404 Grand Ave, Unit B, Columbia.'),
+		'ONBOARDING_VOTE_DAYS' => array('Voting stays open (days)', 'text', 'Default 8 (bylaws 4.5).'),
+		'ONBOARDING_VOTE_REPO' => array('Governance repository', 'text', 'owner/repo on GitHub. Results go on the vote\'s pull request, or as an issue here when it has none. Default ColumbiaGadgetWorks/bylaws.'),
+		'ONBOARDING_VOTE_GITHUB_TOKEN' => array('GitHub token', 'secret', 'A fine-grained token for the repository above with Contents, Issues and Pull requests set to Read and write. Tags the final text when voting opens and posts the result. You are warned a month before it expires.'),
+		'ONBOARDING_GITHUB_API' => array('GitHub API address', 'text', 'Only change this to point at the sandbox.'),
+	),
 	'Purchase requests' => array(
 		'ONBOARDING_PURCHASE_LEAD_LIMIT' => array('Zone lead limit', 'text', 'Largest request a zone lead may approve alone, in dollars.'),
 		'ONBOARDING_PURCHASE_RECEIPT_DAYS' => array('Receipt within (days)', 'text', 'A reimbursement must be filed within this many days of buying. Keeps reimbursements tax free for the member under the IRS accountable plan rules.'),

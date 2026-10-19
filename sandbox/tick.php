@@ -235,7 +235,11 @@ if ($job == 'daily') {
 	$user->fetch(0, getenv('DOLI_ADMIN_LOGIN') ?: 'admin');
 	$user->getrights();
 	$r = activateModule('modOnboarding');
-	echo empty($r['errors']) ? "ok\n" : implode('; ', $r['errors'])."\n";
+	// activateModule skips init when the module is already on; run it anyway.
+	dol_include_once('/onboarding/core/modules/modOnboarding.class.php');
+	$mod = new modOnboarding($db);
+	$ok = $mod->init('') > 0;
+	echo empty($r['errors']) && $ok ? "ok\n" : trim(implode('; ', $r['errors']).' '.$mod->error)."\n";
 } elseif ($job == 'docs') {
 	echo $svc->fetchDocs()."\n";
 } elseif ($job == 'bookings') {
@@ -311,6 +315,58 @@ if ($job == 'daily') {
 		$out['files'] = array_map('basename', glob(DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid).'/*') ?: array());
 	}
 	echo json_encode($out)."\n";
+} elseif ($job == 'vote') {
+	// Member votes. vote create DAYS LABEL [test] | run MINUTES | meeting ID DAYS |
+	// joined EMAIL DAYS | link ID EMAIL WHO | show ID | tables
+	dol_include_once('/onboarding/class/vote.class.php');
+	$vt = new OnboardingVote($db);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	$memberId = function ($email) use ($vt) {
+		$m = $vt->memberByEmail($email);
+		return $m ? (int) $m->rowid : 0;
+	};
+	if ($what == 'create') {
+		$v = $vt->create(dol_now() + (int) round(((float) $argv[3]) * 86400), $argv[4], !empty($argv[5]));
+		echo ($v ? $v->rowid : 0)."\n";
+	} elseif ($what == 'run') {
+		OnboardingService::$now = dol_now() + ((int) (isset($argv[3]) ? $argv[3] : 0)) * 60;
+		echo $vt->runJob()."\n";
+	} elseif ($what == 'meeting') {
+		$db->query("UPDATE ".$db->prefix()."onboarding_vote SET meeting_at = '".$db->idate(dol_now() + (int) round(((float) $argv[4]) * 86400))."' WHERE rowid = ".((int) $argv[3]));
+		echo "ok\n";
+	} elseif ($what == 'joined') {
+		// Pretend the member joined DAYS ago.
+		$db->query("UPDATE ".$db->prefix()."adherent SET datevalid = '".$db->idate(dol_now() - ((int) $argv[4]) * 86400)."' WHERE rowid = ".$memberId($argv[3]));
+		$db->query("DELETE FROM ".$db->prefix()."subscription WHERE fk_adherent = ".$memberId($argv[3]));
+		echo "ok\n";
+	} elseif ($what == 'birth') {
+		$db->query("UPDATE ".$db->prefix()."adherent SET birth = '".$db->escape($argv[4])."' WHERE rowid = ".$memberId($argv[3]));
+		echo "ok\n";
+	} elseif ($what == 'link') {
+		echo $vt->link($vt->get((int) $argv[3]), $memberId($argv[4]), $argv[5])."\n";
+	} elseif ($what == 'show') {
+		$v = $vt->get((int) $argv[3]);
+		$r = $vt->results($v);
+		$qs = array();
+		foreach ($r['questions'] as $row) {
+			$qs[] = array('title' => $row['q']->title, 'outcome' => $row['outcome'], 'passed' => $row['passed'], 'options' => array_map(function ($o) {
+				return array('label' => $o->label, 'votes' => (int) $o->votes);
+			}, $row['options']), 'candidates' => array_map(function ($c) {
+				return $c->name;
+			}, $vt->candidates($v, (int) $row['q']->rowid)));
+		}
+		echo json_encode(array('status' => $v->status, 'voters' => (int) $v->voters, 'ballots' => (int) $v->ballots, 'quorum' => $r['quorum'], 'met' => $r['met'], 'tag' => $v->tag, 'posted' => $v->posted_url, 'post_error' => $v->post_error, 'questions' => $qs, 'result' => $v->result))."\n";
+	} elseif ($what == 'tables') {
+		// The columns of the roll and the answers: proof that nothing ties a voter to a choice.
+		$out = array();
+		foreach (array('onboarding_vote_roll', 'onboarding_vote_option') as $t) {
+			$res = $db->query("SHOW COLUMNS FROM ".$db->prefix().$t);
+			while ($res && ($o = $db->fetch_object($res))) {
+				$out[$t][] = $o->Field.' '.$o->Type;
+			}
+		}
+		echo json_encode($out)."\n";
+	}
 } else {
 	fwrite(STDERR, "Usage: php tick.php daily [days] | sync | dump EMAIL | connect [URL] | import [go] < sheet | emails [go] < list | contact EMAIL | unsubscribe EMAIL | training ...\n");
 	exit(1);

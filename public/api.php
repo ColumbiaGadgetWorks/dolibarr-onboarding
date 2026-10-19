@@ -175,6 +175,15 @@ if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signli
 	onboarding_reply($booking->classJoin($in));
 }
 
+if ($action == 'voteresend') {
+	// "Send my ballot again" on the website's /voting/ page. The same answer every
+	// time, so it cannot tell anyone who is on the roll; the link only goes to the
+	// address on the member card.
+	dol_include_once('/onboarding/class/vote.class.php');
+	$vote = new OnboardingVote($db);
+	$vote->resend(isset($in['email']) ? (string) $in['email'] : '', isset($in['pin']) ? (string) $in['pin'] : '');
+	onboarding_reply(array('ok' => true));
+}
 if ($action == 'trainingstart') {
 	// A training registered on the website's /training/pay/ page, just before the
 	// trainee pays. Only adds a row that a later payment from the same email uses.

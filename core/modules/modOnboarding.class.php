@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.7.0';
+		$this->version = '0.8.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		$this->module_parts = array();
@@ -118,7 +118,7 @@ class modOnboarding extends DolibarrModules
 				'objectname' => 'OnboardingCron',
 				'method' => 'bookings',
 				'parameters' => '',
-				'comment' => 'Lets go of unpaid seats, asks trainers to confirm and cancels unconfirmed sessions, sends day-of reminders and the questions after each training, sends group class lists, and checks the website has the current training catalog.',
+				'comment' => 'Lets go of unpaid seats, asks trainers to confirm and cancels unconfirmed sessions, sends day-of reminders and the questions after each training, sends group class lists, checks the website has the current training catalog, and runs member votes (reminders to the Secretary and President, ballot emails, closing and counting).',
 				'frequency' => 15,
 				'unitfrequency' => 60,
 				'status' => 1,
@@ -168,6 +168,11 @@ class modOnboarding extends DolibarrModules
 		$this->rights[$r][1] = 'Edit training tools, trainers, their times and closed days';
 		$this->rights[$r][4] = 'training';
 		$this->rights[$r][5] = 'tools';
+		$r++;
+		$this->rights[$r][0] = $this->numero.'09';
+		$this->rights[$r][1] = 'See member votes: turnout and results, and start a practice vote (give it to the board)';
+		$this->rights[$r][4] = 'vote';
+		$this->rights[$r][5] = 'read';
 		$r++;
 
 		$this->menu = array();
@@ -268,6 +273,20 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->hasRight("onboarding", "training", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Member votes',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_votes',
+			'url' => '/onboarding/votes.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->hasRight("onboarding", "vote", "read")',
 			'target' => '',
 			'user' => 0,
 		);
