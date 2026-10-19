@@ -337,10 +337,11 @@ used, as before.
 
 Problems between Dolibarr, the website and Givebutter are emailed to **Alerts go to** on the
 setup page (empty: whoever holds the `secretary` tag), at most once an hour for the same
-problem and once more when it clears: the website not accepting updates or not checking in,
-the hourly Givebutter sync failing, the training booking job failing, the waiver or agreement
-unreadable in GitHub. The website emails the same address itself when it cannot reach
-Dolibarr (see the website's README).
+problem and once more when it clears: the website not checking in for 30 minutes (it fetches
+the catalog every 15, so silence means it cannot reach Dolibarr), the website not accepting
+updates, the hourly Givebutter sync failing, the training booking job failing, the waiver or
+agreement unreadable in GitHub. When the website reaches Dolibarr again after an outage it
+reports how long it lasted, and Dolibarr emails that too. The website sends no email itself.
 
 ### Updating to 0.7
 

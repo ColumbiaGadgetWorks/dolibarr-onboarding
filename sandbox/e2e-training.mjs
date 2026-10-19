@@ -378,4 +378,23 @@ assert.equal(nd.waiver.text, `Sandbox waiver, revised ${ts}.`);
 assert.equal(sql(`SELECT COUNT(*) FROM llx_onboarding_doc_version WHERE version = '${oldVersion}'`), '1', 'the old wording is kept');
 assert.deepEqual((await api('trainee', { email: nina })).needs, [], 'someone who signed the old one can still book');
 
+step('alerts come from Dolibarr: the website silent for 30 minutes, and its outage report');
+const alerts = 'alerts@example.test';
+const count = async (text) => (await subjects(alerts)).filter((x) => x.includes(text)).length;
+// The steps above ran the job days ahead; start this one clean.
+tick('purchase', 'const', 'ONBOARDING_ALERT_WEBSITE_CHECKIN', '0');
+await api('catalog', {});
+const quiet0 = await count('has not checked in');
+tick('bookings', '20');
+assert.equal(await count('has not checked in'), quiet0, 'not after 20 minutes');
+tick('bookings', '40');
+assert.equal(await count('The website has not checked in with Dolibarr'), quiet0 + 1);
+const fixed0 = await count('checks in with Dolibarr again');
+await api('catalog', {});
+tick('bookings', '1');
+assert.equal(await count('checks in with Dolibarr again'), fixed0 + 1);
+assert.equal((await api('websitereport', { down_since: new Date(Date.now() - 25 * 60e3).toISOString(), back: new Date().toISOString(), minutes: 25, waiting: 2 })).reported, true);
+assert.ok(await heard(alerts, 'could not reach Dolibarr for 25 minutes'));
+assert.equal((await api('websitereport', { minutes: 3 })).reported, false, 'short blips are not reported');
+
 console.log('\nALL PASSED');

@@ -1910,8 +1910,10 @@ class OnboardingBooking
 	}
 
 	/**
-	 * Dolibarr's side of the website check: has the website fetched the latest
-	 * catalog in the last hour?
+	 * Dolibarr's side of the website check. The website fetches the catalog
+	 * every 15 minutes; no fetch for half an hour means it cannot reach this
+	 * Dolibarr (down, a tunnel or DNS problem, a changed key) or its job stopped.
+	 * A fetch that leaves it on an old version for an hour means pushes fail.
 	 *
 	 * @param int $now Now
 	 * @return void
@@ -1922,20 +1924,41 @@ class OnboardingBooking
 			return;
 		}
 		$seen = getDolGlobalInt('ONBOARDING_WEBSITE_SEEN');
+		$quiet = (int) round(self::num('TRAINING_CHECKIN_ALERT_MINUTES', 30) * 60);
+		if ($seen && $now - $seen > $quiet) {
+			$this->svc->alert('website-checkin', 'The website has not checked in with Dolibarr', 'The website last fetched the training catalog '.dol_print_date($seen, 'dayhour').' ('.round(($now - $seen) / 60).' minutes ago). It normally does every 15 minutes, so it probably cannot reach this Dolibarr from the internet: check that Dolibarr\'s public address (the website\'s DOLIBARR_URL) answers from outside, that the tunnel or DNS is up, and that the website\'s DOLIBARR_API_KEY matches the "Key for the website" on the module setup page.'."\n\nWhile this lasts, booking and signup on the website are paused; tool pages and the lookup still work from the website's copy.");
+		} elseif ($seen) {
+			$this->svc->alertClear('website-checkin', 'The website checks in with Dolibarr again.');
+		}
 		$has = getDolGlobalInt('ONBOARDING_WEBSITE_VERSION');
 		$version = $this->version();
 		$late = (int) round(self::num('TRAINING_SYNC_ALERT_MINUTES', 60) * 60);
 		$last = $this->changes(1);
 		$changedAt = $last ? $this->db->jdate($last[0]->datec) : 0;
 		if ($has >= $version || ($changedAt && $now - $changedAt < $late)) {
-			if ($seen && $now - $seen > 3 * $late) {
-				$this->svc->alert('website-sync', 'The website has not checked in with Dolibarr', 'The website last fetched the training catalog '.dol_print_date($seen, 'dayhour').'. It normally does every 15 minutes. Check that the Worker has DOLIBARR_URL and DOLIBARR_API_KEY set and that this Dolibarr is reachable from the internet.');
-			} else {
-				$this->svc->alertClear('website-sync', 'The website has the current training catalog again.');
-			}
+			$this->svc->alertClear('website-sync', 'The website has the current training catalog again.');
 			return;
 		}
 		$this->svc->alert('website-sync', 'The website has an old training catalog', 'Dolibarr is on catalog version '.$version.' but the website last reported version '.$has.($seen ? ' ('.dol_print_date($seen, 'dayhour').')' : '').'. Press "Send to the website now" under Members, Onboarding, Training tools, and check the website Worker\'s DOLIBARR_URL and DOLIBARR_API_KEY.');
+	}
+
+	/**
+	 * The website reached Dolibarr again after failing to: say so, with how long.
+	 *
+	 * @param array<string,mixed> $in down_since, back (ISO 8601), minutes, waiting
+	 * @return array<string,mixed>
+	 */
+	public function websiteReport($in)
+	{
+		$minutes = isset($in['minutes']) ? (int) $in['minutes'] : 0;
+		$from = isset($in['down_since']) ? strtotime((string) $in['down_since']) : 0;
+		$back = isset($in['back']) ? strtotime((string) $in['back']) : 0;
+		if ($minutes < (int) self::num('TRAINING_OUTAGE_REPORT_MINUTES', 10)) {
+			return array('ok' => true, 'reported' => false);
+		}
+		$waiting = isset($in['waiting']) ? (int) $in['waiting'] : 0;
+		$this->svc->mail($this->svc->alertTo(), '[Fixed] The website could not reach Dolibarr for '.$minutes.' minutes', 'The website could not reach Dolibarr'.($from ? ' from '.self::fmt($from, 'D j M, g:i A') : '').($back ? ' until '.self::fmt($back, 'D j M, g:i A') : '').' ('.$minutes.' minutes). It reaches it again now.'."\n\nDuring that time booking and signup on the website were paused; tool pages and the lookup worked from the website's copy.".($waiting ? ' '.$waiting.' people asked to hear when booking was back, and are being emailed now.' : '')."\n\nIf this happens often, check what Dolibarr's public address runs through (tunnel, DNS, the server).");
+		return array('ok' => true, 'reported' => true);
 	}
 
 	// ---------------------------------------------------------------- group classes
