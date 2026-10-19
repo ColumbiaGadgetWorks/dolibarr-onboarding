@@ -14,7 +14,7 @@
  * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter, trainings,
  * trainingstart, budget, purchase, purchasefile, purchasefinish,
  * catalog, slots, trainee, traineenew, signlink, book, bookingstatus, lookup,
- * closeddays, notifyback, classinfo, classjoin
+ * closeddays, notifyback, websitereport, classinfo, classjoin
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -113,7 +113,7 @@ if ($action == 'trainings') {
 	onboarding_reply(array('ok' => true, 'trainings' => $training->trainedOn(isset($in['email']) ? (string) $in['email'] : '')));
 }
 
-if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signlink', 'book', 'bookingstatus', 'lookup', 'closeddays', 'notifyback', 'classinfo', 'classjoin'), true)) {
+if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signlink', 'book', 'bookingstatus', 'lookup', 'closeddays', 'notifyback', 'websitereport', 'classinfo', 'classjoin'), true)) {
 	// Training bookings (class/booking.class.php). Turnstile and per-IP limits are
 	// the Worker's. Answers about a person say only what the booking page needs:
 	// member or not, what is left to sign, a masked name for the lookup.
@@ -165,6 +165,9 @@ if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signli
 			}
 		}
 		onboarding_reply(array('ok' => true, 'sent' => $n));
+	}
+	if ($action == 'websitereport') {
+		onboarding_reply($booking->websiteReport($in));
 	}
 	if ($action == 'classinfo') {
 		onboarding_reply($booking->classInfo(isset($in['code']) ? (string) $in['code'] : ''));
