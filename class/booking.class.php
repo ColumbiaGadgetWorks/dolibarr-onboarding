@@ -945,21 +945,17 @@ class OnboardingBooking
 	}
 
 	/**
-	 * Validated, and paid through today or dues waived through today.
+	 * A current member, who gets the member price: a validated member card.
+	 * Dues are not checked here: members paying by hand or imported without a
+	 * paid-until date are members too, and Dolibarr terminates a member card
+	 * when dues lapse past the grace period.
 	 *
 	 * @param object|null $m Member row
 	 * @return bool
 	 */
 	public function isPaying($m)
 	{
-		if (!$m || (int) $m->statut != Adherent::STATUS_VALIDATED) {
-			return false;
-		}
-		$today = self::at(self::fmt(OnboardingService::now(), 'Y-m-d'), '00:00');
-		if (!empty($m->datefin) && $this->db->jdate($m->datefin) >= $today - 86400) {
-			return true;
-		}
-		return !empty($m->dues_waived_until) && $this->db->jdate($m->dues_waived_until) >= $today - 86400;
+		return $m && (int) $m->statut == Adherent::STATUS_VALIDATED;
 	}
 
 	/**
@@ -2686,6 +2682,8 @@ class OnboardingBooking
 			'class_roster' => array('{again}Group class list to confirm: {tool}, {when}', "Hi {trainer},\n\n{count} people signed in to the {tool} class on {when}:\n\n{roster}\n\nConfirm who was trained (untick anyone who left early):\n{link_class}"),
 			'staff_class_unanswered' => array('Group class list not confirmed: {tool}, {when}', "{trainer} has not confirmed who was trained at the {tool} class on {when} (code {code}).\n\n{roster}\n\nConfirm it on the class page in Dolibarr:\n{card}"),
 			'staff_unmatched' => array('Training payment without a booking', "{who} paid {paid} on the training campaign (Givebutter {tx}), but no booking waiting for payment has that email and price. Usually they typed another email at Givebutter, or paid after their seat was let go.\n\nLink it to their booking under Members, Onboarding, Trainings, or refund it in Givebutter:\n{card}"),
+			'wrong_amount' => array('Your training payment did not match your booking ({ref})', "Hi {firstname},\n\nWe received {paid_now} from you on Givebutter, but your {tool} training on {when} costs {price}, so the payment could not be matched to your booking and your seat is not confirmed yet.\n\nThe secretary has been told and will refund it or sort out the difference with you. You do not need to pay again."),
+			'staff_wrong_amount' => array('Training paid with the wrong amount: {ref}', "{trainee_full} paid {paid_now} on Givebutter (transaction {tx}) for booking {ref}, {tool} on {when}, which costs {price}. The booking is not marked paid.\n\nEither refund the payment in Givebutter and ask them to book again, or, if you accept the amount, link the payment to the booking under Members, Onboarding, Trainings (Paid without a booking):\n{card}"),
 			'pick_date' => array('Pick a new date for your {tool} training ({ref})', "Hi {firstname},\n\nPick a new date for your {tool} training here:\n\n{link_move}"),
 		);
 	}

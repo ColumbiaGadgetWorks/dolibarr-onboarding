@@ -154,6 +154,17 @@ class OnboardingTraining
 		$id = (int) $this->db->last_insert_id($table);
 
 		$reg = $this->findRegistration($email, $amount);
+		if (!$reg) {
+			// A booking from the same email at another price: the payer changed the amount at checkout.
+			$since = $this->db->idate(OnboardingService::now() - 86400);
+			$near = $booking->bookingsWhere("email = '".$this->db->escape($email)."' AND gb_transaction_id IS NULL AND (status = 'held' OR (status = 'expired' AND hold_until >= '".$since."'))", 'b.rowid DESC');
+			if ($near) {
+				$v = array_merge($booking->vars($near[0], 'staff'), array('paid_now' => price($amount), 'tx' => $txid));
+				$booking->mailTpl('wrong_amount', $email, array_merge($booking->vars($near[0]), array('paid_now' => price($amount))));
+				$booking->mailTpl('staff_wrong_amount', $booking->staffEmails(), $v);
+				return 'training '.$id.' paid without a booking: '.price($amount).' for '.$near[0]->ref.', which costs '.price($near[0]->price);
+			}
+		}
 		if (!$reg || !$this->apply($id, $reg)) {
 			$booking->mailTpl('staff_unmatched', $booking->staffEmails(), array(
 				'who' => trim($trunc('first_name', 100).' '.$trunc('last_name', 100)).' <'.$email.'>',

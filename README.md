@@ -166,7 +166,7 @@ alerts address.
 ### Booking, step by step
 
 1. On the website the trainee types their email (Turnstile). Dolibarr answers member (a
-   validated member paid up or dues waived through today: member price), non-member, or
+   validated member card: member price; lapsed members are terminated by the dues job), non-member, or
    new, and what is left to sign. Nothing else about the person leaves Dolibarr.
 2. Someone new gives a name and becomes a **non-member**: a contact plus a draft member
    card, marked "training only" on the onboarding list, never chased for dues.

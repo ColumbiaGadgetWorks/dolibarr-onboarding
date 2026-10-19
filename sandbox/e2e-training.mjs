@@ -189,6 +189,25 @@ assert.match((await pay(mo, 5)).delivery.status, /paid/);
 assert.equal(show(b2.ref).status, 'confirmed');
 assert.ok(await heard(trainerEmail, `Another booking: ${toolName}`));
 
+step('a member with no paid-until date (imported, or paying by hand) still gets the member price');
+const hal = `hal-${ts}@example.test`;
+const halId = tick('purchase', 'member', hal, `CGW-H${ts % 1000}`, 'Hal', 'Hand');
+sql(`UPDATE llx_adherent SET datefin = NULL WHERE rowid = ${halId}`);
+assert.equal((await api('trainee', { email: hal })).kind, 'member');
+
+step('the payer changes the amount at checkout: not marked paid, both told');
+const wally = `wally-${ts}@example.test`;
+await ready(wally, 'Wal', 'Wrong');
+const bw = await api('book', { email: wally, tool, slot: s2.slot, start: s2.start });
+assert.equal(bw.amount, 10);
+const wrong = await pay(wally, 5);
+assert.match(wrong.delivery.status, new RegExp(`paid without a booking: .*5.* for ${bw.ref}`), wrong.delivery.status);
+assert.equal(show(bw.ref).status, 'held');
+assert.ok(await heard(wally, 'did not match your booking'));
+assert.ok(await heard(secretary, `Training paid with the wrong amount: ${bw.ref}`));
+bk('show', bw.ref);
+sql(`UPDATE llx_onboarding_booking SET status = 'cancelled' WHERE ref = '${bw.ref}'`);
+
 step('a full session is not offered');
 assert.ok(!(await api('slots', { tool })).slots.some((s) => s.start === s1.start), 'two seats, two bookings');
 const full = `full-${ts}@example.test`;

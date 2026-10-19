@@ -52,7 +52,7 @@ print '<p><strong>'.dol_escape_htmltag(trim($object->firstname.' '.$object->last
 
 $person = $bk->person($email);
 $app = $person['applicant'];
-print '<p>'.($person['kind'] == 'member' ? 'Paid-up member (member price)' : 'Non-member (full price)').' &middot; waiver '.($person['waiver'] ? 'on file' : '<strong>not signed</strong>').($person['kind'] == 'member' ? ' &middot; agreement '.($person['agreement'] ? 'on file' : '<strong>not signed</strong>') : '');
+print '<p>'.($person['kind'] == 'member' ? 'Member (member price)' : 'Non-member (full price)').' &middot; waiver '.($person['waiver'] ? 'on file' : '<strong>not signed</strong>').($person['kind'] == 'member' ? ' &middot; agreement '.($person['agreement'] ? 'on file' : '<strong>not signed</strong>') : '');
 if ($app && !empty($app->birthdate)) {
 	$age = OnboardingBooking::age($db->jdate($app->birthdate), OnboardingService::now());
 	print ' &middot; '.($age < 18 ? '<strong>under 18</strong>'.($app->guardian_name ? ', waiver signed by '.dol_escape_htmltag($app->guardian_name).' ('.dol_escape_htmltag($app->guardian_relation).')' : '') : 'adult');
