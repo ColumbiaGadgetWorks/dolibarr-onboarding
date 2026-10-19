@@ -84,7 +84,10 @@ This is a Dolibarr module, not a container. It lives inside the Dolibarr you alr
    is already on their card is kept.
 5. Give the membership team the three permissions under Users and Groups.
 6. On the website Worker, set the secrets `DOLIBARR_URL` (Dolibarr's public address) and
-   `DOLIBARR_API_KEY` (the "Key for the website" on the setup page).
+   `DOLIBARR_API_KEY` (the "Key for the website" on the setup page). If that public address
+   is not Dolibarr's own (for example a tunnel hostname that Bot Fight Mode leaves alone),
+   also enter it as "This Dolibarr's public address" on the setup page, so the hint there
+   and the Givebutter webhook use it.
 
 The website's Worker runs on Cloudflare's network, so it reaches Dolibarr at its public
 address. The key it uses can drive a signup and nothing else; it cannot read the member list.

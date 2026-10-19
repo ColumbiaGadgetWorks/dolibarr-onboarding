@@ -1564,15 +1564,24 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	}
 
 	/**
+	 * @param string $file File in the module's public folder
+	 * @return string Its address from outside: on "This Dolibarr's public address" when set
+	 */
+	public static function publicUrl($file)
+	{
+		$public = rtrim(getDolGlobalString('ONBOARDING_PUBLIC_URL'), '/');
+		if ($public !== '') {
+			return $public.'/custom/onboarding/public/'.$file;
+		}
+		return dol_buildpath('/onboarding/public/'.$file, 2);
+	}
+
+	/**
 	 * @return string Address Givebutter calls
 	 */
 	public function webhookUrl()
 	{
-		$public = rtrim(getDolGlobalString('ONBOARDING_PUBLIC_URL'), '/');
-		if ($public !== '') {
-			return $public.'/custom/onboarding/public/givebutter.php';
-		}
-		return dol_buildpath('/onboarding/public/givebutter.php', 2);
+		return self::publicUrl('givebutter.php');
 	}
 
 	// ---------------------------------------------------------------- legacy import
