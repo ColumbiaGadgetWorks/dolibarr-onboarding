@@ -78,6 +78,18 @@ class OnboardingCron
 			return 1;
 		}
 		$booking->svc->alertClear('cron-bookings', 'The training booking job runs cleanly again.');
+		// Member votes share this job, so updating the module needs no new scheduled job.
+		dol_include_once('/onboarding/class/vote.class.php');
+		try {
+			$vote = new OnboardingVote($this->db);
+			$done = $vote->runJob();
+			$this->output .= $done !== '' ? ($this->output !== '' ? '; ' : '').$done : '';
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			$booking->svc->alert('cron-votes', 'The member vote job failed', 'The member vote steps in the scheduled job "Onboarding: training bookings" stopped with: '.$e->getMessage()."\n\nVote reminders, ballots and the count are not going out until it runs cleanly.");
+			return 1;
+		}
+		$booking->svc->alertClear('cron-votes', 'The member vote job runs cleanly again.');
 		return 0;
 	}
 

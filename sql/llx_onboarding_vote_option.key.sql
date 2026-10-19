@@ -1,0 +1,1 @@
+ALTER TABLE llx_onboarding_vote_option ADD INDEX idx_onboarding_vote_option_question (fk_question);

@@ -45,6 +45,8 @@ CL=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "S
 check 'class.php' 'Create the class'
 check "class.php?id=$CL" 'Sign-in code'
 check "class.php?id=$CL" '<svg'
+check 'votes.php' 'Start a practice vote'
+check 'admin/setup.php' 'Full member types'
 MEM=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT fk_adherent FROM llx_onboarding_training WHERE fk_adherent IS NOT NULL AND source = 'class' ORDER BY rowid DESC LIMIT 1")
 check "member-training.php?id=$MEM" 'Trained on'
 CT=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT fk_socpeople FROM llx_onboarding_booking WHERE fk_socpeople IS NOT NULL ORDER BY rowid DESC LIMIT 1")

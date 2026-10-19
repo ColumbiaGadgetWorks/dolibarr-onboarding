@@ -159,6 +159,9 @@ async function readBody(req) {
   return Object.fromEntries(new URLSearchParams(raw));
 }
 
+const github = [];
+let GITHUB_EXPIRES = '2099-01-01 00:00:00 UTC';
+
 const send = (res, code, body, type = 'text/html; charset=utf-8', extra = {}) => { res.writeHead(code, { 'content-type': type, ...extra }); res.end(body); };
 const json = (res, code, obj) => send(res, code, JSON.stringify(obj), 'application/json');
 
@@ -181,6 +184,26 @@ http.createServer(async (req, res) => {
       const m = path.match(/^\/v1\/plans\/([^/]+)$/);
       if (m) return plans.has(m[1]) ? json(res, 200, plans.get(m[1])) : json(res, 404, { message: 'Not found.' });
       return json(res, 404, { message: 'Not found.' });
+    }
+    if (path.startsWith('/github/')) {
+      // Fake GitHub API for member votes: tag the ballot text, post the result.
+      if (!/^Bearer \S+/.test(req.headers.authorization || '')) return json(res, 401, { message: 'Bad credentials' });
+      const gh = (code, obj) => send(res, code, JSON.stringify(obj), 'application/json', { 'github-authentication-token-expiration': GITHUB_EXPIRES });
+      const b = req.method === 'POST' ? await readBody(req) : {};
+      github.push({ method: req.method, path: path.slice(7), body: b });
+      let g = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
+      if (g && req.method === 'GET') return gh(200, { number: Number(g[2]), head: { sha: 'abc1234def5678abc1234def5678abc1234def56' } });
+      g = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/git\/refs$/);
+      if (g && req.method === 'POST') return gh(201, { ref: b.ref, object: { sha: b.sha } });
+      g = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)\/comments$/);
+      if (g && req.method === 'POST') return gh(201, { html_url: `https://github.com/${g[1]}/pull/${g[2]}#issuecomment-${++seq}` });
+      g = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/issues$/);
+      if (g && req.method === 'POST') return gh(201, { html_url: `https://github.com/${g[1]}/issues/${++seq}` });
+      return gh(404, { message: 'Not Found' });
+    }
+    if (path === '/control/github') {
+      if (req.method === 'POST') { const b = await readBody(req); if (b.expires) GITHUB_EXPIRES = b.expires; github.length = 0; }
+      return json(res, 200, { calls: github });
     }
     if (path === '/health') return json(res, 200, { ok: true });
     let lm = path.match(/^\/legal\/(waiver|agreement)\.md$/);
