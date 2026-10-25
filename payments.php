@@ -3,7 +3,7 @@
  * License: GPL-3.0-or-later
  *
  * Dues payments that did not match anyone, usually because the payer used a
- * different email at Givebutter than on the signup form.
+ * different email or name at Givebutter than on their member card.
  */
 
 $res = 0;
@@ -27,12 +27,41 @@ $svc = new OnboardingService($db);
 $action = GETPOST('action', 'aZ09');
 if ($action == 'assign' && $canwrite) {
 	$payment = (int) GETPOST('payment', 'int');
-	$app = $svc->findByEmail(GETPOST('email', 'alphanohtml'));
-	if (!$app) {
-		setEventMessages('Nobody has signed up with that email address.', null, 'errors');
+	$memberId = (int) GETPOST('member', 'int');
+	$typed = GETPOST('email', 'alphanohtml');
+	$app = null;
+	if ($memberId > 0) {
+		$res = $db->query("SELECT email FROM ".$db->prefix()."onboarding_payment WHERE rowid = ".$payment);
+		$pay = $res ? $db->fetch_object($res) : null;
+		$app = $svc->applicantForMember($memberId, $pay ? (string) $pay->email : '');
+		if (!$app) {
+			setEventMessages('That member has no usable email address on their card. Add one, then assign again.', null, 'errors');
+		}
+	} elseif (trim((string) $typed) !== '') {
+		$app = $svc->findByEmail($typed);
+		if (!$app && ($mid = $svc->memberFor($typed)) > 0) {
+			$app = $svc->applicantForMember($mid, $typed);
+		}
+		if (!$app) {
+			setEventMessages('No signup or member has that email address.', null, 'errors');
+		}
 	} else {
-		setEventMessages('Payment: '.$svc->applyPayment($app, $payment), null);
+		setEventMessages('Choose the member, or type their signup email.', null, 'errors');
 	}
+	if ($app) {
+		setEventMessages('Payment: '.$svc->applyPayment($app, $payment), null);
+		// Their other payments now match by their Givebutter contact.
+		$more = $svc->retryUnmatched();
+		if ($more) {
+			setEventMessages($more.' more payment'.($more == 1 ? '' : 's').' matched.', null);
+		}
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
+if ($action == 'retry' && $canwrite) {
+	$n = $svc->retryUnmatched();
+	setEventMessages($n ? $n.' payment'.($n == 1 ? '' : 's').' matched.' : 'Still no match for these. Choose the member for each one.', null, $n ? 'mesgs' : 'warnings');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
@@ -42,9 +71,33 @@ if ($action == 'ignore' && $canwrite) {
 	exit;
 }
 
+// Members to choose from, and a guess per payment: the one member whose last
+// name appears in the payer's Givebutter name or email ("idavisstober" for
+// Isaiah Davis-Stober).
+$members = array();
+$res = $db->query("SELECT rowid, firstname, lastname, email, statut FROM ".$db->prefix()."adherent WHERE entity IN (".getEntity('adherent').") AND statut <> -2 ORDER BY lastname, firstname");
+while ($res && ($o = $db->fetch_object($res))) {
+	$members[] = $o;
+}
+$squash = function ($text) {
+	return preg_replace('/[^a-z]/', '', strtolower((string) $text));
+};
+$guess = function ($pay) use ($members, $squash) {
+	$hay = $squash($pay->firstname.$pay->lastname).' '.$squash(strstr((string) $pay->email, '@', true));
+	$hits = array();
+	foreach ($members as $m) {
+		$last = $squash($m->lastname);
+		if (strlen($last) >= 4 && strpos($hay, $last) !== false) {
+			$hits[] = (int) $m->rowid;
+		}
+	}
+	return count($hits) == 1 ? $hits[0] : 0;
+};
+
 llxHeader('', 'Unmatched payments');
-print load_fiche_titre('Unmatched dues payments', '', 'members');
-print '<p class="opacitymedium">These Givebutter payments did not match anyone who signed up. Type the email the person used on the signup form to give them the payment, or ignore it if it is not dues.</p>';
+$retry = $canwrite ? '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block"><input type="hidden" name="token" value="'.newToken().'"><button type="submit" name="action" value="retry" class="butAction" title="Matches each payment again by Givebutter contact, email and name. The hourly sync does this too.">Match again</button></form>' : '';
+print load_fiche_titre('Unmatched dues payments', $retry, 'members');
+print '<p class="opacitymedium">These Givebutter payments did not match a signup or a member, by email or by name. Choose the member who paid (a likely one is picked for you when the name or email points to one), or ignore it if it is not dues. Once assigned, that person\'s later payments match on their own. A payment that is already on the member\'s card, for example from the dues import, is not recorded twice.</p>';
 
 $resql = $db->query("SELECT * FROM ".$db->prefix()."onboarding_payment WHERE entity = ".((int) $conf->entity)." AND status = 'unmatched' ORDER BY transacted_at DESC LIMIT 500");
 print '<div class="div-table-responsive"><table class="noborder centpercent">';
@@ -63,7 +116,14 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 		print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block">';
 		print '<input type="hidden" name="token" value="'.newToken().'">';
 		print '<input type="hidden" name="payment" value="'.((int) $o->rowid).'">';
-		print '<input type="email" name="email" placeholder="Signup email" class="minwidth200"> ';
+		$pick = $guess($o);
+		print '<select name="member" class="minwidth200 maxwidth300"><option value="">Choose the member&hellip;</option>';
+		foreach ($members as $m) {
+			$label = trim($m->lastname.', '.$m->firstname, ', ').($m->email ? ' ('.$m->email.')' : '').((int) $m->statut == 1 ? '' : ' - not active');
+			print '<option value="'.((int) $m->rowid).'"'.($pick == (int) $m->rowid ? ' selected' : '').'>'.dol_escape_htmltag($label).'</option>';
+		}
+		print '</select> ';
+		print '<input type="email" name="email" placeholder="or signup email" class="maxwidth150"> ';
 		print '<button type="submit" name="action" value="assign" class="button smallpaddingimp">Assign</button> ';
 		print '<button type="submit" name="action" value="ignore" class="button smallpaddingimp">Ignore</button>';
 		print '</form>';
