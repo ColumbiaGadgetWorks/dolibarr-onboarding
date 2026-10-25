@@ -120,8 +120,27 @@ assert.equal(d.member.status, -1, 'ready to pay: a non-member (draft member), no
 assert.equal(d.member.subscriptions, 0);
 
 step('a payment from an unknown email stays unmatched');
-const stranger = await mock('/control/pay', { email: `stranger-${Date.now()}@example.test`, amount: 50 });
+const strangerEmail = `stranger-${Date.now()}@example.test`;
+const stranger = await mock('/control/pay', { email: strangerEmail, amount: 50 });
 assert.match(stranger.delivery.status, /unmatched/);
+
+step('a member from before the signup form is matched by name, then by email');
+const oldEmail = `old-${Date.now()}@example.test`;
+tick('purchase', 'member', oldEmail, '', 'Grace', 'Hopper');
+const byName = await mock('/control/pay', { email: `gh-${Date.now()}@elsewhere.test`, amount: 50, first_name: 'Grace', last_name: 'Hopper' });
+assert.match(byName.delivery.status, /applied to applicant/, byName.delivery.status);
+assert.equal(dumpOf(oldEmail).member.subscriptions, 1);
+const twice = await mock('/control/pay', { email: oldEmail, amount: 50, first_name: 'Grace', last_name: 'Hopper' });
+assert.match(twice.delivery.status, /already recorded/, twice.delivery.status);
+assert.equal(dumpOf(oldEmail).member.subscriptions, 1);
+assert.ok(!(await mailTo(oldEmail)).some((s) => /welcome/i.test(s)), 'an existing member gets no welcome email');
+
+step('an unmatched payment matches once the member is added');
+tick('purchase', 'member', strangerEmail, '', 'Stan', 'Ger');
+assert.equal(tick('retry'), '1');
+assert.equal(dumpOf(strangerEmail).member.subscriptions, 1);
+// Left for the staff page check in smoke-pages.sh.
+assert.match((await mock('/control/pay', { email: `stranger-left-${Date.now()}@example.test`, amount: 50 })).delivery.status, /unmatched/);
 step('a donation to another campaign is ignored');
 assert.match((await mock('/control/pay', { email, amount: 500, campaign: 'DONATE' })).delivery.status, /ignored/);
 

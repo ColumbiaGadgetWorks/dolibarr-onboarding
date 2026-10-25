@@ -36,6 +36,8 @@ if ($job == 'daily') {
 	echo $svc->dunning().'; '.$svc->cleanup()."\n";
 } elseif ($job == 'sync') {
 	echo $svc->reconcile()."\n";
+} elseif ($job == 'retry') {
+	echo $svc->retryUnmatched()."\n";
 } elseif ($job == 'connect') {
 	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {

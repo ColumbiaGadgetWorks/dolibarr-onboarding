@@ -29,8 +29,16 @@ and the page at `/membership/join/`).
 
 Members, Onboarding in the left menu lists everyone with their stage, with filters such as
 "Paying, no active badge" and "Not paying, badge still active", and an "Email link" button
-that sends someone a link to finish their paperwork online. Members, Onboarding, Unmatched
-payments lists dues payments made with an email nobody signed up with.
+that sends someone a link to finish their paperwork online.
+
+A Givebutter dues payment is matched to a signup (by plan, contact or email) or, failing
+that, to a member already in Dolibarr (by email, then by a first and last name only one
+member has), so members added before the signup form keep their dues up to date too. A
+payment already on the member's card, such as one recorded by the CGWManagement dues import,
+is not recorded again. Members, Onboarding, Unmatched payments lists the payments that
+matched nobody: choose the member (one is pre-selected when the payer's name or email
+contains a single member's last name) and their later payments match by their Givebutter
+contact. The hourly sync and the **Match again** button retry every unmatched payment.
 
 ## Email updates
 

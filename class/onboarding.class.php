@@ -1159,6 +1159,133 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	}
 
 	/**
+	 * Who a payment belongs to: a signup (by plan, contact or email), else a
+	 * member who was here before the signup form, by email or by a name only
+	 * one member has. A member found that way gets an applicant row, so the
+	 * next payment matches by its Givebutter contact.
+	 *
+	 * @param string $contactId Givebutter contact id
+	 * @param string $planId Givebutter plan id
+	 * @param string $email Email typed at checkout
+	 * @param string $first First name at Givebutter
+	 * @param string $last Last name at Givebutter
+	 * @return object|null Applicant row
+	 */
+	public function payer($contactId, $planId, $email, $first = '', $last = '')
+	{
+		$app = $this->match($contactId, $planId, $email);
+		if (!$app) {
+			$mid = $this->memberFor($email, $first, $last);
+			if ($mid > 0) {
+				$app = $this->applicantForMember($mid, $email);
+			}
+		}
+		return $app;
+	}
+
+	/**
+	 * A Dolibarr member, by email, else by a first and last name that exactly
+	 * one member has. Excluded members are never matched.
+	 *
+	 * @param string $email Email
+	 * @param string $first First name
+	 * @param string $last Last name
+	 * @return int Member id, 0 when none or not sure
+	 */
+	public function memberFor($email, $first = '', $last = '')
+	{
+		$where = "entity IN (".getEntity('adherent').") AND statut <> ".((int) Adherent::STATUS_EXCLUDED);
+		$email = self::cleanEmail($email);
+		if ($email !== '') {
+			$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE ".$where." AND LOWER(TRIM(email)) = '".$this->db->escape($email)."' ORDER BY (statut = 1) DESC, rowid LIMIT 1");
+			if ($res && ($obj = $this->db->fetch_object($res))) {
+				return (int) $obj->rowid;
+			}
+		}
+		$first = strtolower(trim((string) $first));
+		$last = strtolower(trim((string) $last));
+		if ($first === '' || $last === '') {
+			return 0;
+		}
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE ".$where." AND LOWER(TRIM(firstname)) = '".$this->db->escape($first)."' AND LOWER(TRIM(lastname)) = '".$this->db->escape($last)."' LIMIT 2");
+		if ($res && $this->db->num_rows($res) == 1 && ($obj = $this->db->fetch_object($res))) {
+			return (int) $obj->rowid;
+		}
+		return 0;
+	}
+
+	/**
+	 * The applicant row for a member, made when the member was added before the
+	 * signup form existed (by the import scripts or by hand) and has none.
+	 *
+	 * @param int $adhId Member id
+	 * @param string $email Fallback email when the member card has none
+	 * @return object|null Applicant row
+	 */
+	public function applicantForMember($adhId, $email = '')
+	{
+		global $conf;
+		$app = $this->one("fk_adherent = ".((int) $adhId));
+		if ($app) {
+			return $app;
+		}
+		$adh = new Adherent($this->db);
+		if ($adh->fetch((int) $adhId) <= 0) {
+			return null;
+		}
+		$addr = self::cleanEmail($adh->email);
+		if (!isValidEmail($addr)) {
+			$addr = self::cleanEmail($email);
+		}
+		if (!isValidEmail($addr)) {
+			return null;
+		}
+		$app = $this->findByEmail($addr);
+		if ($app) {
+			if ($app->fk_adherent > 0) {
+				return null; // That address belongs to another member's record.
+			}
+			$this->save($app->rowid, array('fk_adherent' => (int) $adhId));
+			return $this->fetch($app->rowid);
+		}
+		$cid = $this->contactByEmail($addr);
+		// Like the rows the booking page makes: it holds a member's Givebutter link
+		// and signatures, with no signup stages to walk through.
+		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_applicant (entity, email, firstname, lastname, fk_socpeople, fk_adherent, training_only, stage, payment_state, datec) VALUES (";
+		$sql .= ((int) $conf->entity).", '".$this->db->escape($addr)."', '".$this->db->escape(dol_trunc((string) $adh->firstname, 100, 'right', 'UTF-8', 1))."', '".$this->db->escape(dol_trunc((string) $adh->lastname, 100, 'right', 'UTF-8', 1))."', ";
+		$sql .= ($cid > 0 ? (int) $cid : 'NULL').", ".((int) $adhId).", 1, 'complete', 'active', '".$this->db->idate(self::now())."')";
+		if (!$this->db->query($sql)) {
+			dol_syslog('Onboarding: applicant for member '.$adhId.' failed: '.$this->db->lasterror(), LOG_ERR);
+			return null;
+		}
+		return $this->fetch((int) $this->db->last_insert_id($this->db->prefix()."onboarding_applicant"));
+	}
+
+	/**
+	 * Try again to match the payments nobody claimed, oldest first: a member
+	 * may have been added, or a payment assigned by hand, since they came in.
+	 *
+	 * @return int Payments applied
+	 */
+	public function retryUnmatched()
+	{
+		global $conf;
+		$res = $this->db->query("SELECT rowid, gb_contact_id, gb_plan_id, email, firstname, lastname FROM ".$this->db->prefix()."onboarding_payment WHERE entity = ".((int) $conf->entity)." AND status = 'unmatched' ORDER BY transacted_at, rowid");
+		$rows = array();
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$rows[] = $obj;
+		}
+		$applied = 0;
+		foreach ($rows as $obj) {
+			$app = $this->payer((string) $obj->gb_contact_id, (string) $obj->gb_plan_id, (string) $obj->email, (string) $obj->firstname, (string) $obj->lastname);
+			if ($app && strpos($this->applyPayment($app, $obj->rowid), 'applied') === 0) {
+				$applied++;
+			}
+		}
+		return $applied;
+	}
+
+	/**
 	 * Record a Givebutter transaction and, when it belongs to someone, apply it.
 	 *
 	 * @param array $t TransactionResource
@@ -1203,11 +1330,13 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			return 'duplicate';
 		}
 
-		$app = $this->match($contactId, $planId, $email);
+		$first = substr((string) (isset($t['first_name']) ? $t['first_name'] : ''), 0, 100);
+		$last = substr((string) (isset($t['last_name']) ? $t['last_name'] : ''), 0, 100);
+		$app = $this->payer($contactId, $planId, $email, $first, $last);
 		if (!$row) {
 			$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, gb_plan_id, gb_contact_id, email, firstname, lastname, amount, campaign_code, transacted_at, status, datec) VALUES (";
 			$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($planId)."', '".$this->db->escape($contactId)."', '".$this->db->escape($email)."', ";
-			$sql .= "'".$this->db->escape(substr((string) (isset($t['first_name']) ? $t['first_name'] : ''), 0, 100))."', '".$this->db->escape(substr((string) (isset($t['last_name']) ? $t['last_name'] : ''), 0, 100))."', ";
+			$sql .= "'".$this->db->escape($first)."', '".$this->db->escape($last)."', ";
 			$sql .= price2num($amount).", '".$this->db->escape($campaign)."', '".$this->db->idate($when)."', 'unmatched', '".$this->db->idate(self::now())."')";
 			if (!$this->db->query($sql)) {
 				// Lost a race with another delivery of the same event.
@@ -1253,7 +1382,6 @@ You get at most one email an hour about this, and one more when it is fixed.");
 
 		$amount = (float) $pay->amount;
 		$when = $this->db->jdate($pay->transacted_at);
-		$first = $app->payment_state == 'none';
 		$supporter = $amount >= (float) getDolGlobalString('ONBOARDING_DUES_SUPPORTER', '100');
 		$typeid = getDolGlobalInt($supporter ? 'ONBOARDING_TYPE_SUPPORTER' : 'ONBOARDING_TYPE_STANDARD');
 
@@ -1268,6 +1396,32 @@ You get at most one email an hour about this, and one more when it is fixed.");
 		if ($typeid > 0 && $adh->typeid != $typeid && in_array((int) $adh->typeid, $managed)) {
 			$this->db->query("UPDATE ".$this->db->prefix()."adherent SET fk_adherent_type = ".((int) $typeid)." WHERE rowid = ".((int) $adh->id));
 		}
+		// Dues already on the card for this payment: recorded by import_dues.py
+		// from an export ("Givebutter 2026-09-18 Name"), or by an earlier run.
+		$subs = 0;
+		$recorded = false;
+		$dates = array();
+		foreach (array(-1, 0, 1) as $d) {
+			$dates[] = 'Givebutter '.date('Y-m-d', $when + $d * 86400);
+		}
+		$res = $this->db->query("SELECT dateadh, subscription, note FROM ".$this->db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$subs++;
+			$note = (string) $o->note;
+			$start = $this->db->jdate($o->dateadh);
+			if (($pay->gb_transaction_id !== '' && strpos($note, $pay->gb_transaction_id) !== false)
+				|| (abs($start - $when) <= 3 * 86400 && abs((float) $o->subscription - $amount) < 0.01)) {
+				$recorded = true;
+			}
+			foreach ($dates as $label) {
+				if (strpos($note, $label) !== false) {
+					$recorded = true;
+				}
+			}
+		}
+		// Welcome emails only for someone whose first dues these are.
+		$first = $app->payment_state == 'none' && $subs == 0;
+
 		$adh->array_options['options_payment_channel'] = 'Givebutter';
 		$adh->insertExtraFields();
 		if ($adh->statut != Adherent::STATUS_VALIDATED && $adh->statut != Adherent::STATUS_EXCLUDED) {
@@ -1288,10 +1442,12 @@ You get at most one email an hour about this, and one more when it is fixed.");
 				$months = 3;
 			}
 		}
-		$end = dol_time_plus_duree(dol_time_plus_duree($when, $months, 'm'), -1, 'd');
-		$subid = $adh->subscription($when, $amount, 0, '', 'Givebutter '.$pay->gb_transaction_id, '', '', '', $end);
-		if ($subid <= 0) {
-			dol_syslog('Onboarding: subscription failed: '.$adh->error, LOG_ERR);
+		if (!$recorded) {
+			$end = dol_time_plus_duree(dol_time_plus_duree($when, $months, 'm'), -1, 'd');
+			$subid = $adh->subscription($when, $amount, 0, '', 'Givebutter '.$pay->gb_transaction_id, '', '', '', $end);
+			if ($subid <= 0) {
+				dol_syslog('Onboarding: subscription failed: '.$adh->error, LOG_ERR);
+			}
 		}
 		$user = $saved;
 
@@ -1315,7 +1471,7 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			$this->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), 'New paying member: '.$app->firstname.' '.$app->lastname, $app->firstname.' '.$app->lastname.' <'.$app->email.'> has set up dues ('.price($amount).') and needs a badge.'.$missing);
 			$this->mail($app->email, $this->template('ONBOARDING_MAIL_WELCOME_SUBJECT', 'Welcome to {org}', $app), $this->template('ONBOARDING_MAIL_WELCOME_BODY', "Hi {firstname},\n\nYour dues payment came through and your membership is active. Someone from the membership team will be in touch about your badge.", $app));
 		}
-		return 'applied to applicant '.$app->rowid;
+		return 'applied to applicant '.$app->rowid.($recorded ? ' (dues were already recorded)' : '');
 	}
 
 	/**
@@ -1412,6 +1568,8 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			}
 			$url = !empty($json['links']['next']) ? $json['links']['next'] : '';
 		}
+
+		$applied += $this->retryUnmatched();
 
 		$plans = 0;
 		$res = $this->db->query("SELECT rowid, gb_plan_id FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND gb_plan_id IS NOT NULL AND gb_plan_id <> '' AND payment_state IN ('active', 'past_due', 'cancelled')");

@@ -316,7 +316,7 @@ const late = Number(parts.hour) * 60 + Number(parts.minute);
 const offset = late < 9 * 60 + 5 ? 9 * 60 + 5 - late : 0; // on the shop's clock, after 9:00 today
 assert.match(vote('run', String(offset)), /Schedule test: asked the officers to notice/);
 assert.doesNotMatch(vote('run', String(offset)), /Schedule test: asked/, 'once per step');
-assert.match(await text(S, 'Send the notice by'), /must go out by/);
+assert.match(await text(S, 'Send the notice by'), /must go out\s+by/);
 void sid;
 
 tick('purchase', 'const', 'ONBOARDING_VOTE_TYPES', '');
