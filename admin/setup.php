@@ -44,6 +44,9 @@ $sections = array(
 		'ONBOARDING_DUES_STANDARD' => array('Standard monthly dues', 'text', ''),
 		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'A payment of at least this much makes the member a Supporter.'),
 	),
+	'PayPal and legacy members' => array(
+		'ONBOARDING_PAYPAL_THROUGH' => array('PayPal payments imported through', 'text', 'PayPal and Legacy members are not shown as expired until the imported PayPal data reaches the day their next payment was due, so a late import does not expire anyone. Empty: worked out from the newest line on the PAYPAL bank account (the dues import puts every PayPal payment there). Fill in a date (YYYY-MM-DD) only to override that.'),
+	),
 	'Training fees' => array(
 		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on (through the widget on the website\'s /training/book/ page), for example the code at the end of its link. Give it no checkout questions: the booking carries the tool, zone, trainer and time. Leave empty to turn training tracking off.'),
 		'ONBOARDING_TRAINING_TRAINER_SHARE' => array('Trainer\'s share (percent)', 'text', 'Of what arrives after Givebutter\'s fee, credited to the trainer. The rest goes to the zone\'s budget. A tool can set its own.'),
@@ -160,7 +163,7 @@ if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetch
 		dol_include_once('/onboarding/class/purchase.class.php');
 		$out = (new OnboardingPurchase($db, $svc))->installRoleTags();
 	} else {
-		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->cleanup();
+		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->presumePaid().'; '.$svc->cleanup();
 	}
 	setEventMessages($out, null);
 	header('Location: '.$_SERVER['PHP_SELF']);

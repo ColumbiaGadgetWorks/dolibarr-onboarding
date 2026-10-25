@@ -38,6 +38,34 @@ if ($job == 'daily') {
 	echo $svc->reconcile()."\n";
 } elseif ($job == 'retry') {
 	echo $svc->retryUnmatched()."\n";
+} elseif ($job == 'paypal') {
+	// paypal setup ID: a PayPal member whose last month ended 10 days ago |
+	// paypal through DATE|clear | paypal presume | paypal end ID
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'setup') {
+		$adh = new Adherent($db);
+		$adh->fetch((int) $argv[3]);
+		$adh->array_options['options_payment_channel'] = 'PayPal';
+		$adh->insertExtraFields();
+		$db->query("DELETE FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
+		$adh->subscription(dol_now() - 40 * 86400, 40, 0, '', 'PayPal sandbox', '', '', '', dol_now() - 10 * 86400);
+		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = (SELECT MAX(datef) FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id).") WHERE rowid = ".((int) $adh->id));
+		echo "ok\n";
+	} elseif ($what == 'through') {
+		if ($argv[3] == 'clear') {
+			dolibarr_del_const($db, 'ONBOARDING_PAYPAL_THROUGH', $conf->entity);
+		} else {
+			dolibarr_set_const($db, 'ONBOARDING_PAYPAL_THROUGH', $argv[3], 'chaine', 0, '', $conf->entity);
+		}
+		echo "ok\n";
+	} elseif ($what == 'presume') {
+		echo $svc->presumePaid()."\n";
+	} elseif ($what == 'end') {
+		$res = $db->query("SELECT datefin FROM ".$db->prefix()."adherent WHERE rowid = ".((int) $argv[3]));
+		$o = $res ? $db->fetch_object($res) : null;
+		echo ($o && $o->datefin ? dol_print_date($db->jdate($o->datefin), '%Y-%m-%d') : '')."\n";
+	}
 } elseif ($job == 'connect') {
 	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {

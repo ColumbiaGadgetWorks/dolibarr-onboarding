@@ -1995,6 +1995,106 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	}
 
 	/**
+	 * The date of the newest PayPal payment imported into Dolibarr: the setup
+	 * page's date when filled in, else the newest line on the bank account with
+	 * ref PAYPAL (import_dues.py records each payment there on its date), else
+	 * the newest subscription labelled "PayPal ...".
+	 *
+	 * @return int Timestamp, 0 when no PayPal payment was ever imported
+	 */
+	public function paypalThrough()
+	{
+		$set = trim(getDolGlobalString('ONBOARDING_PAYPAL_THROUGH'));
+		if ($set !== '' && ($ts = strtotime($set))) {
+			return $ts;
+		}
+		$p = $this->db->prefix();
+		$sqls = array(
+			"SELECT MAX(b.dateo) AS d FROM ".$p."bank AS b INNER JOIN ".$p."bank_account AS ba ON ba.rowid = b.fk_account WHERE UPPER(ba.ref) = 'PAYPAL' AND ba.entity IN (".getEntity('bank_account').")",
+			"SELECT MAX(s.dateadh) AS d FROM ".$p."subscription AS s INNER JOIN ".$p."adherent AS a ON a.rowid = s.fk_adherent WHERE s.note LIKE 'PayPal %' AND a.entity IN (".getEntity('adherent').")",
+		);
+		foreach ($sqls as $sql) {
+			// The bank tables are missing when the Banks module was never enabled.
+			$res = @$this->db->query($sql);
+			$obj = $res ? $this->db->fetch_object($res) : null;
+			if ($obj && !empty($obj->d)) {
+				return (int) $this->db->jdate($obj->d);
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * PayPal and Legacy members are recorded by hand from PayPal exports, so a
+	 * paid-through date in the past may only mean the next export has not been
+	 * imported yet. Until the imported PayPal data reaches the date their next
+	 * payment was due (3 days' slack), keep them from showing as expired by
+	 * holding their end date at today. Their real end date always comes back:
+	 * Dolibarr recomputes it from the subscriptions when the next one is
+	 * recorded, and this puts it back once an import covers the due date with
+	 * no payment.
+	 *
+	 * @return string Summary
+	 */
+	public function presumePaid()
+	{
+		$through = $this->paypalThrough();
+		if (!$through) {
+			return 'no PayPal import found, PayPal members left as they are';
+		}
+		$now = self::now();
+		$endOfToday = dol_mktime(23, 59, 59, (int) dol_print_date($now, '%m'), (int) dol_print_date($now, '%d'), (int) dol_print_date($now, '%Y'));
+		$p = $this->db->prefix();
+		$sql = "SELECT a.rowid, a.datefin FROM ".$p."adherent AS a";
+		$sql .= " LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid";
+		$sql .= " LEFT JOIN ".$p."adherent_type AS t ON t.rowid = a.fk_adherent_type";
+		$sql .= " WHERE a.entity IN (".getEntity('adherent').") AND a.statut = ".((int) Adherent::STATUS_VALIDATED);
+		$sql .= " AND (e.payment_channel = 'PayPal' OR (LOWER(t.libelle) = 'legacy' AND COALESCE(e.payment_channel, '') <> 'Givebutter'))";
+		$res = $this->db->query($sql);
+		$members = array();
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$members[] = $obj;
+		}
+		$held = 0;
+		$restored = 0;
+		foreach ($members as $obj) {
+			// The newest subscription, and the day it was actually paid when the
+			// dues import linked it to its bank line.
+			$last = "SELECT s.dateadh, s.datef, b.dateo FROM ".$p."subscription AS s LEFT JOIN ".$p."bank AS b ON b.rowid = s.fk_bank WHERE s.fk_adherent = ".((int) $obj->rowid)." ORDER BY s.datef DESC LIMIT 1";
+			$r = @$this->db->query($last);
+			if (!$r) {
+				$r = $this->db->query("SELECT dateadh, datef, NULL AS dateo FROM ".$p."subscription WHERE fk_adherent = ".((int) $obj->rowid)." ORDER BY datef DESC LIMIT 1");
+			}
+			$sub = $r ? $this->db->fetch_object($r) : null;
+			if (!$sub || empty($sub->datef)) {
+				continue;
+			}
+			$paidTo = (int) $this->db->jdate($sub->datef);
+			// When the next payment was due: a period after the last one was paid
+			// (someone paying on the 7th for a calendar month is due on the 7th),
+			// else the day after the period ends.
+			$due = $paidTo + 86400;
+			if (!empty($sub->dateo)) {
+				$months = max(1, (int) round(($paidTo - (int) $this->db->jdate($sub->dateadh)) / (30.44 * 86400)));
+				$due = dol_time_plus_duree((int) $this->db->jdate($sub->dateo), $months, 'm');
+			}
+			$unknown = $through < $due + 3 * 86400;
+			$want = ($unknown && $paidTo < $endOfToday) ? $endOfToday : $paidTo;
+			if ($want == $endOfToday) {
+				$held++;
+			}
+			$cur = (int) $this->db->jdate($obj->datefin);
+			if (abs($cur - $want) > 60) {
+				$this->db->query("UPDATE ".$p."adherent SET datefin = '".$this->db->idate($want)."' WHERE rowid = ".((int) $obj->rowid));
+				if ($want == $paidTo && $cur > $paidTo) {
+					$restored++;
+				}
+			}
+		}
+		return 'PayPal data imported through '.dol_print_date($through, 'day').': '.$held.' PayPal/Legacy members held as paid until it is newer, '.$restored.' end dates put back';
+	}
+
+	/**
 	 * Mark a member non-paying.
 	 *
 	 * @param object $app Applicant row

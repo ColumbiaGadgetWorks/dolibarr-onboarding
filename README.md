@@ -40,6 +40,16 @@ matched nobody: choose the member (one is pre-selected when the payer's name or 
 contains a single member's last name) and their later payments match by their Givebutter
 contact. The hourly sync and the **Match again** button retry every unmatched payment.
 
+PayPal and Legacy members are recorded by hand from PayPal exports (the CGWManagement dues
+import), so their end date can pass only because the next export is not in yet. The daily
+job holds such a member's end date at today, so Dolibarr does not show them as expired,
+until the imported PayPal data reaches the day their next payment was due (a period after
+their last payment, plus 3 days). "Imported through" is the newest line on the bank account
+with ref PAYPAL, or a date set on the setup page. When the next payment is imported the end
+date comes from it as usual; when an import passes the due date with no payment, the real
+end date is put back and they show as expired. Givebutter, check and scholarship members are
+not affected.
+
 ## Email updates
 
 The website's "Get updates by email" box sends each address here. It becomes a Dolibarr

@@ -139,6 +139,21 @@ step('an unmatched payment matches once the member is added');
 tick('purchase', 'member', strangerEmail, '', 'Stan', 'Ger');
 assert.equal(tick('retry'), '1');
 assert.equal(dumpOf(strangerEmail).member.subscriptions, 1);
+step('a PayPal member is not expired before the PayPal data reaches their due date');
+const ppEmail = `paypal-${Date.now()}@example.test`;
+const ppId = tick('purchase', 'member', ppEmail, '', 'Pay', 'Pal');
+tick('paypal', 'setup', ppId);
+const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+const paidTo = tick('paypal', 'end', ppId);
+assert.ok(paidTo < day(-8) && paidTo > day(-12), `last month ended about 10 days ago: ${paidTo}`);
+tick('paypal', 'through', day(-20));
+assert.match(tick('paypal', 'presume'), /1 PayPal\/Legacy members held/);
+assert.equal(tick('paypal', 'end', ppId), day(0), 'held at today while the import is older than the due date');
+tick('paypal', 'through', day(0));
+assert.match(tick('paypal', 'presume'), /1 end dates put back/);
+assert.equal(tick('paypal', 'end', ppId), paidTo, 'an import past the due date with no payment: really expired');
+tick('paypal', 'through', 'clear');
+
 // Left for the staff page check in smoke-pages.sh.
 assert.match((await mock('/control/pay', { email: `stranger-left-${Date.now()}@example.test`, amount: 50 })).delivery.status, /unmatched/);
 step('a donation to another campaign is ignored');
