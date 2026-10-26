@@ -41,10 +41,6 @@ sections:
     list: recent_payments
     limit: 8
 
-  - title: Paid up until about now
-    show: list
-    list: expiring
-
   - title: Upcoming trainings
     show: list
     list: upcoming_trainings

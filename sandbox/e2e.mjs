@@ -185,7 +185,7 @@ step('Givebutter dues recorded as a calendar month: no false lapse, the period r
 }
 
 step('CGW home page layout: the default reads cleanly, mistakes are named');
-assert.match(tickIn(readFileSync(new URL('../home.default.yaml', import.meta.url), 'utf8'), 'home', 'check'), /^9 sections\s*$/);
+assert.match(tickIn(readFileSync(new URL('../home.default.yaml', import.meta.url), 'utf8'), 'home', 'check'), /^8 sections\s*$/);
 const badLayout = tickIn('sections:\n  - title: X\n    show: numbers\n    numbers: [active_members, bogus]\n  - title: Y\n    show: list\n    list: nope\n', 'home', 'check');
 assert.match(badLayout, /unknown number "bogus"/);
 assert.match(badLayout, /"list:" must be one of/);
