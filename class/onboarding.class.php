@@ -1448,6 +1448,8 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			if ($subid <= 0) {
 				dol_syslog('Onboarding: subscription failed: '.$adh->error, LOG_ERR);
 			}
+		} else {
+			$this->extendToAnniversary((int) $adh->id, $when, $months);
 		}
 		$user = $saved;
 
@@ -1472,6 +1474,73 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			$this->mail($app->email, $this->template('ONBOARDING_MAIL_WELCOME_SUBJECT', 'Welcome to {org}', $app), $this->template('ONBOARDING_MAIL_WELCOME_BODY', "Hi {firstname},\n\nYour dues payment came through and your membership is active. Someone from the membership team will be in touch about your badge.", $app));
 		}
 		return 'applied to applicant '.$app->rowid.($recorded ? ' (dues were already recorded)' : '');
+	}
+
+	/**
+	 * The dues import records a payment as the calendar month it falls in
+	 * (paid 28 September: 1 to 30 September), but Givebutter charges again on
+	 * the same day next month, so the member looked expired for four weeks.
+	 * Make the subscription that holds a payment run until the day before the
+	 * next charge, and the member's end date with it. Only ever lengthens.
+	 *
+	 * @param int $adhId Member
+	 * @param int $when When the payment was made
+	 * @param int $months Period it pays for
+	 * @return bool Something was changed
+	 */
+	public function extendToAnniversary($adhId, $when, $months = 1)
+	{
+		$p = $this->db->prefix();
+		$target = dol_time_plus_duree(dol_time_plus_duree($when, max(1, (int) $months), 'm'), -1, 'd');
+		$res = $this->db->query("SELECT rowid, datef FROM ".$p."subscription WHERE fk_adherent = ".((int) $adhId)." AND dateadh <= '".$this->db->idate($when + 86400)."' AND datef >= '".$this->db->idate($when - 86400)."' ORDER BY datef DESC LIMIT 1");
+		$sub = $res ? $this->db->fetch_object($res) : null;
+		if (!$sub || $this->db->jdate($sub->datef) >= $target - 3600) {
+			return false;
+		}
+		$this->db->query("UPDATE ".$p."subscription SET datef = '".$this->db->idate($target)."' WHERE rowid = ".((int) $sub->rowid));
+		$this->db->query("UPDATE ".$p."adherent SET datefin = '".$this->db->idate($target)."' WHERE rowid = ".((int) $adhId)." AND (datefin IS NULL OR datefin < '".$this->db->idate($target)."')");
+		return true;
+	}
+
+	/**
+	 * How long a member's Givebutter dues really cover: their end date, or a
+	 * month after the newest Givebutter payment matched to them, whichever is
+	 * later.
+	 *
+	 * @param object $app Applicant row
+	 * @param int $datefin Member end date
+	 * @return int
+	 */
+	public function paidThrough($app, $datefin)
+	{
+		$res = $this->db->query("SELECT MAX(transacted_at) AS t FROM ".$this->db->prefix()."onboarding_payment WHERE fk_applicant = ".((int) $app->rowid)." AND status = 'matched'");
+		$obj = $res ? $this->db->fetch_object($res) : null;
+		$last = ($obj && $obj->t) ? (int) $this->db->jdate($obj->t) : 0;
+		$byPayment = $last ? dol_time_plus_duree(dol_time_plus_duree($last, 1, 'm'), -1, 'd') : 0;
+		return max((int) $datefin, $byPayment);
+	}
+
+	/**
+	 * Fix periods recorded as calendar months for Givebutter payments already
+	 * matched (see extendToAnniversary). Run daily; does nothing once fixed.
+	 *
+	 * @return int Members changed
+	 */
+	public function repairPeriods()
+	{
+		global $conf;
+		$res = $this->db->query("SELECT a.fk_adherent, p.transacted_at FROM ".$this->db->prefix()."onboarding_payment AS p INNER JOIN ".$this->db->prefix()."onboarding_applicant AS a ON a.rowid = p.fk_applicant WHERE p.entity = ".((int) $conf->entity)." AND p.status = 'matched' AND a.fk_adherent > 0 AND p.transacted_at > '".$this->db->idate(self::now() - 400 * 86400)."' ORDER BY p.transacted_at");
+		$rows = array();
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$rows[] = $obj;
+		}
+		$changed = array();
+		foreach ($rows as $obj) {
+			if ($this->extendToAnniversary((int) $obj->fk_adherent, (int) $this->db->jdate($obj->transacted_at))) {
+				$changed[(int) $obj->fk_adherent] = true;
+			}
+		}
+		return count($changed);
 	}
 
 	/**
@@ -1930,6 +1999,8 @@ You get at most one email an hour about this, and one more when it is fixed.");
 		$grace = max(1, (int) getDolGlobalString('ONBOARDING_GRACE_DAYS', '30'));
 		$sent = 0;
 		$lapsed = 0;
+		$cleared = 0;
+		$repaired = $this->repairPeriods();
 
 		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND fk_adherent > 0 AND payment_state IN ('active', 'past_due', 'cancelled')");
 		$ids = array();
@@ -1953,7 +2024,16 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			if ($channel !== '' && $channel !== 'Givebutter') {
 				continue; // PayPal, check and scholarship members are kept up by hand.
 			}
-			$paidUntil = (int) $adh->datefin;
+			$paidUntil = $this->paidThrough($app, (int) $adh->datefin);
+
+			// A "ran out" problem flagged before the dues really ran out (a period
+			// recorded too short): not a problem. A failed or cancelled plan is
+			// reported after the paid period, so it is never cleared here.
+			if ($app->payment_state == 'past_due' && !empty($app->problem_since) && $this->db->jdate($app->problem_since) <= $paidUntil) {
+				$this->save($id, array('payment_state' => 'active', 'problem_since' => null, 'reminders_sent' => null));
+				$cleared++;
+				continue;
+			}
 
 			// Dues that simply ran out, with no cancellation ever reported.
 			if ($app->payment_state == 'active') {
@@ -1991,7 +2071,7 @@ You get at most one email an hour about this, and one more when it is fixed.");
 				$sent++;
 			}
 		}
-		return $sent.' reminders sent, '.$lapsed.' members marked non-paying';
+		return $sent.' reminders sent, '.$lapsed.' members marked non-paying, '.$cleared.' false payment problems cleared, '.$repaired.' dues periods lengthened to the next charge';
 	}
 
 	/**
@@ -2029,7 +2109,7 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	 * paid-through date in the past may only mean the next export has not been
 	 * imported yet. Until the imported PayPal data reaches the date their next
 	 * payment was due (3 days' slack), keep them from showing as expired by
-	 * holding their end date at today. Their real end date always comes back:
+	 * holding their end date at tomorrow. Their real end date always comes back:
 	 * Dolibarr recomputes it from the subscriptions when the next one is
 	 * recorded, and this puts it back once an import covers the due date with
 	 * no payment.
@@ -2043,7 +2123,9 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			return 'no PayPal import found, PayPal members left as they are';
 		}
 		$now = self::now();
-		$endOfToday = dol_mktime(23, 59, 59, (int) dol_print_date($now, '%m'), (int) dol_print_date($now, '%d'), (int) dol_print_date($now, '%Y'));
+		// Held to the end of tomorrow, not today: the daily job runs in the
+		// afternoon, and from midnight until then they would show as expired.
+		$endOfToday = dol_mktime(23, 59, 59, (int) dol_print_date($now, '%m'), (int) dol_print_date($now, '%d'), (int) dol_print_date($now, '%Y')) + 86400;
 		$p = $this->db->prefix();
 		$sql = "SELECT a.rowid, a.datefin FROM ".$p."adherent AS a";
 		$sql .= " LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid";

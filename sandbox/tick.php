@@ -38,6 +38,38 @@ if ($job == 'daily') {
 	echo $svc->reconcile()."\n";
 } elseif ($job == 'retry') {
 	echo $svc->retryUnmatched()."\n";
+} elseif ($job == 'dues') {
+	// The dues import's calendar month for a Givebutter payment made DAYS ago.
+	// dues import ID DAYS: subscription "Givebutter <date> Name" from DAYS+27 days
+	// ago to DAYS-2 days ago, as end date, flagged as a payment problem since then |
+	// dues payment EMAIL DAYS STATUS: a Givebutter payment row that many days ago |
+	// dues run: the reminders job | dues show ID: end date and payment state
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'import') {
+		$adh = new Adherent($db);
+		$adh->fetch((int) $argv[3]);
+		$paid = dol_now() - (int) $argv[4] * 86400;
+		$db->query("DELETE FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
+		$adh->subscription($paid - 27 * 86400, 50, 0, '', 'Givebutter '.date('Y-m-d', $paid).' '.$adh->firstname.' '.$adh->lastname, '', '', '', $paid + 2 * 86400);
+		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = '".$db->idate($paid + 2 * 86400)."' WHERE rowid = ".((int) $adh->id));
+		$adh->array_options['options_payment_channel'] = 'Givebutter';
+		$adh->insertExtraFields();
+		$app = $svc->applicantForMember((int) $adh->id);
+		$svc->save($app->rowid, array('payment_state' => 'past_due', 'problem_since' => $db->idate($paid + 2 * 86400), 'reminders_sent' => '3'));
+		echo $app->rowid."\n";
+	} elseif ($what == 'payment') {
+		$app = $svc->findByEmail($argv[3]);
+		$st = isset($argv[5]) ? $argv[5] : 'unmatched';
+		$db->query("INSERT INTO ".$db->prefix()."onboarding_payment (entity, gb_transaction_id, email, firstname, lastname, amount, transacted_at, status, fk_applicant, datec) VALUES (".((int) $conf->entity).", 'repro".mt_rand()."', '".$db->escape($argv[3])."', 'X', 'Y', 50, '".$db->idate(dol_now() - (int) $argv[4] * 86400)."', '".$db->escape($st)."', ".($st == 'matched' && $app ? (int) $app->rowid : 'NULL').", '".$db->idate(dol_now())."')");
+		echo "ok\n";
+	} elseif ($what == 'run') {
+		echo $svc->dunning()."\n";
+	} elseif ($what == 'show') {
+		$adh = new Adherent($db);
+		$adh->fetch((int) $argv[3]);
+		$app = $svc->applicantForMember((int) $adh->id);
+		echo json_encode(array('end' => dol_print_date($adh->datefin, '%Y-%m-%d'), 'state' => $app->payment_state, 'problem' => $app->problem_since))."\n";
+	}
 } elseif ($job == 'paypal') {
 	// paypal setup ID: a PayPal member whose last month ended 10 days ago |
 	// paypal through DATE|clear | paypal presume | paypal end ID
