@@ -66,6 +66,26 @@ if ($job == 'daily') {
 		$o = $res ? $db->fetch_object($res) : null;
 		echo ($o && $o->datefin ? dol_print_date($db->jdate($o->datefin), '%Y-%m-%d') : '')."\n";
 	}
+} elseif ($job == 'mailgate') {
+	// mailgate send TO SUBJECT: an email straight through CMailFile, as Dolibarr's
+	// own code sends them | mailgate daily
+	dol_include_once('/onboarding/class/mailgate.class.php');
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'send') {
+		require_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
+		// A temporary attachment, gone before anyone approves, as Dolibarr's own are.
+		$tmp = tempnam(sys_get_temp_dir(), 'att');
+		file_put_contents($tmp, "attached text\n");
+		$m = new CMailFile($argv[4], $argv[3], 'sandbox@example.test', "Sent by Dolibarr itself.\n", array($tmp), array('text/plain'), array('note.txt'));
+		echo ($m->sendfile() ? 'true' : 'false')."\n";
+		@unlink($tmp);
+	} elseif ($what == 'daily') {
+		echo (new OnboardingMailGate($db))->daily()."\n";
+	} elseif ($what == 'reset') {
+		$db->query("DELETE FROM ".$db->prefix()."onboarding_mail_kind");
+		$db->query("UPDATE ".$db->prefix()."onboarding_mail_hold SET status = 'rejected' WHERE status = 'pending'");
+		echo "ok\n";
+	}
 } elseif ($job == 'connect') {
 	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {

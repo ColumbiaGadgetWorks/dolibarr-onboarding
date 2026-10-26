@@ -53,6 +53,8 @@ jobs:
         run: node e2e-training.mjs
       - name: Member votes
         run: node e2e-vote.mjs
+      - name: Email approval
+        run: node e2e-mailgate.mjs
       - name: Staff pages render
         run: bash smoke-pages.sh
       - name: Logs

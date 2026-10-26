@@ -27,10 +27,11 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.8.2';
+		$this->version = '0.9.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
-		$this->module_parts = array();
+		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
+		$this->module_parts = array('hooks' => array('mail'));
 		$this->dirs = array('/onboarding/applicant');
 		$this->config_page_url = array('setup.php@onboarding');
 		$this->hidden = false;
@@ -287,6 +288,20 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->hasRight("onboarding", "vote", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Email approval',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_mailgate',
+			'url' => '/onboarding/mailgate.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->admin',
 			'target' => '',
 			'user' => 0,
 		);

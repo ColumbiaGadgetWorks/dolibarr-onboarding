@@ -44,6 +44,10 @@ $sections = array(
 		'ONBOARDING_DUES_STANDARD' => array('Standard monthly dues', 'text', ''),
 		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'A payment of at least this much makes the member a Supporter.'),
 	),
+	'Email approval' => array(
+		'ONBOARDING_MAILGATE_APPROVER' => array('Approver', 'text', 'When set, every email Dolibarr sends (this module\'s, password resets, mass emailings) waits until this address approves it. They get a copy of each with Approve, "Approve, and always allow this kind" and Reject buttons. Empty: emails go out straight away. Waiting emails: Members, Onboarding, Email approval.'),
+		'ONBOARDING_MAILGATE_EXEMPT' => array('Never held for', 'text', 'Comma separated addresses whose emails go out without approval. The approver is always on it.'),
+	),
 	'PayPal and legacy members' => array(
 		'ONBOARDING_PAYPAL_THROUGH' => array('PayPal payments imported through', 'text', 'PayPal and Legacy members are not shown as expired until the imported PayPal data reaches the day their next payment was due, so a late import does not expire anyone. Empty: worked out from the newest line on the PAYPAL bank account (the dues import puts every PayPal payment there). Fill in a date (YYYY-MM-DD) only to override that.'),
 	),
