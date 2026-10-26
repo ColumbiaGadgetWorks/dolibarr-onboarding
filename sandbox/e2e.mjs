@@ -152,6 +152,16 @@ assert.equal(tick('paypal', 'end', ppId), day(1), 'held through tomorrow while t
 tick('paypal', 'through', day(0));
 assert.match(tick('paypal', 'presume'), /1 end dates put back/);
 assert.equal(tick('paypal', 'end', ppId), paidTo, 'an import past the due date with no payment: really expired');
+assert.match(tick('paypal', 'presume'), /expired: Pay Pal/, 'the summary names who expired');
+
+step('PayPal: a week of grace after the due date, even when the import is newer');
+const rrEmail = `ryan-${Date.now()}@example.test`;
+const rrId = tick('purchase', 'member', rrEmail, '', 'Ry', 'Ran');
+tick('paypal', 'calendar', rrId);
+// Paid 35 days ago, month recorded as ending 14 days ago, no channel on the card:
+// due 5 days ago, so still in the week of grace though the import is from today.
+tick('paypal', 'presume');
+assert.equal(tick('paypal', 'end', rrId), day(1), 'held through the week of grace, found by its PayPal import label');
 tick('paypal', 'through', 'clear');
 
 step('Givebutter dues recorded as a calendar month: no false lapse, the period runs to the next charge');

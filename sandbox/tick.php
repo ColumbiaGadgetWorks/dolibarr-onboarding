@@ -84,6 +84,19 @@ if ($job == 'daily') {
 		$adh->subscription(dol_now() - 40 * 86400, 40, 0, '', 'PayPal sandbox', '', '', '', dol_now() - 10 * 86400);
 		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = (SELECT MAX(datef) FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id).") WHERE rowid = ".((int) $adh->id));
 		echo "ok\n";
+	} elseif ($what == 'calendar') {
+		// calendar ID: like the dues import's PayPal row for a payment 35 days
+		// ago, recorded as its calendar month (ended 14 days ago), with no
+		// payment channel set on the card.
+		$adh = new Adherent($db);
+		$adh->fetch((int) $argv[3]);
+		$adh->array_options['options_payment_channel'] = '';
+		$adh->insertExtraFields();
+		$paid = dol_now() - 35 * 86400;
+		$db->query("DELETE FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
+		$adh->subscription($paid - 8 * 86400, 40, 0, '', 'PayPal '.date('Y-m-d', $paid).' '.$adh->firstname, '', '', '', $paid + 21 * 86400);
+		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = (SELECT MAX(datef) FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id).") WHERE rowid = ".((int) $adh->id));
+		echo "ok\n";
 	} elseif ($what == 'through') {
 		if ($argv[3] == 'clear') {
 			dolibarr_del_const($db, 'ONBOARDING_PAYPAL_THROUGH', $conf->entity);

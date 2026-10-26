@@ -49,7 +49,7 @@ $sections = array(
 		'ONBOARDING_MAILGATE_EXEMPT' => array('Never held for', 'text', 'Comma separated addresses whose emails go out without approval. The approver is always on it.'),
 	),
 	'PayPal and legacy members' => array(
-		'ONBOARDING_PAYPAL_THROUGH' => array('PayPal payments imported through', 'text', 'PayPal and Legacy members are not shown as expired until the imported PayPal data reaches the day their next payment was due, so a late import does not expire anyone. Empty: worked out from the newest line on the PAYPAL bank account (the dues import puts every PayPal payment there). Fill in a date (YYYY-MM-DD) only to override that.'),
+		'ONBOARDING_PAYPAL_THROUGH' => array('PayPal payments imported through', 'text', 'PayPal and Legacy members are not shown as expired until a week after their next payment was due, and until the imported PayPal data reaches that far, so a late or partial import does not expire anyone. Empty: worked out from the newest dues payment on the PAYPAL bank account (the dues import puts every PayPal payment there). Fill in a date (YYYY-MM-DD) only to override that.'),
 	),
 	'Training fees' => array(
 		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on (through the widget on the website\'s /training/book/ page), for example the code at the end of its link. Give it no checkout questions: the booking carries the tool, zone, trainer and time. Leave empty to turn training tracking off.'),
