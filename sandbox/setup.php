@@ -39,6 +39,8 @@ $consts = array(
 	'ONBOARDING_API_KEY' => getenv('ONBOARDING_API_KEY') ?: 'sandbox-key-sandbox-key-sandbox-key',
 	'ONBOARDING_GB_API_KEY' => 'sandbox',
 	'ONBOARDING_GB_API_BASE' => 'http://givebutter:8090/v1',
+	// The PayPal sync is off until e2e-paypal.mjs sets a Client ID and Secret.
+	'ONBOARDING_PAYPAL_API_BASE' => 'http://givebutter:8090',
 	'ONBOARDING_GB_CAMPAIGN_CODE' => 'SANDBOX',
 	'ONBOARDING_TRAINING_CAMPAIGN_CODE' => 'TRAINING',
 	'ONBOARDING_TRAINING_LOOKUP_URL' => 'http://'.$host.':8787/training/',

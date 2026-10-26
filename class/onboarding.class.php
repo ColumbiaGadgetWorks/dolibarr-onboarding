@@ -2089,6 +2089,10 @@ You get at most one email an hour about this, and one more when it is fixed.");
 		if ($set !== '' && ($ts = strtotime($set))) {
 			return $ts;
 		}
+		// With the PayPal sync connected, PayPal's own data says how far it goes.
+		if (getDolGlobalString('ONBOARDING_PAYPAL_CLIENT_ID') !== '' && getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH') > 0) {
+			return getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH');
+		}
 		$p = $this->db->prefix();
 		$sqls = array(
 			// The newest PayPal dues payment, not any line: a transfer or a fee

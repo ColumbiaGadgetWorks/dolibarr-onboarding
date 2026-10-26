@@ -70,6 +70,61 @@ if ($job == 'daily') {
 		$app = $svc->applicantForMember((int) $adh->id);
 		echo json_encode(array('end' => dol_print_date($adh->datefin, '%Y-%m-%d'), 'state' => $app->payment_state, 'problem' => $app->problem_since))."\n";
 	}
+} elseif ($job == 'pp') {
+	// PayPal sync: pp bank | pp sync | pp reset | pp subs ID | pp row TXID |
+	// pp assign TXID MEMBERID | pp importsub ID DAYS | pp through
+	dol_include_once('/onboarding/class/paypal.class.php');
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+	$pp = new OnboardingPaypal($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'bank') {
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$acc = new Account($db);
+		if ($acc->fetch(0, 'PAYPAL') <= 0) {
+			$acc->ref = 'PAYPAL';
+			$acc->label = 'PayPal';
+			$acc->type = Account::TYPE_CURRENT;
+			$acc->currency_code = 'USD';
+			$acc->country_id = 11;
+			$acc->date_solde = dol_now() - 400 * 86400;
+			$acc->solde = 0;
+			$acc->balance = 0;
+			$id = $acc->create($user);
+			echo ($id > 0 ? 'created '.$id : 'failed: '.$acc->error)."\n";
+		} else {
+			echo "exists\n";
+		}
+	} elseif ($what == 'sync') {
+		echo $pp->sync()."\n";
+	} elseif ($what == 'reset') {
+		dolibarr_del_const($db, 'ONBOARDING_PAYPAL_LAST_SYNC', $conf->entity);
+		dolibarr_del_const($db, 'ONBOARDING_PAYPAL_SYNCED_THROUGH', $conf->entity);
+		echo "ok\n";
+	} elseif ($what == 'subs') {
+		$out = array();
+		$res = $db->query("SELECT note, subscription, fk_bank, dateadh, datef FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $argv[3])." ORDER BY rowid");
+		while ($res && ($o = $db->fetch_object($res))) {
+			$out[] = array('note' => $o->note, 'amount' => (float) $o->subscription, 'bank' => (int) $o->fk_bank, 'from' => substr($o->dateadh, 0, 10), 'to' => substr($o->datef, 0, 10));
+		}
+		echo json_encode($out)."\n";
+	} elseif ($what == 'row') {
+		$res = $db->query("SELECT status, fk_adherent, note FROM ".$db->prefix()."onboarding_paypal WHERE txid = '".$db->escape($argv[3])."'");
+		echo json_encode($res ? $db->fetch_object($res) : null)."\n";
+	} elseif ($what == 'assign') {
+		$res = $db->query("SELECT rowid FROM ".$db->prefix()."onboarding_paypal WHERE txid = '".$db->escape($argv[3])."'");
+		$o = $res ? $db->fetch_object($res) : null;
+		echo $pp->record($o ? (int) $o->rowid : 0, (int) $argv[4])."\n";
+	} elseif ($what == 'importsub') {
+		// As the dues import records a PayPal payment made DAYS ago: its calendar month.
+		$adh = new Adherent($db);
+		$adh->fetch((int) $argv[3]);
+		$paid = dol_now() - (int) $argv[4] * 86400;
+		$from = dol_mktime(12, 0, 0, (int) date('m', $paid), 1, (int) date('Y', $paid));
+		$adh->subscription($from, 40, 0, '', 'PayPal '.date('Y-m-d', $paid).' '.$adh->firstname.' '.$adh->lastname, '', '', '', dol_time_plus_duree(dol_time_plus_duree($from, 1, 'm'), -1, 'd'));
+		echo "ok\n";
+	} elseif ($what == 'through') {
+		echo dol_print_date($svc->paypalThrough(), '%Y-%m-%d %H:%M')."\n";
+	}
 } elseif ($job == 'paypal') {
 	// paypal setup ID: a PayPal member whose last month ended 10 days ago |
 	// paypal through DATE|clear | paypal presume | paypal end ID

@@ -160,6 +160,11 @@ async function readBody(req) {
 }
 
 const github = [];
+// Fake PayPal (see /control/paypal). The sandbox's Client ID and Secret:
+const PAYPAL_ID = 'sandbox-paypal-id';
+const PAYPAL_SECRET = 'sandbox-paypal-secret';
+const paypalTx = [];
+let PAYPAL_SEARCH = true;
 let GITHUB_EXPIRES = '2099-01-01 00:00:00 UTC';
 
 const send = (res, code, body, type = 'text/html; charset=utf-8', extra = {}) => { res.writeHead(code, { 'content-type': type, ...extra }); res.end(body); };
@@ -169,6 +174,35 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
   try {
+    // Fake PayPal: OAuth and Transaction search, fed by POST /control/paypal.
+    if (path === '/v1/oauth2/token' && req.method === 'POST') {
+      const want = 'Basic ' + Buffer.from(`${PAYPAL_ID}:${PAYPAL_SECRET}`).toString('base64');
+      if (req.headers.authorization !== want) return json(res, 401, { error: 'invalid_client' });
+      return json(res, 200, { access_token: 'pp-token', token_type: 'Bearer', expires_in: 32400 });
+    }
+    if (path === '/v1/reporting/transactions' && req.method === 'GET') {
+      if (req.headers.authorization !== 'Bearer pp-token') return json(res, 401, { name: 'AUTHENTICATION_FAILURE' });
+      if (!PAYPAL_SEARCH) return json(res, 403, { name: 'NOT_AUTHORIZED' });
+      const iso = (v) => Date.parse(String(v || '').replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+      const from = iso(url.searchParams.get('start_date'));
+      const to = iso(url.searchParams.get('end_date'));
+      if (!(to > from) || to - from > 31 * 86400000) return json(res, 400, { name: 'INVALID_REQUEST', message: 'Date range is greater than 31 days' });
+      const hits = paypalTx.filter((t) => { const d = iso(t.transaction_info.transaction_initiation_date); return d >= from && d <= to; });
+      const size = Number(url.searchParams.get('page_size') || 100);
+      const pageNo = Number(url.searchParams.get('page') || 1);
+      return json(res, 200, { transaction_details: hits.slice((pageNo - 1) * size, pageNo * size), page: pageNo, total_items: hits.length, total_pages: Math.max(1, Math.ceil(hits.length / size)), last_refreshed_datetime: new Date().toISOString().replace(/\.\d+Z$/, '+0000') });
+    }
+    if (path === '/control/paypal' && req.method === 'POST') {
+      const b = await readBody(req);
+      if (b.search !== undefined) { PAYPAL_SEARCH = !!b.search; return json(res, 200, { ok: true }); }
+      const txid = `PP${++seq}`;
+      const when = new Date(Date.now() - Number(b.days_ago || 0) * 86400000).toISOString().replace(/\.\d+Z$/, '+0000');
+      paypalTx.push({
+        transaction_info: { transaction_id: txid, transaction_event_code: b.code || 'T0002', transaction_initiation_date: when, transaction_amount: { currency_code: 'USD', value: String(Number(b.amount || 40).toFixed(2)) }, fee_amount: { currency_code: 'USD', value: String((-Number(b.fee || 0)).toFixed(2)) }, transaction_status: b.status || 'S' },
+        payer_info: { account_id: b.payer_id || `PAYER${seq}`, email_address: b.email || '', payer_name: { given_name: b.given_name || '', surname: b.surname || '' } },
+      });
+      return json(res, 200, { txid });
+    }
     if (path.startsWith('/v1/')) {
       if (!/^Bearer \S+/.test(req.headers.authorization || '')) return json(res, 401, { message: 'Unauthenticated.' });
       if (path === '/v1/transactions') return json(res, 200, { data: transactions, links: { next: null }, meta: { total: transactions.length } });
