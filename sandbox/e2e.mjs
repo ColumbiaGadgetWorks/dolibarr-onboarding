@@ -139,30 +139,22 @@ step('an unmatched payment matches once the member is added');
 tick('purchase', 'member', strangerEmail, '', 'Stan', 'Ger');
 assert.equal(tick('retry'), '1');
 assert.equal(dumpOf(strangerEmail).member.subscriptions, 1);
-step('a PayPal member is not expired before the PayPal data reaches their due date');
+step('PayPal members: reminders like Givebutter members, but only while the PayPal sync is up to date');
 const ppEmail = `paypal-${Date.now()}@example.test`;
 const ppId = tick('purchase', 'member', ppEmail, '', 'Pay', 'Pal');
 tick('paypal', 'setup', ppId);
-const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 const paidTo = tick('paypal', 'end', ppId);
-assert.ok(paidTo < day(-8) && paidTo > day(-12), `last month ended about 10 days ago: ${paidTo}`);
-tick('paypal', 'through', day(-20));
-assert.match(tick('paypal', 'presume'), /1 PayPal\/Legacy members held/);
-assert.equal(tick('paypal', 'end', ppId), day(1), 'held through tomorrow while the import is older than the due date');
-tick('paypal', 'through', day(0));
-assert.match(tick('paypal', 'presume'), /1 end dates put back/);
-assert.equal(tick('paypal', 'end', ppId), paidTo, 'an import past the due date with no payment: really expired');
-assert.match(tick('paypal', 'presume'), /expired: Pay Pal/, 'the summary names who expired');
-
-step('PayPal: a week of grace after the due date, even when the import is newer');
-const rrEmail = `ryan-${Date.now()}@example.test`;
-const rrId = tick('purchase', 'member', rrEmail, '', 'Ry', 'Ran');
-tick('paypal', 'calendar', rrId);
-// Paid 35 days ago, month recorded as ending 14 days ago, no channel on the card:
-// due 5 days ago, so still in the week of grace though the import is from today.
-tick('paypal', 'presume');
-assert.equal(tick('paypal', 'end', rrId), day(1), 'held through the week of grace, found by its PayPal import label');
-tick('paypal', 'through', 'clear');
+// An end date the old "held as paid" step left at tomorrow is put back.
+tick('paypal', 'hold', ppId);
+tick('paypal', 'fresh', 'off');
+assert.match(tick('dues', 'run'), /held end dates put back/);
+assert.equal(tick('paypal', 'end', ppId), paidTo, 'the real end date is back');
+assert.equal(JSON.parse(tick('dues', 'show', ppId)).state, 'active', 'not judged while the PayPal sync is not running');
+tick('paypal', 'fresh', 'on');
+tick('dues', 'run');
+assert.equal(JSON.parse(tick('dues', 'show', ppId)).state, 'past_due', 'a PayPal payment that did not come is a payment problem');
+assert.ok((await mailTo(ppEmail)).some((x) => /dues need attention/i.test(x)), 'and the member gets the reminder');
+tick('paypal', 'fresh', 'off');
 
 step('Givebutter dues recorded as a calendar month: no false lapse, the period runs to the next charge');
 {

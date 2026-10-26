@@ -389,6 +389,13 @@ class OnboardingPaypal
 			$adh->insertExtraFields();
 		}
 		$user = $saved;
+		// Reminders and lapses work from the applicant row: a payment ends any
+		// payment problem, as a Givebutter payment does.
+		$app = $this->svc->applicantForMember((int) $adh->id, (string) $row->email);
+		if ($app && $app->payment_state != 'active') {
+			$this->svc->save($app->rowid, array('payment_state' => 'active', 'problem_since' => null, 'reminders_sent' => null));
+			$this->svc->refreshStage($app->rowid);
+		}
 		$this->db->query("UPDATE ".$p."onboarding_paypal SET note = '".$this->db->escape($note)."' WHERE rowid = ".((int) $rowid));
 		return ($recorded ? 'matched' : 'recorded').': '.$who.' '.price($amount).' '.date('Y-m-d', $when);
 	}
