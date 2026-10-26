@@ -1513,11 +1513,77 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	 */
 	public function paidThrough($app, $datefin)
 	{
-		$res = $this->db->query("SELECT MAX(transacted_at) AS t FROM ".$this->db->prefix()."onboarding_payment WHERE fk_applicant = ".((int) $app->rowid)." AND status = 'matched'");
+		$p = $this->db->prefix();
+		$ends = array((int) $datefin);
+		$res = $this->db->query("SELECT MAX(transacted_at) AS t FROM ".$p."onboarding_payment WHERE fk_applicant = ".((int) $app->rowid)." AND status = 'matched'");
 		$obj = $res ? $this->db->fetch_object($res) : null;
-		$last = ($obj && $obj->t) ? (int) $this->db->jdate($obj->t) : 0;
-		$byPayment = $last ? dol_time_plus_duree(dol_time_plus_duree($last, 1, 'm'), -1, 'd') : 0;
-		return max((int) $datefin, $byPayment);
+		if ($obj && $obj->t) {
+			$ends[] = dol_time_plus_duree(dol_time_plus_duree((int) $this->db->jdate($obj->t), 1, 'm'), -1, 'd');
+		}
+		if ($app->fk_adherent > 0) {
+			// PayPal: the newest payment the PayPal sync matched to them.
+			$res = @$this->db->query("SELECT MAX(transacted_at) AS t, MAX(amount) AS a FROM ".$p."onboarding_paypal WHERE fk_adherent = ".((int) $app->fk_adherent)." AND status = 'matched'");
+			$obj = $res ? $this->db->fetch_object($res) : null;
+			if ($obj && $obj->t) {
+				dol_include_once('/onboarding/class/paypal.class.php');
+				$ends[] = dol_time_plus_duree(dol_time_plus_duree((int) $this->db->jdate($obj->t), OnboardingPaypal::months((float) $obj->a), 'm'), -1, 'd');
+			}
+			// A period the dues import recorded as a calendar month: it really runs
+			// from the day it was paid (its bank line) for as many months.
+			$res = @$this->db->query("SELECT s.dateadh, s.datef, b.dateo FROM ".$p."subscription AS s INNER JOIN ".$p."bank AS b ON b.rowid = s.fk_bank WHERE s.fk_adherent = ".((int) $app->fk_adherent)." ORDER BY s.datef DESC LIMIT 1");
+			$obj = $res ? $this->db->fetch_object($res) : null;
+			if ($obj && $obj->dateo && $obj->datef) {
+				$months = max(1, (int) round(((int) $this->db->jdate($obj->datef) - (int) $this->db->jdate($obj->dateadh)) / (30.44 * 86400)));
+				$ends[] = dol_time_plus_duree(dol_time_plus_duree((int) $this->db->jdate($obj->dateo), $months, 'm'), -1, 'd');
+			}
+		}
+		return max($ends);
+	}
+
+	/**
+	 * Undo the old "held as paid" end dates (0.8.2 to 0.10.x held PayPal and
+	 * Legacy members' end date at tomorrow while PayPal data was missing): a
+	 * member whose end date is later than their newest subscription gets the
+	 * subscription's end back. Now that PayPal payments come in by themselves,
+	 * the end date is simply what was paid.
+	 *
+	 * @return int Members changed
+	 */
+	public function restoreEndDates()
+	{
+		$p = $this->db->prefix();
+		$sql = "SELECT a.rowid, MAX(s.datef) AS paidto FROM ".$p."adherent AS a INNER JOIN ".$p."subscription AS s ON s.fk_adherent = a.rowid";
+		$sql .= " LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid LEFT JOIN ".$p."adherent_type AS t ON t.rowid = a.fk_adherent_type";
+		$sql .= " WHERE a.entity IN (".getEntity('adherent').") AND (e.payment_channel = 'PayPal' OR LOWER(t.libelle) = 'legacy' OR COALESCE(e.payment_channel, '') = '')";
+		$sql .= " GROUP BY a.rowid, a.datefin HAVING a.datefin > MAX(s.datef)";
+		$res = $this->db->query($sql);
+		$rows = array();
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$rows[] = $obj;
+		}
+		foreach ($rows as $obj) {
+			$this->db->query("UPDATE ".$p."adherent SET datefin = '".$this->db->escape($obj->paidto)."' WHERE rowid = ".((int) $obj->rowid));
+		}
+		return count($rows);
+	}
+
+	/**
+	 * PayPal members added before the signup form have no applicant row, which
+	 * is what reminders and lapses work from. Make one for each.
+	 *
+	 * @return void
+	 */
+	public function ensurePaypalApplicants()
+	{
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT a.rowid FROM ".$p."adherent AS a INNER JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid LEFT JOIN ".$p."onboarding_applicant AS o ON o.fk_adherent = a.rowid WHERE a.entity IN (".getEntity('adherent').") AND a.statut = ".((int) Adherent::STATUS_VALIDATED)." AND e.payment_channel = 'PayPal' AND o.rowid IS NULL");
+		$ids = array();
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$ids[] = (int) $obj->rowid;
+		}
+		foreach ($ids as $id) {
+			$this->applicantForMember($id);
+		}
 	}
 
 	/**
@@ -2001,6 +2067,11 @@ You get at most one email an hour about this, and one more when it is fixed.");
 		$lapsed = 0;
 		$cleared = 0;
 		$repaired = $this->repairPeriods();
+		$restored = $this->restoreEndDates();
+		$this->ensurePaypalApplicants();
+		// PayPal members are judged only while the PayPal sync is up to date: a
+		// broken sync must not look like everyone stopped paying.
+		$paypalFresh = getDolGlobalString('ONBOARDING_PAYPAL_CLIENT_ID') !== '' && getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH') > $now - 86400;
 
 		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND fk_adherent > 0 AND payment_state IN ('active', 'past_due', 'cancelled')");
 		$ids = array();
@@ -2021,8 +2092,11 @@ You get at most one email an hour about this, and one more when it is fixed.");
 				}
 			}
 			$channel = isset($adh->array_options['options_payment_channel']) ? (string) $adh->array_options['options_payment_channel'] : '';
-			if ($channel !== '' && $channel !== 'Givebutter') {
-				continue; // PayPal, check and scholarship members are kept up by hand.
+			if ($channel !== '' && $channel !== 'Givebutter' && $channel !== 'PayPal') {
+				continue; // Check, cash and scholarship members are kept up by hand.
+			}
+			if ($channel === 'PayPal' && !$paypalFresh) {
+				continue;
 			}
 			$paidUntil = $this->paidThrough($app, (int) $adh->datefin);
 
@@ -2064,140 +2138,21 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			}
 			if ($due) {
 				$left = max(0, $grace - $days);
-				$body = $this->template('ONBOARDING_MAIL_REMINDER_BODY', "Hi {firstname},\n\nYour {org} dues payment did not go through or was cancelled. To keep your membership and badge access, please set up dues again here:\n\n{payment_url}\n\nUse the same email address you joined with. Your membership will end in {days_left} days if we do not hear from you. If dues are a hardship, just reply to this email and we will work something out.", $app, array('days_left' => (string) $left));
+				if ($channel === 'PayPal') {
+					$body = $this->template('ONBOARDING_MAIL_REMINDER_PAYPAL_BODY', "Hi {firstname},\n\nWe have not received your {org} dues through PayPal since {paid_until}. Please check that your PayPal subscription is still active, or set up dues here instead:\n\n{payment_url}\n\nYour membership will end in {days_left} days if we do not hear from you. If dues are a hardship, just reply to this email and we will work something out.", $app, array('days_left' => (string) $left, 'paid_until' => dol_print_date($paidUntil, 'day')));
+				} else {
+					$body = $this->template('ONBOARDING_MAIL_REMINDER_BODY', "Hi {firstname},\n\nYour {org} dues payment did not go through or was cancelled. To keep your membership and badge access, please set up dues again here:\n\n{payment_url}\n\nUse the same email address you joined with. Your membership will end in {days_left} days if we do not hear from you. If dues are a hardship, just reply to this email and we will work something out.", $app, array('days_left' => (string) $left));
+				}
 				$this->mail($app->email, $this->template('ONBOARDING_MAIL_REMINDER_SUBJECT', 'Your {org} dues need attention', $app), $body);
 				// One email even if several offsets came due at once.
 				$this->save($id, array('reminders_sent' => implode(',', array_merge($done, $due))));
 				$sent++;
 			}
 		}
-		return $sent.' reminders sent, '.$lapsed.' members marked non-paying, '.$cleared.' false payment problems cleared, '.$repaired.' dues periods lengthened to the next charge';
+		return $sent.' reminders sent, '.$lapsed.' members marked non-paying, '.$cleared.' false payment problems cleared, '.$repaired.' dues periods lengthened to the next charge'.($restored ? ', '.$restored.' held end dates put back' : '');
 	}
 
-	/**
-	 * The date of the newest PayPal payment imported into Dolibarr: the setup
-	 * page's date when filled in, else the newest dues payment on the bank
-	 * account with ref PAYPAL (import_dues.py records each payment there on its
-	 * date and links it to the subscription), else the newest subscription
-	 * labelled "PayPal ...".
-	 *
-	 * @return int Timestamp, 0 when no PayPal payment was ever imported
-	 */
-	public function paypalThrough()
-	{
-		$set = trim(getDolGlobalString('ONBOARDING_PAYPAL_THROUGH'));
-		if ($set !== '' && ($ts = strtotime($set))) {
-			return $ts;
-		}
-		// With the PayPal sync connected, PayPal's own data says how far it goes.
-		if (getDolGlobalString('ONBOARDING_PAYPAL_CLIENT_ID') !== '' && getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH') > 0) {
-			return getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH');
-		}
-		$p = $this->db->prefix();
-		$sqls = array(
-			// The newest PayPal dues payment, not any line: a transfer or a fee
-			// dated later says nothing about which payments were imported.
-			"SELECT MAX(b.dateo) AS d FROM ".$p."bank AS b INNER JOIN ".$p."bank_account AS ba ON ba.rowid = b.fk_account INNER JOIN ".$p."subscription AS s ON s.fk_bank = b.rowid WHERE UPPER(ba.ref) = 'PAYPAL' AND ba.entity IN (".getEntity('bank_account').")",
-			"SELECT MAX(s.dateadh) AS d FROM ".$p."subscription AS s INNER JOIN ".$p."adherent AS a ON a.rowid = s.fk_adherent WHERE s.note LIKE 'PayPal %' AND a.entity IN (".getEntity('adherent').")",
-		);
-		foreach ($sqls as $sql) {
-			// The bank tables are missing when the Banks module was never enabled.
-			$res = @$this->db->query($sql);
-			$obj = $res ? $this->db->fetch_object($res) : null;
-			if ($obj && !empty($obj->d)) {
-				return (int) $this->db->jdate($obj->d);
-			}
-		}
-		return 0;
-	}
 
-	/**
-	 * PayPal and Legacy members are recorded by hand from PayPal exports, so a
-	 * paid-through date in the past may only mean the next export has not been
-	 * imported yet. Until a week after their next payment was due, and until
-	 * the imported PayPal data reaches that far, keep them from showing as
-	 * expired by holding their end date at tomorrow. Their real end date always
-	 * comes back: Dolibarr recomputes it from the subscriptions when the next
-	 * one is recorded, and this puts it back once the week is over and an
-	 * import covers it with no payment.
-	 *
-	 * @return string Summary
-	 */
-	public function presumePaid()
-	{
-		$through = $this->paypalThrough();
-		$grace = 7 * 86400;
-		$now = self::now();
-		// Held to the end of tomorrow, not today: the daily job runs in the
-		// afternoon, and from midnight until then they would show as expired.
-		$endOfToday = dol_mktime(23, 59, 59, (int) dol_print_date($now, '%m'), (int) dol_print_date($now, '%d'), (int) dol_print_date($now, '%Y')) + 86400;
-		$p = $this->db->prefix();
-		// PayPal members, Legacy members not on Givebutter, and members with no
-		// channel set whose newest dues came from a PayPal import.
-		$sql = "SELECT a.rowid, a.firstname, a.lastname, a.datefin, e.payment_channel, LOWER(t.libelle) AS type FROM ".$p."adherent AS a";
-		$sql .= " LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid";
-		$sql .= " LEFT JOIN ".$p."adherent_type AS t ON t.rowid = a.fk_adherent_type";
-		$sql .= " WHERE a.entity IN (".getEntity('adherent').") AND a.statut = ".((int) Adherent::STATUS_VALIDATED);
-		$sql .= " AND (e.payment_channel = 'PayPal' OR COALESCE(e.payment_channel, '') = '' OR (LOWER(t.libelle) = 'legacy' AND e.payment_channel <> 'Givebutter'))";
-		$res = $this->db->query($sql);
-		$members = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$members[] = $obj;
-		}
-		$held = 0;
-		$restored = 0;
-		$expired = array();
-		foreach ($members as $obj) {
-			// The newest subscription, and the day it was actually paid when the
-			// dues import linked it to its bank line.
-			$last = "SELECT s.dateadh, s.datef, s.note, b.dateo FROM ".$p."subscription AS s LEFT JOIN ".$p."bank AS b ON b.rowid = s.fk_bank WHERE s.fk_adherent = ".((int) $obj->rowid)." ORDER BY s.datef DESC LIMIT 1";
-			$r = @$this->db->query($last);
-			if (!$r) {
-				$r = $this->db->query("SELECT dateadh, datef, note, NULL AS dateo FROM ".$p."subscription WHERE fk_adherent = ".((int) $obj->rowid)." ORDER BY datef DESC LIMIT 1");
-			}
-			$sub = $r ? $this->db->fetch_object($r) : null;
-			if (!$sub || empty($sub->datef)) {
-				continue;
-			}
-			$note = (string) $sub->note;
-			if ((string) $obj->payment_channel === '' && $obj->type != 'legacy' && stripos($note, 'PayPal') !== 0) {
-				continue; // No channel, and not paying by PayPal as far as we can tell.
-			}
-			$paidTo = (int) $this->db->jdate($sub->datef);
-			// The day they last paid: the bank line the dues import linked, else
-			// the date in the import's label ("PayPal 2026-09-09 Name").
-			$paidOn = !empty($sub->dateo) ? (int) $this->db->jdate($sub->dateo) : 0;
-			if (!$paidOn && preg_match('/\b(\d{4})-(\d{2})-(\d{2})\b/', $note, $m)) {
-				$paidOn = dol_mktime(12, 0, 0, (int) $m[2], (int) $m[3], (int) $m[1]);
-			}
-			// When the next payment was due: a period after the last one was paid
-			// (someone paying on the 9th for a calendar month is due on the 9th),
-			// else the day after the period ends.
-			$due = $paidTo + 86400;
-			if ($paidOn) {
-				$months = max(1, (int) round(($paidTo - (int) $this->db->jdate($sub->dateadh)) / (30.44 * 86400)));
-				$due = max($due, dol_time_plus_duree($paidOn, $months, 'm'));
-			}
-			// A week of grace after the due date, and until the imported PayPal
-			// data reaches that far: a late or not yet imported payment is not a
-			// lapse.
-			$unknown = $now < $due + $grace || ($through && $through < $due + $grace);
-			$want = ($unknown && $paidTo < $endOfToday) ? $endOfToday : $paidTo;
-			if ($want == $endOfToday) {
-				$held++;
-			} elseif ($paidTo < $now) {
-				$expired[] = trim($obj->firstname.' '.$obj->lastname).' (due '.dol_print_date($due, 'day').')';
-			}
-			$cur = (int) $this->db->jdate($obj->datefin);
-			if (abs($cur - $want) > 60) {
-				$this->db->query("UPDATE ".$p."adherent SET datefin = '".$this->db->idate($want)."' WHERE rowid = ".((int) $obj->rowid));
-				if ($want == $paidTo && $cur > $paidTo) {
-					$restored++;
-				}
-			}
-		}
-		return 'PayPal data imported through '.($through ? dol_print_date($through, 'day') : 'nothing yet').': '.$held.' PayPal/Legacy members held as paid (a week after their due date, and until the PayPal data is newer than that), '.$restored.' end dates put back'.($expired ? '; expired: '.implode(', ', array_slice($expired, 0, 20)) : '');
-	}
 
 	/**
 	 * Mark a member non-paying.

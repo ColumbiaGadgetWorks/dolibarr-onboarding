@@ -67,7 +67,7 @@ class OnboardingCron
 		$purchase = new OnboardingPurchase($this->db, $svc);
 		dol_include_once('/onboarding/class/mailgate.class.php');
 		$gate = new OnboardingMailGate($this->db);
-		$this->output = $svc->dunning().'; '.$svc->presumePaid().'; '.$svc->cleanup().'; '.$training->expireRegistrations().'; '.$purchase->purge().'; '.$svc->fetchDocs().'; '.$gate->daily();
+		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations().'; '.$purchase->purge().'; '.$svc->fetchDocs().'; '.$gate->daily();
 		return 0;
 	}
 

@@ -123,11 +123,11 @@ if ($job == 'daily') {
 		$adh->subscription($from, 40, 0, '', 'PayPal '.date('Y-m-d', $paid).' '.$adh->firstname.' '.$adh->lastname, '', '', '', dol_time_plus_duree(dol_time_plus_duree($from, 1, 'm'), -1, 'd'));
 		echo "ok\n";
 	} elseif ($what == 'through') {
-		echo dol_print_date($svc->paypalThrough(), '%Y-%m-%d %H:%M')."\n";
+		echo dol_print_date(getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH'), '%Y-%m-%d %H:%M')."\n";
 	}
 } elseif ($job == 'paypal') {
 	// paypal setup ID: a PayPal member whose last month ended 10 days ago |
-	// paypal through DATE|clear | paypal presume | paypal end ID
+	// paypal hold ID | paypal fresh on|off | paypal end ID
 	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 	$what = isset($argv[2]) ? $argv[2] : '';
 	if ($what == 'setup') {
@@ -139,28 +139,20 @@ if ($job == 'daily') {
 		$adh->subscription(dol_now() - 40 * 86400, 40, 0, '', 'PayPal sandbox', '', '', '', dol_now() - 10 * 86400);
 		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = (SELECT MAX(datef) FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id).") WHERE rowid = ".((int) $adh->id));
 		echo "ok\n";
-	} elseif ($what == 'calendar') {
-		// calendar ID: like the dues import's PayPal row for a payment 35 days
-		// ago, recorded as its calendar month (ended 14 days ago), with no
-		// payment channel set on the card.
-		$adh = new Adherent($db);
-		$adh->fetch((int) $argv[3]);
-		$adh->array_options['options_payment_channel'] = '';
-		$adh->insertExtraFields();
-		$paid = dol_now() - 35 * 86400;
-		$db->query("DELETE FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
-		$adh->subscription($paid - 8 * 86400, 40, 0, '', 'PayPal '.date('Y-m-d', $paid).' '.$adh->firstname, '', '', '', $paid + 21 * 86400);
-		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = (SELECT MAX(datef) FROM ".$db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id).") WHERE rowid = ".((int) $adh->id));
+	} elseif ($what == 'hold') {
+		// What 0.8.2 to 0.10 did to a PayPal member while PayPal data was missing.
+		$db->query("UPDATE ".$db->prefix()."adherent SET datefin = '".$db->idate(dol_now() + 86400)."' WHERE rowid = ".((int) $argv[3]));
 		echo "ok\n";
-	} elseif ($what == 'through') {
-		if ($argv[3] == 'clear') {
-			dolibarr_del_const($db, 'ONBOARDING_PAYPAL_THROUGH', $conf->entity);
+	} elseif ($what == 'fresh') {
+		// fresh on|off: the PayPal sync connected and just run, or not
+		if ($argv[3] == 'on') {
+			dolibarr_set_const($db, 'ONBOARDING_PAYPAL_CLIENT_ID', 'sandbox-paypal-id', 'chaine', 0, '', $conf->entity);
+			dolibarr_set_const($db, 'ONBOARDING_PAYPAL_SYNCED_THROUGH', dol_now(), 'chaine', 0, '', $conf->entity);
 		} else {
-			dolibarr_set_const($db, 'ONBOARDING_PAYPAL_THROUGH', $argv[3], 'chaine', 0, '', $conf->entity);
+			dolibarr_del_const($db, 'ONBOARDING_PAYPAL_CLIENT_ID', $conf->entity);
+			dolibarr_del_const($db, 'ONBOARDING_PAYPAL_SYNCED_THROUGH', $conf->entity);
 		}
 		echo "ok\n";
-	} elseif ($what == 'presume') {
-		echo $svc->presumePaid()."\n";
 	} elseif ($what == 'end') {
 		$res = $db->query("SELECT datefin FROM ".$db->prefix()."adherent WHERE rowid = ".((int) $argv[3]));
 		$o = $res ? $db->fetch_object($res) : null;

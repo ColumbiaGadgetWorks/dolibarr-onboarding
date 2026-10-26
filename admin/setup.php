@@ -55,9 +55,6 @@ $sections = array(
 		'ONBOARDING_PAYPAL_DUES_CODES' => array('PayPal transaction codes that are dues', 'text', 'Default T0002 (subscription payments). Other PayPal payments are not dues and are left alone.'),
 		'ONBOARDING_PAYPAL_API_BASE' => array('PayPal API address', 'text', 'Only change this to point at the sandbox.'),
 	),
-	'PayPal and legacy members' => array(
-		'ONBOARDING_PAYPAL_THROUGH' => array('PayPal payments imported through', 'text', 'PayPal and Legacy members are not shown as expired until a week after their next payment was due, and until the imported PayPal data reaches that far, so a late or partial import does not expire anyone. Empty: worked out from the newest dues payment on the PAYPAL bank account (the dues import puts every PayPal payment there). Fill in a date (YYYY-MM-DD) only to override that.'),
-	),
 	'Training fees' => array(
 		'ONBOARDING_TRAINING_CAMPAIGN_CODE' => array('Training campaign code', 'text', 'The Givebutter campaign people pay training fees on (through the widget on the website\'s /training/book/ page), for example the code at the end of its link. Give it no checkout questions: the booking carries the tool, zone, trainer and time. Leave empty to turn training tracking off.'),
 		'ONBOARDING_TRAINING_TRAINER_SHARE' => array('Trainer\'s share (percent)', 'text', 'Of what arrives after Givebutter\'s fee, credited to the trainer. The rest goes to the zone\'s budget. A tool can set its own.'),
@@ -111,6 +108,7 @@ $sections = array(
 		'ONBOARDING_GRACE_DAYS' => array('Mark non-paying after (days)', 'text', 'Counted from the same moment. A member who has already paid for a period keeps it until it runs out.'),
 		'ONBOARDING_MAIL_REMINDER_SUBJECT' => array('Reminder subject', 'text', 'Leave any email field empty to use the built-in wording.'),
 		'ONBOARDING_MAIL_REMINDER_BODY' => array('Reminder text', 'area', 'Placeholders: {firstname} {lastname} {org} {payment_url} {days_left}'),
+		'ONBOARDING_MAIL_REMINDER_PAYPAL_BODY' => array('Reminder text for PayPal members', 'area', 'Sent instead of the text above to members who pay by PayPal. Placeholders: {firstname} {lastname} {org} {payment_url} {days_left} {paid_until}'),
 		'ONBOARDING_MAIL_LAPSED_SUBJECT' => array('Membership ended subject', 'text', ''),
 		'ONBOARDING_MAIL_LAPSED_BODY' => array('Membership ended text', 'area', 'Placeholders: {firstname} {lastname} {org} {payment_url}'),
 		'ONBOARDING_MAIL_WELCOME_SUBJECT' => array('Welcome subject', 'text', ''),
@@ -159,7 +157,8 @@ if ($action == 'save') {
 	if (!$errors) {
 		setEventMessages('Saved', null);
 	}
-	header('Location: '.$_SERVER['PHP_SELF']);
+	$section = (int) GETPOST('section', 'int');
+	header('Location: '.$_SERVER['PHP_SELF'].($section > 0 ? '#section-'.$section : ''));
 	exit;
 }
 if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetchdocs', 'runbookings', 'runpaypal'), true)) {
@@ -177,7 +176,7 @@ if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetch
 		dol_include_once('/onboarding/class/purchase.class.php');
 		$out = (new OnboardingPurchase($db, $svc))->installRoleTags();
 	} else {
-		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->presumePaid().'; '.$svc->cleanup();
+		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->cleanup();
 	}
 	setEventMessages($out, null);
 	header('Location: '.$_SERVER['PHP_SELF']);
@@ -187,6 +186,16 @@ if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetch
 llxHeader('', 'Member onboarding setup');
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans('BackToModuleList').'</a>';
 print load_fiche_titre('Member onboarding setup', $linkback, 'title_setup');
+
+// Run now: the same jobs Dolibarr's scheduler runs on its own.
+print '<table class="noborder centpercent">';
+print '<tr class="liste_titre"><td>Run now</td></tr>';
+print '<tr class="oddeven"><td><span class="opacitymedium">These run on their own while Dolibarr\'s scheduled jobs are running (Givebutter and PayPal hourly, training bookings every 15 minutes, reminders daily). To run one now:</span><br>';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runsync&token='.newToken().'">Sync Givebutter now</a> ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runpaypal&token='.newToken().'">Sync PayPal now</a> ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runbookings&token='.newToken().'">Run training bookings now</a> ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=rundaily&token='.newToken().'">Run reminders now</a>';
+print '</td></tr></table><br>';
 
 $endpoint = OnboardingService::publicUrl('api.php');
 print '<div class="info">The website talks to Dolibarr at <strong>'.dol_escape_htmltag($endpoint).'</strong>. In the website Worker, set the secret <code>DOLIBARR_URL</code> to <strong>'.dol_escape_htmltag(preg_replace('/\/custom\/onboarding\/public\/api\.php$/', '', $endpoint)).'</strong> and <code>DOLIBARR_API_KEY</code> to the key below.</div>';
@@ -248,9 +257,12 @@ print '</table>';
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="save">';
+$n = 0;
 foreach ($sections as $title => $fields) {
-	print '<br><table class="noborder centpercent">';
-	print '<tr class="liste_titre"><td colspan="2">'.dol_escape_htmltag($title).'</td></tr>';
+	$n++;
+	// Every section has its own Save; each saves the whole page and comes back here.
+	print '<br><table class="noborder centpercent" id="section-'.$n.'">';
+	print '<tr class="liste_titre"><td>'.dol_escape_htmltag($title).'</td><td class="right"><button type="submit" name="section" value="'.$n.'" class="button button-save smallpaddingimp">'.$langs->trans('Save').'</button></td></tr>';
 	foreach ($fields as $name => $def) {
 		$value = getDolGlobalString($name);
 		print '<tr class="oddeven"><td class="titlefield tdtop">'.dol_escape_htmltag($def[0]).'</td><td>';
@@ -278,11 +290,6 @@ foreach ($sections as $title => $fields) {
 print '<br><div class="center"><input type="submit" class="button button-save" value="'.$langs->trans('Save').'"></div>';
 print '</form>';
 
-print '<br><div class="opacitymedium">The scheduled jobs run on their own once Dolibarr\'s scheduled jobs are set up. To run them now: ';
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runsync&token='.newToken().'">Sync Givebutter now</a> ';
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runpaypal&token='.newToken().'">Sync PayPal now</a> ';
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runbookings&token='.newToken().'">Run training bookings now</a> ';
-print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=rundaily&token='.newToken().'">Run reminders now</a></div>';
 
 llxFooter();
 $db->close();

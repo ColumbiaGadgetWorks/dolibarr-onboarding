@@ -44,17 +44,6 @@ matched nobody: choose the member (one is pre-selected when the payer's name or 
 contains a single member's last name) and their later payments match by their Givebutter
 contact. The hourly sync and the **Match again** button retry every unmatched payment.
 
-PayPal and Legacy members are recorded by hand from PayPal exports (the CGWManagement dues
-import), so their end date can pass only because the next export is not in yet. The daily
-job holds such a member's end date at tomorrow, so Dolibarr does not show them as expired,
-until a week after the day their next payment was due (a period after their last payment),
-and until the imported PayPal data reaches that far. Members with no payment channel whose
-newest dues came from a PayPal import count too. "Imported through" is the newest dues payment on the bank
-account with ref PAYPAL, or a date set on the setup page. When the next payment is imported the end
-date comes from it as usual; when an import passes the due date with no payment, the real
-end date is put back and they show as expired. Givebutter, check and scholarship members are
-not affected.
-
 ## Email updates
 
 The website's "Get updates by email" box sends each address here. It becomes a Dolibarr
@@ -450,11 +439,14 @@ A lapsed member who pays again is a member again. Payments that match nobody wai
 Members, Onboarding, Unmatched payments; once one is assigned, later payments from that
 PayPal account match on their own. **Sync PayPal now** on the setup page runs it at once.
 
-PayPal members are then judged by PayPal's own data: "imported through" is how far PayPal's
-search has data (it can run a few hours behind), so a member whose payment does not arrive
-within the week of grace after it was due shows as expired. A failing sync (wrong
-credentials, Transaction search not switched on) is emailed to the alerts address and shown
-under Needs attention.
+PayPal members then get the same reminders and lapse as Givebutter members: the daily job
+judges them by what was paid (a month, or the months paid for, from their newest payment),
+sends the reminders (a PayPal wording, editable on the setup page), and ends the membership
+after the grace period, all through email approval when it is on. They are judged only while
+the PayPal sync has run within the last day, so a broken sync never looks like everyone
+stopped paying. A failing sync (wrong credentials, Transaction search not switched on) is
+emailed to the alerts address and shown under Needs attention. Check, cash and scholarship
+members are still kept up by hand.
 
 To set it up: at developer.paypal.com, log in with CGW's PayPal Business account, Apps &
 Credentials, **Live**, create an app, tick **Transaction search** in its features (PayPal can
@@ -463,7 +455,8 @@ take a few hours to switch it on), and paste its Client ID and Secret on the set
 ### Updating to 0.10
 
 Update the module, then disable and enable **Member onboarding** once (the new table for
-PayPal payments).
+PayPal payments). From 0.11 the daily job also puts back end dates that 0.8.2 to 0.10 held
+at "tomorrow" for PayPal and Legacy members.
 
 ## Needs attention
 
