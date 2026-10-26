@@ -433,7 +433,7 @@ only while its holder still has the `secretary` or `president` tag.
 ## CGW home page
 
 The top menu **CGW** opens a home page for the makerspace: what needs attention, member and
-dues counts, recent dues payments, who is paid up until about now, upcoming trainings,
+dues counts, recent dues payments, upcoming trainings,
 deadlines, quick links and the bank balances. Each person only sees the sections they may
 see.
 
