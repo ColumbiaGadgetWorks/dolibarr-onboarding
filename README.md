@@ -436,6 +436,35 @@ only while its holder still has the `secretary` or `president` tag.
 4. Deploy the website branch with the `/voting/` pages.
 5. In January, start a practice vote with the board.
 
+## PayPal sync
+
+With a PayPal **Client ID** and **Secret** on the setup page (PayPal sync), the hourly job
+also asks PayPal's Transaction search API for new transactions. Each subscription payment
+(PayPal code T0002; others are left alone) is matched to a member: whoever earlier payments
+from the same PayPal account went to, else by email, else by a first and last name only one
+member has. It is recorded on their card as a subscription from the payment date for the
+months it pays (its amount over **PayPal monthly dues**, default 40), with the payment and
+PayPal's fee on the bank account with ref PAYPAL, linked to the member. A payment already on
+the card, from the CGWManagement dues import or the yearly statement, is not recorded again.
+A lapsed member who pays again is a member again. Payments that match nobody wait under
+Members, Onboarding, Unmatched payments; once one is assigned, later payments from that
+PayPal account match on their own. **Sync PayPal now** on the setup page runs it at once.
+
+PayPal members are then judged by PayPal's own data: "imported through" is how far PayPal's
+search has data (it can run a few hours behind), so a member whose payment does not arrive
+within the week of grace after it was due shows as expired. A failing sync (wrong
+credentials, Transaction search not switched on) is emailed to the alerts address and shown
+under Needs attention.
+
+To set it up: at developer.paypal.com, log in with CGW's PayPal Business account, Apps &
+Credentials, **Live**, create an app, tick **Transaction search** in its features (PayPal can
+take a few hours to switch it on), and paste its Client ID and Secret on the setup page.
+
+### Updating to 0.10
+
+Update the module, then disable and enable **Member onboarding** once (the new table for
+PayPal payments).
+
 ## Needs attention
 
 Members, Onboarding, **Needs attention** lists everything flagged for someone to check, with

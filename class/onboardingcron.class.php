@@ -39,6 +39,16 @@ class OnboardingCron
 		} elseif (getDolGlobalString('ONBOARDING_GB_API_KEY') !== '') {
 			$svc->alertClear('givebutter-sync', 'The hourly Givebutter sync works again.');
 		}
+		dol_include_once('/onboarding/class/paypal.class.php');
+		if (OnboardingPaypal::configured()) {
+			$pp = (new OnboardingPaypal($this->db, $svc))->sync();
+			$this->output .= '; '.$pp;
+			if (strpos($pp, 'failed') !== false) {
+				$svc->alert('paypal-sync', 'The hourly PayPal sync is failing', 'The hourly sync with PayPal said: '.$pp."\n\nPayPal dues are not recorded until this works, and PayPal members are judged by the last data that came in.");
+			} else {
+				$svc->alertClear('paypal-sync', 'The hourly PayPal sync works again.');
+			}
+		}
 		return 0;
 	}
 

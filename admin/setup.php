@@ -48,6 +48,13 @@ $sections = array(
 		'ONBOARDING_MAILGATE_APPROVER' => array('Approver', 'text', 'When set, every email Dolibarr sends (this module\'s, password resets, mass emailings) waits until this address approves it. They get a copy of each with Approve, "Approve, and always allow this kind" and Reject buttons. Empty: emails go out straight away. Waiting emails: Members, Onboarding, Email approval.'),
 		'ONBOARDING_MAILGATE_EXEMPT' => array('Never held for', 'text', 'Comma separated addresses whose emails go out without approval. The approver is always on it.'),
 	),
+	'PayPal sync' => array(
+		'ONBOARDING_PAYPAL_CLIENT_ID' => array('PayPal Client ID', 'text', 'From a Live app at developer.paypal.com (Apps & Credentials) with Transaction search ticked. With it and the secret set, the hourly sync records PayPal dues on member cards and PayPal members are judged by PayPal\'s own data.'),
+		'ONBOARDING_PAYPAL_SECRET' => array('PayPal Secret', 'secret', 'The same app\'s Secret.'),
+		'ONBOARDING_PAYPAL_MONTHLY' => array('PayPal monthly dues', 'text', 'Default 40. A payment of three times this pays three months, and so on.'),
+		'ONBOARDING_PAYPAL_DUES_CODES' => array('PayPal transaction codes that are dues', 'text', 'Default T0002 (subscription payments). Other PayPal payments are not dues and are left alone.'),
+		'ONBOARDING_PAYPAL_API_BASE' => array('PayPal API address', 'text', 'Only change this to point at the sandbox.'),
+	),
 	'PayPal and legacy members' => array(
 		'ONBOARDING_PAYPAL_THROUGH' => array('PayPal payments imported through', 'text', 'PayPal and Legacy members are not shown as expired until a week after their next payment was due, and until the imported PayPal data reaches that far, so a late or partial import does not expire anyone. Empty: worked out from the newest dues payment on the PAYPAL bank account (the dues import puts every PayPal payment there). Fill in a date (YYYY-MM-DD) only to override that.'),
 	),
@@ -155,9 +162,12 @@ if ($action == 'save') {
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
-if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetchdocs', 'runbookings'), true)) {
+if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetchdocs', 'runbookings', 'runpaypal'), true)) {
 	if ($action == 'fetchdocs') {
 		$out = $svc->fetchDocs();
+	} elseif ($action == 'runpaypal') {
+		dol_include_once('/onboarding/class/paypal.class.php');
+		$out = (new OnboardingPaypal($db, $svc))->sync();
 	} elseif ($action == 'runbookings') {
 		dol_include_once('/onboarding/class/booking.class.php');
 		$out = (new OnboardingBooking($db, $svc))->run();
@@ -270,6 +280,7 @@ print '</form>';
 
 print '<br><div class="opacitymedium">The scheduled jobs run on their own once Dolibarr\'s scheduled jobs are set up. To run them now: ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runsync&token='.newToken().'">Sync Givebutter now</a> ';
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runpaypal&token='.newToken().'">Sync PayPal now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runbookings&token='.newToken().'">Run training bookings now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=rundaily&token='.newToken().'">Run reminders now</a></div>';
 

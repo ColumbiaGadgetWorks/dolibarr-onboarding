@@ -21,6 +21,7 @@ class OnboardingAttention
 	const ALERTS = array(
 		'GIVEBUTTER_SYNC' => 'The hourly Givebutter sync is failing',
 		'GIVEBUTTER_WEBHOOK' => 'Givebutter webhooks are being refused',
+		'PAYPAL_SYNC' => 'The hourly PayPal sync is failing',
 		'WEBSITE_CHECKIN' => 'The website has not reached Dolibarr lately',
 		'WEBSITE_PUSH' => 'The website is not accepting updates',
 		'WEBSITE_SYNC' => 'The website is out of sync',
@@ -96,7 +97,7 @@ class OnboardingAttention
 		}
 
 		if ($user->hasRight('onboarding', 'applicant', 'read')) {
-			$add('unmatched', 'Unmatched dues payments', 'Givebutter payments that matched no signup or member.', $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_payment WHERE entity = ".$e." AND status = 'unmatched'"), $base.'payments.php', true);
+			$add('unmatched', 'Unmatched dues payments', 'Givebutter and PayPal payments that matched no signup or member.', $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_payment WHERE entity = ".$e." AND status = 'unmatched'") + $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_paypal WHERE entity = ".$e." AND status = 'unmatched'"), $base.'payments.php', true);
 			$add('problem', 'Dues payment problems', 'A failed or cancelled Givebutter plan; reminders are going out.', $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_applicant WHERE entity = ".$e." AND payment_state IN ('past_due', 'cancelled')"), $base.'applicants.php?filter=problem');
 			$ef = $p."adherent_extrafields";
 			$add('nobadge', 'Paying, no active badge', 'Paying members whose badge is not turned on yet.', $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_applicant AS a LEFT JOIN ".$ef." AS x ON x.fk_object = a.fk_adherent WHERE a.entity = ".$e." AND a.payment_state = 'active' AND (x.access_enabled IS NULL OR x.access_enabled = 0)"), $base.'applicants.php?filter=nobadge');
