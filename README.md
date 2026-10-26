@@ -431,6 +431,43 @@ only while its holder still has the `secretary` or `president` tag.
 4. Deploy the website branch with the `/voting/` pages.
 5. In January, start a practice vote with the board.
 
+## Email approval
+
+With an **Approver** set on the setup page (Email approval), every email Dolibarr sends to
+anyone not on the **Never held for** list waits for that person. That covers this module's
+emails and Dolibarr's own (password resets, mass emailings, anything sent through Dolibarr's
+mail class), using Dolibarr's `sendMail` hook. The approver gets a copy of each, with its
+attachments, and three buttons:
+
+- **Approve**: send this one, exactly as written.
+- **Approve, and always allow this kind**: send it, and from now on send this kind without
+  asking.
+- **Reject**: never send it.
+
+A kind is where the email comes from in the code plus the fixed start of its subject, for
+example `OnboardingService::lapse | your columbia gadget works membership has ended`, so
+allowing one kind never lets another through. A mass emailing is one kind per mailing and is
+approved once for all its recipients. An email with any recipient not on the exempt list is
+held whole. The approver is always exempt. The buttons open a page that shows the email and
+waits for a press, so mail scanners opening links do nothing.
+
+Members, Onboarding, **Email approval** (admins) lists what is waiting, with the same
+buttons; the kinds, where **Always allow** can be turned off again; and what was decided
+lately. The daily job emails the approver a list of anything waiting more than a day and
+deletes decided emails after 90 days. A rejected email is simply not sent; whatever caused
+it (a lapse, a booking) has still happened. Emptying **Approver** turns it all off.
+
+The code that sends an email is told it was sent when it is held, so nothing else changes:
+held emails just arrive later. Time-sensitive ones (password resets, signup links, booking
+confirmations, trainer reminders) arrive only once approved, so approve those quickly or
+allow their kinds.
+
+### Updating to 0.9
+
+Update the module, then disable and enable **Member onboarding** once: the hook that holds
+emails and the two new tables are only set up when the module is enabled. Then set
+**Approver** and **Never held for** on the setup page.
+
 ## Deadline reminders
 
 Any Dolibarr project task can nag the people assigned to it until it is done. Use it for board
