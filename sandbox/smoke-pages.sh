@@ -38,7 +38,10 @@ check '../../index.php?mainmenu=home' 'All checks'
 check 'home.php' 'Recent dues payments'
 check 'home.php' 'Active members'
 check 'home.php' 'Quick links'
+check 'home.php?mainmenu=cgw' 'Onboarding setup'
+check 'home.php?mainmenu=cgw' 'Members types'
 check 'admin/setup.php' 'Open the CGW home page'
+check 'admin/setup.php' 'Module updates'
 check 'mailgate.php' 'Mixed recipients'
 check 'mailgate.php?view=1' 'Kind'
 check 'admin/setup.php' 'Never held for'
@@ -98,4 +101,9 @@ done
 # Not logged in: the ID photo must not be served.
 type=$(curl -s -o /dev/null -w '%{content_type}' "$BASE/custom/onboarding/document.php?id=$ID&file=id")
 case "$type" in image/*) echo "FAIL ID photo served without login"; fail=1;; *) echo "ok   ID photo needs login";; esac
+# The setup page's "turn off and on" step (after an update from GitHub): the module comes back.
+T4=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/setup.php" | grep -o 'action=checkupdate&amp;token=[^"]*' | head -1 | sed 's/.*token=//')
+curl -s -b "$JAR" -o /dev/null "$BASE/custom/onboarding/admin/setup.php?action=reenable&token=$T4"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-Onboarding-Key: sandbox-key-sandbox-key-sandbox-key' "$BASE/custom/onboarding/public/api.php?action=docs")
+if [ "$code" = "200" ]; then echo "ok   module off and on from the setup page"; else echo "FAIL module off and on: the API answers $code"; fail=1; fi
 exit $fail

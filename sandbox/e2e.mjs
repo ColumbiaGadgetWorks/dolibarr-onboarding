@@ -191,6 +191,19 @@ assert.match(badLayout, /unknown number "bogus"/);
 assert.match(badLayout, /"list:" must be one of/);
 assert.match(tickIn('sections:\n  - title: X\n     show: attention\n', 'home', 'check'), /Line 3/);
 
+step('module updates: the version on GitHub, and installing a downloaded copy with a backup');
+const su = JSON.parse(tick('selfupdate', 'latest'));
+assert.equal(su.latest, '9.9.9');
+assert.match(su.installed, /^\d+\.\d+\.\d+$/);
+assert.match(su.cannot, /cannot write/, 'the sandbox mounts the module read-only, so the button is replaced by the reason');
+const inst = JSON.parse(tick('selfupdate', 'install'));
+assert.equal(inst.ok, true, inst.message);
+assert.equal(inst.installed, '9.9.9');
+assert.equal(inst.from, su.installed);
+assert.equal(inst.stale_gone, true, 'a file the new version lacks is removed');
+assert.ok(inst.backups >= 1, 'the old copy is kept');
+assert.equal(inst.bad.ok, false, 'something that is not a zip of the module changes nothing');
+
 // Left for the staff page check in smoke-pages.sh.
 assert.match((await mock('/control/pay', { email: `stranger-left-${Date.now()}@example.test`, amount: 50 })).delivery.status, /unmatched/);
 step('a donation to another campaign is ignored');

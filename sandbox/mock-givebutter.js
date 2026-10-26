@@ -239,6 +239,8 @@ http.createServer(async (req, res) => {
       if (req.method === 'POST') { const b = await readBody(req); if (b.expires) GITHUB_EXPIRES = b.expires; github.length = 0; }
       return json(res, 200, { calls: github });
     }
+    // Stands in for the raw module descriptor on GitHub, for the update check.
+    if (path === '/update/modOnboarding.class.php') return send(res, 200, "<?php\n\t\t$this->version = '9.9.9';\n", 'text/plain');
     if (path === '/health') return json(res, 200, { ok: true });
     let lm = path.match(/^\/legal\/(waiver|agreement)\.md$/);
     if (lm && req.method === 'GET') return send(res, 200, legal[lm[1]], 'text/plain; charset=utf-8');

@@ -77,8 +77,13 @@ This is a Dolibarr module, not a container. It lives inside the Dolibarr you alr
    docker exec dolibarr sh -c 'cd /var/www/html/custom && curl -sL https://github.com/ColumbiaGadgetWorks/dolibarr-onboarding/archive/refs/heads/main.tar.gz | tar xz && rm -rf onboarding && mv dolibarr-onboarding-main onboarding && chown -R www-data:www-data onboarding'
    ```
 
-   Replace the first `dolibarr` with your container's name. The same command updates the
-   module later. `/var/www/html/custom` must be a mapped volume, or the module disappears
+   Replace the first `dolibarr` with your container's name. After this first install, update
+   with **Update from GitHub** at the top of the module's setup page instead: it downloads the
+   newest version, keeps a backup of the installed one (in the documents folder,
+   `onboarding/updates`, the last three), puts it in place, removes files the new version no
+   longer has, and turns the module off and on so the new version sets itself up. Settings
+   are kept. It needs the module folder to belong to the web server, which the command above
+   does; the setup page says so when it cannot write there. `/var/www/html/custom` must be a mapped volume, or the module disappears
    when the container is updated.
 2. In Dolibarr: Home, Setup, Modules, enable **Member onboarding**. Also enable **Scheduled
    jobs** and make sure Dolibarr's cron runs, or reminders are never sent.
@@ -439,6 +444,10 @@ on the page. It starts as the recommended layout in `home.default.yaml`; **Reset
 recommended** at the top of the setup page goes back to it, and an unchanged layout follows
 improvements to the default.
 
+The CGW top menu's left side has the CGW home page, Dolibarr's Setup, Admin Tools and Users
+& Groups (as under Home), Members, Contributions and Members types, and every onboarding
+page, which stay under CGW when opened from there.
+
 **Make it everyone's home page** (same place) makes it the page everyone lands on after
 logging in, including people who had picked their own landing page; **Stop opening it after
 login** goes back to Dolibarr's home page.
@@ -469,6 +478,12 @@ members are still kept up by hand.
 To set it up: at developer.paypal.com, log in with CGW's PayPal Business account, Apps &
 Credentials, **Live**, create an app, tick **Transaction search** in its features (PayPal can
 take a few hours to switch it on), and paste its Client ID and Secret on the setup page.
+
+### Updating to 0.13
+
+Update the module with the command above one last time (it adds **Update from GitHub**),
+then disable and enable **Member onboarding**, so the CGW left menu appears. From then on,
+use **Update from GitHub** on the setup page.
 
 ### Updating to 0.12
 
