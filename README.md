@@ -425,6 +425,24 @@ only while its holder still has the `secretary` or `president` tag.
 4. Deploy the website branch with the `/voting/` pages.
 5. In January, start a practice vote with the board.
 
+## CGW home page
+
+The top menu **CGW** opens a home page for the makerspace: what needs attention, member and
+dues counts, recent dues payments, who is paid up until about now, upcoming trainings,
+deadlines, quick links and the bank balances. Each person only sees the sections they may
+see.
+
+What it shows is a YAML layout on the setup page (CGW home page); the comments at the top
+of it explain every option (sections of attention, numbers, a list, links, or any Dolibarr
+home widget, half or full width). Mistakes are named, with their line, when it is saved and
+on the page. It starts as the recommended layout in `home.default.yaml`; **Reset layout to
+recommended** at the top of the setup page goes back to it, and an unchanged layout follows
+improvements to the default.
+
+**Make it everyone's home page** (same place) makes it the page everyone lands on after
+logging in, including people who had picked their own landing page; **Stop opening it after
+login** goes back to Dolibarr's home page.
+
 ## PayPal sync
 
 With a PayPal **Client ID** and **Secret** on the setup page (PayPal sync), the hourly job
@@ -451,6 +469,11 @@ members are still kept up by hand.
 To set it up: at developer.paypal.com, log in with CGW's PayPal Business account, Apps &
 Credentials, **Live**, create an app, tick **Transaction search** in its features (PayPal can
 take a few hours to switch it on), and paste its Client ID and Secret on the setup page.
+
+### Updating to 0.12
+
+Update the module, then disable and enable **Member onboarding** once, so the top menu
+**CGW** appears.
 
 ### Updating to 0.10
 

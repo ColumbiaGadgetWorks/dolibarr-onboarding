@@ -1,0 +1,71 @@
+# CGW home page layout.
+#
+# Edit this on Member onboarding setup, "CGW home page". Each section has a
+# title and what it shows:
+#
+#   show: attention   everything flagged under Needs attention
+#   show: numbers     counts, picked from:
+#                       active_members  paying_givebutter  paying_paypal
+#                       paying_check  scholarship  expired  not_paying
+#                       signups_in_progress  new_this_month
+#                       dues_this_month  dues_last_month
+#                       unmatched_payments  emails_waiting
+#   show: list        one of: recent_payments  new_members  expiring
+#                       upcoming_trainings  open_deadlines
+#                     (limit: how many lines, default 8)
+#   show: links       "- Label: address" lines; addresses start at Dolibarr's
+#                     root (/adherents/list.php) or are full links (https://...)
+#   show: widget      any Dolibarr home page widget by its file name,
+#                     e.g. box_comptes.php (bank balances)
+#
+# width: half (the default, two side by side) or full.
+# A section someone has no permission for is left out for them.
+
+sections:
+  - title: Needs attention
+    show: attention
+    width: full
+
+  - title: Members
+    show: numbers
+    numbers: [active_members, paying_givebutter, paying_paypal, paying_check, scholarship, expired, signups_in_progress, new_this_month]
+
+  - title: Dues
+    show: numbers
+    numbers: [dues_this_month, dues_last_month, unmatched_payments, emails_waiting]
+
+  - title: Recent dues payments
+    show: list
+    list: recent_payments
+    limit: 8
+
+  - title: Paid up until about now
+    show: list
+    list: expiring
+
+  - title: Upcoming trainings
+    show: list
+    list: upcoming_trainings
+
+  - title: Deadlines
+    show: list
+    list: open_deadlines
+
+  - title: Quick links
+    show: links
+    links:
+      - Members: /adherents/list.php?statut=1
+      - New member: /adherents/card.php?action=create
+      - Onboarding: /custom/onboarding/applicants.php
+      - Unmatched payments: /custom/onboarding/payments.php
+      - Email approval: /custom/onboarding/mailgate.php
+      - Trainings: /custom/onboarding/trainings.php
+      - Purchase requests: /custom/onboarding/purchases.php
+      - Deadline reminders: /custom/onboarding/deadlines.php
+      - Bank accounts: /compta/bank/list.php
+      - Scheduled jobs: /cron/list.php
+      - Onboarding setup: /custom/onboarding/admin/setup.php
+
+  - title: Bank accounts
+    show: widget
+    widget: box_comptes.php

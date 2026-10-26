@@ -17,6 +17,7 @@ if (!$res) {
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 dol_include_once('/onboarding/class/onboarding.class.php');
+dol_include_once('/onboarding/class/home.class.php');
 
 if (!$user->admin) {
 	accessforbidden();
@@ -122,6 +123,9 @@ $sections = array(
 		'ONBOARDING_WAIVER_TEXT' => array('Liability waiver (no GitHub)', 'area', 'Used only when the address above is empty. Saving new wording keeps it as a new version; existing signatures keep the text they signed.'),
 		'ONBOARDING_AGREEMENT_TEXT' => array('Membership agreement (no GitHub)', 'area', 'Used only when the address above is empty.'),
 	),
+	'CGW home page' => array(
+		'ONBOARDING_HOME_YAML' => array('Layout', 'area', 'What the CGW home page (top menu CGW) shows, in YAML. The comments at the top of the text explain every option. Reset layout (at the top of this page) goes back to the recommended one.'),
+	),
 	'Housekeeping' => array(
 		'ONBOARDING_DRAFT_DAYS' => array('Delete abandoned signups after (days)', 'text', '0 keeps them forever.'),
 		'ONBOARDING_ID_RETENTION_DAYS' => array('Delete ID photos after (days)', 'text', 'Counted from the day signup completes. 0 keeps them. The "ID photo uploaded" tick stays either way.'),
@@ -147,6 +151,18 @@ if ($action == 'save') {
 			}
 		}
 	}
+	// The home page layout: the default text saved unchanged is kept as "default",
+	// so later improvements to the default reach this Dolibarr.
+	$layout = getDolGlobalString('ONBOARDING_HOME_YAML');
+	$default = (string) @file_get_contents(dirname(__DIR__).'/home.default.yaml');
+	if (trim(str_replace("\r", '', $layout)) === trim($default)) {
+		dolibarr_set_const($db, 'ONBOARDING_HOME_YAML', '', 'chaine', 0, '', $conf->entity);
+	} elseif (trim($layout) !== '') {
+		list($sections, $problems) = OnboardingHome::read($layout);
+		if ($problems) {
+			setEventMessages('The CGW home page layout was saved, but has problems: '.implode(' ', $problems), null, 'warnings');
+		}
+	}
 	// Wording typed here (no GitHub address) becomes a version like a GitHub one.
 	foreach (OnboardingService::DOCS as $doc => $title) {
 		$text = getDolGlobalString('ONBOARDING_'.strtoupper($doc).'_TEXT');
@@ -159,6 +175,25 @@ if ($action == 'save') {
 	}
 	$section = (int) GETPOST('section', 'int');
 	header('Location: '.$_SERVER['PHP_SELF'].($section > 0 ? '#section-'.$section : ''));
+	exit;
+}
+if (in_array($action, array('homeeveryone', 'homeoff', 'homereset'), true)) {
+	if ($action == 'homeeveryone') {
+		// Everyone lands on it after logging in, people who picked their own
+		// landing page (user card, Display) included.
+		dolibarr_set_const($db, 'MAIN_LANDING_PAGE', OnboardingHome::LANDING, 'chaine', 0, 'Set by Member onboarding: the CGW home page', $conf->entity);
+		$db->query("DELETE FROM ".$db->prefix()."user_param WHERE param = 'MAIN_LANDING_PAGE' AND entity = ".((int) $conf->entity));
+		setEventMessages('The CGW home page is now everyone\'s landing page. People see it the next time they log in.', null);
+	} elseif ($action == 'homeoff') {
+		if (getDolGlobalString('MAIN_LANDING_PAGE') === OnboardingHome::LANDING) {
+			dolibarr_del_const($db, 'MAIN_LANDING_PAGE', $conf->entity);
+		}
+		setEventMessages('Logging in opens Dolibarr\'s own home page again. The CGW home page stays in the top menu.', null);
+	} else {
+		dolibarr_del_const($db, 'ONBOARDING_HOME_YAML', $conf->entity);
+		setEventMessages('The CGW home page layout is back to the recommended one.', null);
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
 if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetchdocs', 'runbookings', 'runpaypal'), true)) {
@@ -195,6 +230,23 @@ print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runsync&token=
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runpaypal&token='.newToken().'">Sync PayPal now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runbookings&token='.newToken().'">Run training bookings now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=rundaily&token='.newToken().'">Run reminders now</a>';
+print '</td></tr></table><br>';
+
+// CGW home page: the landing page, and the layout.
+$landing = getDolGlobalString('MAIN_LANDING_PAGE') === OnboardingHome::LANDING;
+$custom = trim(getDolGlobalString('ONBOARDING_HOME_YAML')) !== '';
+print '<table class="noborder centpercent">';
+print '<tr class="liste_titre"><td>CGW home page</td></tr>';
+print '<tr class="oddeven"><td><span class="opacitymedium">'.($landing ? 'Everyone lands on the CGW home page after logging in.' : 'Logging in opens Dolibarr\'s own home page; the CGW home page is in the top menu (CGW).').' The layout is '.($custom ? 'your own (CGW home page, below).' : 'the recommended one.').'</span><br>';
+print '<a class="butAction" href="'.dol_buildpath('/onboarding/home.php', 1).'?mainmenu=cgw">Open the CGW home page</a> ';
+if ($landing) {
+	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=homeoff&token='.newToken().'">Stop opening it after login</a> ';
+} else {
+	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=homeeveryone&token='.newToken().'">Make it everyone\'s home page</a> ';
+}
+if ($custom) {
+	print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?action=homereset&token='.newToken().'" onclick="return confirm(\'Replace your layout with the recommended one?\')">Reset layout to recommended</a>';
+}
 print '</td></tr></table><br>';
 
 $endpoint = OnboardingService::publicUrl('api.php');
@@ -274,7 +326,11 @@ foreach ($sections as $title => $fields) {
 			if ($name == 'ONBOARDING_AGREEMENT_TEXT' && $value === '') {
 				$shown = $docs['agreement']['text'];
 			}
-			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : 6).'" class="quatrevingtpercent">'.dol_escape_htmltag($shown).'</textarea>';
+			if ($name == 'ONBOARDING_HOME_YAML') {
+				$shown = OnboardingHome::layoutText();
+				print '<a id="home-layout"></a>';
+			}
+			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : 6)).'" class="quatrevingtpercent"'.($name == 'ONBOARDING_HOME_YAML' ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown).'</textarea>';
 		} elseif ($def[1] == 'secret') {
 			print '<input type="password" name="'.$name.'" value="" class="minwidth400" autocomplete="new-password" placeholder="'.($value !== '' ? 'Saved. Type a new one to replace it.' : 'Not set').'">';
 		} else {

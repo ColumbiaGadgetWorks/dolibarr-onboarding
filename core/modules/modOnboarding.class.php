@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.11.0';
+		$this->version = '0.12.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -183,6 +183,22 @@ class modOnboarding extends DolibarrModules
 
 		$this->menu = array();
 		$r = 0;
+		// Top menu "CGW": the CGW home page.
+		$this->menu[$r++] = array(
+			'fk_menu' => '',
+			'type' => 'top',
+			'titre' => 'CGW',
+			'prefix' => img_picto('', 'home', 'class="pictofixedwidth"'),
+			'mainmenu' => 'cgw',
+			'leftmenu' => '',
+			'url' => '/onboarding/home.php?mainmenu=cgw',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '1',
+			'target' => '',
+			'user' => 0,
+		);
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=members',
 			'type' => 'left',
