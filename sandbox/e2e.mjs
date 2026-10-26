@@ -148,11 +148,38 @@ const paidTo = tick('paypal', 'end', ppId);
 assert.ok(paidTo < day(-8) && paidTo > day(-12), `last month ended about 10 days ago: ${paidTo}`);
 tick('paypal', 'through', day(-20));
 assert.match(tick('paypal', 'presume'), /1 PayPal\/Legacy members held/);
-assert.equal(tick('paypal', 'end', ppId), day(0), 'held at today while the import is older than the due date');
+assert.equal(tick('paypal', 'end', ppId), day(1), 'held through tomorrow while the import is older than the due date');
 tick('paypal', 'through', day(0));
 assert.match(tick('paypal', 'presume'), /1 end dates put back/);
 assert.equal(tick('paypal', 'end', ppId), paidTo, 'an import past the due date with no payment: really expired');
 tick('paypal', 'through', 'clear');
+
+step('Givebutter dues recorded as a calendar month: no false lapse, the period runs to the next charge');
+{
+  const dayStr = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  // Paid 28 days ago; the import recorded the month as ending 26 days ago.
+  const bEmail = `bryan-${Date.now()}@example.test`;
+  const bId = tick('purchase', 'member', bEmail, '', 'Bry', 'Morr');
+  tick('dues', 'import', bId, '28');
+  tick('dues', 'payment', bEmail, '28');
+  assert.ok(Number(tick('retry')) >= 1, 'the Givebutter payment matches the member');
+  let b = JSON.parse(tick('dues', 'show', bId));
+  assert.ok(b.end >= dayStr(1) && b.end <= dayStr(4), `end date moved to the day before the next charge: ${b.end}`);
+  assert.match(tick('dues', 'run'), /false payment problems cleared/);
+  b = JSON.parse(tick('dues', 'show', bId));
+  assert.equal(b.state, 'active', 'the false payment problem is cleared');
+  assert.ok(!(await mailTo(bEmail)).some((x) => /attention|ended/i.test(x)), 'no reminder or lapse email');
+
+  // A payment matched before this fix, with its short period: the daily job repairs it.
+  const cEmail = `cal-${Date.now()}@example.test`;
+  const cId = tick('purchase', 'member', cEmail, '', 'Cal', 'Endar');
+  tick('dues', 'import', cId, '20');
+  tick('dues', 'payment', cEmail, '20', 'matched');
+  assert.match(tick('dues', 'run'), /[1-9]\d* dues periods lengthened/);
+  const c = JSON.parse(tick('dues', 'show', cId));
+  assert.ok(c.end >= dayStr(9) && c.end <= dayStr(12), `repaired end date: ${c.end}`);
+  assert.equal(c.state, 'active');
+}
 
 // Left for the staff page check in smoke-pages.sh.
 assert.match((await mock('/control/pay', { email: `stranger-left-${Date.now()}@example.test`, amount: 50 })).delivery.status, /unmatched/);

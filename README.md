@@ -35,14 +35,18 @@ A Givebutter dues payment is matched to a signup (by plan, contact or email) or,
 that, to a member already in Dolibarr (by email, then by a first and last name only one
 member has), so members added before the signup form keep their dues up to date too. A
 payment already on the member's card, such as one recorded by the CGWManagement dues import,
-is not recorded again. Members, Onboarding, Unmatched payments lists the payments that
+is not recorded again; if the import recorded it as a calendar month (paid 28 September:
+1 to 30 September), the period is lengthened to the day before Givebutter charges again, so
+the member does not look expired, or get a "dues need attention" email, for four weeks. The
+daily job does this for payments matched earlier too, and clears payment problems that were
+flagged before the dues really ran out. Members, Onboarding, Unmatched payments lists the payments that
 matched nobody: choose the member (one is pre-selected when the payer's name or email
 contains a single member's last name) and their later payments match by their Givebutter
 contact. The hourly sync and the **Match again** button retry every unmatched payment.
 
 PayPal and Legacy members are recorded by hand from PayPal exports (the CGWManagement dues
 import), so their end date can pass only because the next export is not in yet. The daily
-job holds such a member's end date at today, so Dolibarr does not show them as expired,
+job holds such a member's end date at tomorrow, so Dolibarr does not show them as expired,
 until the imported PayPal data reaches the day their next payment was due (a period after
 their last payment, plus 3 days). "Imported through" is the newest line on the bank account
 with ref PAYPAL, or a date set on the setup page. When the next payment is imported the end
