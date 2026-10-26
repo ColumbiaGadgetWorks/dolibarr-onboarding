@@ -177,6 +177,29 @@ if ($action == 'save') {
 	header('Location: '.$_SERVER['PHP_SELF'].($section > 0 ? '#section-'.$section : ''));
 	exit;
 }
+if ($action == 'selfupdate' || $action == 'checkupdate') {
+	dol_include_once('/onboarding/class/selfupdate.class.php');
+	$su = new OnboardingSelfUpdate($db);
+	if ($action == 'checkupdate') {
+		$latest = $su->latest(true);
+		setEventMessages($latest !== '' ? 'GitHub has version '.$latest.'; this Dolibarr has '.OnboardingSelfUpdate::installed().'.' : 'Could not reach GitHub.', null, $latest !== '' ? 'mesgs' : 'warnings');
+		header('Location: '.$_SERVER['PHP_SELF']);
+		exit;
+	}
+	$r = $su->update();
+	setEventMessages($r['message'], null, $r['ok'] ? 'mesgs' : 'errors');
+	// The new code is only loaded by the next request: turn the module off and
+	// on there, so it sets itself up with its own installer.
+	header('Location: '.$_SERVER['PHP_SELF'].($r['ok'] ? '?action=reenable&token='.newToken() : ''));
+	exit;
+}
+if ($action == 'reenable') {
+	dol_include_once('/onboarding/class/selfupdate.class.php');
+	$err = (new OnboardingSelfUpdate($db))->reenable();
+	setEventMessages($err === '' ? 'Member onboarding was turned off and on again, so version '.OnboardingSelfUpdate::installed().' is set up. Your settings are kept.' : $err, null, $err === '' ? 'mesgs' : 'errors');
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
 if (in_array($action, array('homeeveryone', 'homeoff', 'homereset'), true)) {
 	if ($action == 'homeeveryone') {
 		// Everyone lands on it after logging in, people who picked their own
@@ -230,6 +253,31 @@ print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runsync&token=
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runpaypal&token='.newToken().'">Sync PayPal now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=runbookings&token='.newToken().'">Run training bookings now</a> ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=rundaily&token='.newToken().'">Run reminders now</a>';
+print '</td></tr></table><br>';
+
+// Module updates from GitHub.
+dol_include_once('/onboarding/class/selfupdate.class.php');
+$su = new OnboardingSelfUpdate($db);
+$installed = OnboardingSelfUpdate::installed();
+$latest = $su->latest();
+$cannot = OnboardingSelfUpdate::cannotWrite();
+print '<table class="noborder centpercent">';
+print '<tr class="liste_titre"><td>Module updates</td></tr>';
+print '<tr class="oddeven"><td><span class="opacitymedium">This Dolibarr has version <strong>'.dol_escape_htmltag($installed).'</strong>. ';
+if ($latest === '') {
+	print 'GitHub could not be reached to check for a newer one.';
+} elseif (version_compare($latest, $installed, '>')) {
+	print '<strong>Version '.dol_escape_htmltag($latest).' is on GitHub.</strong>';
+} else {
+	print 'That is the newest on GitHub.';
+}
+print ' Update downloads the newest version from GitHub, keeps a backup of this one, puts it in place and turns the module off and on (settings are kept).</span><br>';
+if ($cannot !== '') {
+	print '<span class="warning">'.dol_escape_htmltag($cannot).'</span><br>';
+} else {
+	print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=selfupdate&token='.newToken().'" onclick="return confirm(\'Update Member onboarding from GitHub and turn it off and on?\')">Update from GitHub'.($latest !== '' && version_compare($latest, $installed, '>') ? ' to '.dol_escape_htmltag($latest) : '').'</a> ';
+}
+print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=checkupdate&token='.newToken().'">Check again</a>';
 print '</td></tr></table><br>';
 
 // CGW home page: the landing page, and the layout.

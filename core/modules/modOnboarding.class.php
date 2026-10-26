@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.12.0';
+		$this->version = '0.13.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -354,6 +354,53 @@ class modOnboarding extends DolibarrModules
 			'target' => '',
 			'user' => 0,
 		);
+
+		// The CGW top menu's left side: the CGW home page, Dolibarr's own setup
+		// links (as under Home), the member pages people use most, and every
+		// onboarding page, which stay under CGW when opened from here.
+		$cgw = array(
+			// leftmenu, parent, title, url, perms, icon
+			array('cgw_home', '', 'CGW home', '/onboarding/home.php?mainmenu=cgw', '1', '<i class="fas fa-chart-bar fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_setup', '', 'Setup', '/admin/index.php?mainmenu=home&leftmenu=setup', '$user->admin', '<i class="fa fa-tools fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_admintools', '', 'Admin Tools', '/admin/tools/index.php?mainmenu=home&leftmenu=admintools', '$user->admin', '<i class="fa fa-server fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_users', '', 'Users & Groups', '/user/home.php?mainmenu=home&leftmenu=users', '$user->hasRight("user", "user", "lire")', '<i class="fa fa-user fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_members', '', 'Members', '/adherents/index.php?mainmenu=members&leftmenu=members', '$user->hasRight("adherent", "lire")', '<i class="fa fa-user-friends fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_members_new', 'cgw_members', 'New member', '/adherents/card.php?mainmenu=members&leftmenu=members&action=create', '$user->hasRight("adherent", "creer")', ''),
+			array('cgw_members_list', 'cgw_members', 'List', '/adherents/list.php?mainmenu=members&leftmenu=members&statut=1', '$user->hasRight("adherent", "lire")', ''),
+			array('cgw_contributions', '', 'Contributions', '/adherents/subscription/list.php?mainmenu=members&leftmenu=members', '$user->hasRight("adherent", "cotisation", "lire")', '<i class="fa fa-money-check-alt fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_contributions_new', 'cgw_contributions', 'New membership', '/adherents/list.php?mainmenu=members&leftmenu=members&statut=-1,1', '$user->hasRight("adherent", "cotisation", "creer")', ''),
+			array('cgw_contributions_list', 'cgw_contributions', 'List', '/adherents/subscription/list.php?mainmenu=members&leftmenu=members', '$user->hasRight("adherent", "cotisation", "lire")', ''),
+			array('cgw_types', '', 'Members types', '/adherents/type.php?mainmenu=members&leftmenu=setup', '$user->hasRight("adherent", "configurer")', '<i class="fa fa-users fa-fw paddingright pictofixedwidth"></i>'),
+			array('cgw_types_new', 'cgw_types', 'New', '/adherents/type.php?mainmenu=members&leftmenu=setup&action=create', '$user->hasRight("adherent", "configurer")', ''),
+			array('cgw_types_list', 'cgw_types', 'List', '/adherents/type.php?mainmenu=members&leftmenu=setup', '$user->hasRight("adherent", "configurer")', ''),
+			array('cgw_onboarding', '', 'Onboarding', '/onboarding/applicants.php?mainmenu=cgw&leftmenu=cgw_onboarding', '$user->hasRight("onboarding", "applicant", "read")', '<i class="fa fa-user-plus fa-fw paddingright pictofixedwidth"></i>'),
+		);
+		// Every page under Members, Onboarding, here too.
+		foreach ($this->menu as $m) {
+			if ($m['fk_menu'] == 'fk_mainmenu=members,fk_leftmenu=onboarding') {
+				$sep = strpos($m['url'], '?') === false ? '?' : '&';
+				$cgw[] = array('cgw_'.$m['leftmenu'], 'cgw_onboarding', $m['titre'], $m['url'].$sep.'mainmenu=cgw&leftmenu=cgw_onboarding', $m['perms'], '');
+			}
+		}
+		$cgw[] = array('cgw_deadlines', 'cgw_onboarding', 'Deadline reminders', '/onboarding/deadlines.php?mainmenu=cgw&leftmenu=cgw_onboarding', 'isModEnabled("project") && $user->hasRight("projet", "lire")', '');
+		$cgw[] = array('cgw_onboarding_setup', 'cgw_onboarding', 'Onboarding setup', '/onboarding/admin/setup.php?mainmenu=cgw&leftmenu=cgw_onboarding', '$user->admin', '');
+		foreach ($cgw as $c) {
+			$this->menu[$r++] = array(
+				'fk_menu' => 'fk_mainmenu=cgw'.($c[1] !== '' ? ',fk_leftmenu='.$c[1] : ''),
+				'type' => 'left',
+				'titre' => $c[2],
+				'prefix' => $c[5],
+				'mainmenu' => 'cgw',
+				'leftmenu' => $c[0],
+				'url' => $c[3],
+				'langs' => 'onboarding@onboarding',
+				'position' => 2000 + $r,
+				'enabled' => 'isModEnabled("onboarding")',
+				'perms' => $c[4],
+				'target' => '',
+				'user' => 0,
+			);
+		}
 	}
 
 	/**

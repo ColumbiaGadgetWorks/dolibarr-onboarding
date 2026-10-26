@@ -183,6 +183,48 @@ if ($job == 'daily') {
 	dol_include_once('/onboarding/class/home.class.php');
 	list($sections, $problems) = OnboardingHome::read((string) file_get_contents('php://stdin'));
 	echo count($sections)." sections\n".implode("\n", $problems)."\n";
+} elseif ($job == 'selfupdate') {
+	// selfupdate latest: the version the mock "GitHub" offers |
+	// selfupdate install: install a zip of this module, version 9.9.9, into a copy
+	// of it (the real one is read-only here), with a file the new one lacks
+	dol_include_once('/onboarding/class/selfupdate.class.php');
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+	$su = new OnboardingSelfUpdate($db);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'latest') {
+		dolibarr_set_const($db, 'ONBOARDING_UPDATE_VERSION_URL', 'http://givebutter:8090/update/modOnboarding.class.php', 'chaine', 0, '', $conf->entity);
+		echo json_encode(array('latest' => $su->latest(true), 'installed' => OnboardingSelfUpdate::installed(), 'cannot' => OnboardingSelfUpdate::cannotWrite()))."\n";
+	} elseif ($what == 'install') {
+		$src = OnboardingSelfUpdate::moduleDir();
+		$target = DOL_DATA_ROOT.'/onboarding/selftest-target';
+		dol_delete_dir_recursive($target);
+		dolCopyDir($src, $target, '0', 1);
+		file_put_contents($target.'/old-file-gone.txt', 'stale');
+		$zipPath = DOL_DATA_ROOT.'/onboarding/selftest.zip';
+		@unlink($zipPath);
+		$zip = new ZipArchive();
+		$zip->open($zipPath, ZipArchive::CREATE);
+		$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS));
+		foreach ($it as $f) {
+			$rel = substr($f->getPathname(), strlen($src) + 1);
+			if (strpos($rel, '.git') === 0 || strpos($rel, 'sandbox/node_modules') === 0) {
+				continue;
+			}
+			$body = file_get_contents($f->getPathname());
+			if ($rel == 'core/modules/modOnboarding.class.php') {
+				$body = preg_replace("/\\\$this->version = '[^']*'/", "\\\$this->version = '9.9.9'", $body);
+			}
+			$zip->addFromString('dolibarr-onboarding-main/'.$rel, $body);
+		}
+		$zip->close();
+		$r = $su->install($zipPath, $target);
+		$r['installed'] = OnboardingSelfUpdate::versionIn(file_get_contents($target.'/core/modules/modOnboarding.class.php'));
+		$r['stale_gone'] = !file_exists($target.'/old-file-gone.txt');
+		$r['backups'] = count(glob(OnboardingSelfUpdate::workDir().'/backup-*', GLOB_ONLYDIR) ?: array());
+		$r['bad'] = $su->install(__FILE__, $target);
+		dol_delete_dir_recursive($target);
+		echo json_encode($r)."\n";
+	}
 } elseif ($job == 'connect') {
 	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {
