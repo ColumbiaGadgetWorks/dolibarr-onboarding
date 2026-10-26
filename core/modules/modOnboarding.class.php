@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.9.0';
+		$this->version = '0.9.1';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -128,6 +128,11 @@ class modOnboarding extends DolibarrModules
 			),
 		);
 
+		// Home page box listing what needs attention (attention.php).
+		$this->boxes = array(
+			0 => array('file' => 'box_onboarding_attention.php@onboarding', 'note' => 'Needs attention', 'enabledbydefaulton' => 'Home'),
+		);
+
 		$this->rights = array();
 		$r = 0;
 		$this->rights[$r][0] = $this->numero.'01';
@@ -190,6 +195,20 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->hasRight("onboarding", "applicant", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Needs attention',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_attention',
+			'url' => '/onboarding/attention.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->admin || $user->hasRight("onboarding", "applicant", "read") || $user->hasRight("onboarding", "training", "read") || $user->hasRight("projet", "lire")',
 			'target' => '',
 			'user' => 0,
 		);
