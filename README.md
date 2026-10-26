@@ -431,6 +431,18 @@ only while its holder still has the `secretary` or `president` tag.
 4. Deploy the website branch with the `/voting/` pages.
 5. In January, start a practice vote with the board.
 
+## Needs attention
+
+Members, Onboarding, **Needs attention** lists everything flagged for someone to check, with
+a count and a link to where it is dealt with: emails waiting for approval, problems Dolibarr
+emailed about that have not cleared (website, Givebutter, votes), scheduled jobs that failed
+or are over two hours late (Dolibarr's scheduler has stopped), unmatched dues payments, dues
+payment problems, badges to turn on or off, purchase requests to decide or pay, training
+bookings that need someone, trainer dues credits, and overdue deadline tasks. Each line only
+shows for people who may act on it. The same list, without the empty lines, is the **Needs
+attention** box on Dolibarr's home page; it is added to the home page when the module is
+enabled, and can be added or removed with the home page's box picker.
+
 ## Email approval
 
 With an **Approver** set on the setup page (Email approval), every email Dolibarr sends to
@@ -465,7 +477,7 @@ allow their kinds.
 ### Updating to 0.9
 
 Update the module, then disable and enable **Member onboarding** once: the hook that holds
-emails and the two new tables are only set up when the module is enabled. Then set
+emails, the two new tables and the home page box are only set up when the module is enabled. Then set
 **Approver** and **Never held for** on the setup page.
 
 ## Deadline reminders
