@@ -262,7 +262,7 @@ $installed = OnboardingSelfUpdate::installed();
 $latest = $su->latest();
 $cannot = OnboardingSelfUpdate::cannotWrite();
 print '<table class="noborder centpercent">';
-print '<tr class="liste_titre"><td>Module updates</td></tr>';
+print '<tr class="liste_titre" id="module-updates"><td>Module updates</td></tr>';
 print '<tr class="oddeven"><td><span class="opacitymedium">This Dolibarr has version <strong>'.dol_escape_htmltag($installed).'</strong>. ';
 if ($latest === '') {
 	print 'GitHub could not be reached to check for a newer one.';

@@ -448,6 +448,10 @@ The CGW top menu's left side has the CGW home page, Dolibarr's Setup, Admin Tool
 & Groups (as under Home), Members, Contributions and Members types, and every onboarding
 page, which stay under CGW when opened from there.
 
+In the layout, a link to `update` (`- Update module: update`, in the recommended Quick links)
+is a green **Update from GitHub** button for admins, naming the newer version when GitHub
+has one.
+
 **Make it everyone's home page** (same place) makes it the page everyone lands on after
 logging in, including people who had picked their own landing page; **Stop opening it after
 login** goes back to Dolibarr's home page.

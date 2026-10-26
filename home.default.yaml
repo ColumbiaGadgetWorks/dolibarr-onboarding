@@ -14,7 +14,9 @@
 #                       upcoming_trainings  open_deadlines
 #                     (limit: how many lines, default 8)
 #   show: links       "- Label: address" lines; addresses start at Dolibarr's
-#                     root (/adherents/list.php) or are full links (https://...)
+#                     root (/adherents/list.php) or are full links (https://...).
+#                     "- Update module: update" is the green Update from GitHub
+#                     button (admins only).
 #   show: widget      any Dolibarr home page widget by its file name,
 #                     e.g. box_comptes.php (bank balances)
 #
@@ -65,6 +67,7 @@ sections:
       - Bank accounts: /compta/bank/list.php
       - Scheduled jobs: /cron/list.php
       - Onboarding setup: /custom/onboarding/admin/setup.php
+      - Update module: update
 
   - title: Bank accounts
     show: widget

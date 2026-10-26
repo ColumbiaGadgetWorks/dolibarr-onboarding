@@ -128,7 +128,7 @@ class OnboardingHome
 			case 'list':
 				return $this->listing((string) $s['list'], max(1, min(50, (int) (isset($s['limit']) ? $s['limit'] : 8))), $user);
 			case 'links':
-				return $this->links($s['links']);
+				return $this->links($s['links'], $user);
 			case 'widget':
 				return $this->widget((string) $s['widget'], (int) (isset($s['limit']) ? $s['limit'] : 8));
 		}
@@ -342,7 +342,7 @@ class OnboardingHome
 	 * @param array $links "- Label: address" items
 	 * @return string
 	 */
-	private function links($links)
+	private function links($links, $user)
 	{
 		$out = '';
 		foreach ((array) $links as $item) {
@@ -351,6 +351,10 @@ class OnboardingHome
 			}
 			foreach ($item as $label => $url) {
 				$url = (string) $url;
+				if ($url === 'update') {
+					$out .= $this->updateButton((string) $label, $user);
+					continue;
+				}
 				if (!preg_match('#^(https?://|/)#', $url)) {
 					continue;
 				}
@@ -359,6 +363,32 @@ class OnboardingHome
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * "- Label: update": the setup page's Update from GitHub, in green, for admins.
+	 * Says when a newer version is on GitHub; goes to the setup page's Module
+	 * updates box when Dolibarr cannot write the module folder.
+	 *
+	 * @param string $label Label
+	 * @param User $user User
+	 * @return string
+	 */
+	private function updateButton($label, $user)
+	{
+		if (empty($user->admin)) {
+			return '';
+		}
+		dol_include_once('/onboarding/class/selfupdate.class.php');
+		$latest = (new OnboardingSelfUpdate($this->db))->latest();
+		$newer = $latest !== '' && version_compare($latest, OnboardingSelfUpdate::installed(), '>');
+		$setup = dol_buildpath('/onboarding/admin/setup.php', 1);
+		$style = 'margin:0 .4em .4em 0;background:#2d6a4f;border-color:#2d6a4f;color:#fff';
+		$text = dol_escape_htmltag($label).($newer ? ' to '.dol_escape_htmltag($latest) : '');
+		if (OnboardingSelfUpdate::cannotWrite() !== '') {
+			return '<a class="butAction" style="'.$style.'" href="'.$setup.'#module-updates">'.$text.'</a>';
+		}
+		return '<a class="butAction" style="'.$style.'" href="'.$setup.'?action=selfupdate&token='.newToken().'" onclick="return confirm(\'Update Member onboarding from GitHub and turn it off and on?\')" title="'.dol_escape_htmltag($newer ? 'Version '.$latest.' is on GitHub' : 'Already the newest version on GitHub; updating again does no harm').'">'.$text.'</a>';
 	}
 
 	/**
