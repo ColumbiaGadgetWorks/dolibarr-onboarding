@@ -27,11 +27,12 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.13.2';
+		$this->version = '0.13.3';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
-		$this->module_parts = array('hooks' => array('mail'));
+		// css: the CGW top menu entry in CGW green.
+		$this->module_parts = array('hooks' => array('mail'), 'css' => array('/onboarding/css/onboarding.css'));
 		$this->dirs = array('/onboarding/applicant');
 		$this->config_page_url = array('setup.php@onboarding');
 		$this->hidden = false;

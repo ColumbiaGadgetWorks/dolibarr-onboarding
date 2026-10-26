@@ -1,0 +1,22 @@
+/* Columbia Gadget Works member onboarding module for Dolibarr.
+ * License: GPL-3.0-or-later
+ *
+ * Loaded on every page (module_parts css). The CGW top menu entry in CGW green,
+ * so it stands out from Dolibarr's own menus.
+ */
+li#mainmenutd_cgw {
+	background: #2d6a4f;
+	border-radius: 6px;
+	margin: 3px 4px;
+}
+li#mainmenutd_cgw:hover,
+li#mainmenutd_cgw.tmenusel {
+	background: #1f4d39;
+}
+li#mainmenutd_cgw a,
+li#mainmenutd_cgw .mainmenuaspan,
+li#mainmenutd_cgw .fa,
+li#mainmenutd_cgw .fas,
+li#mainmenutd_cgw .pictofixedwidth {
+	color: #fff !important;
+}
