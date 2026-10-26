@@ -178,6 +178,11 @@ if ($job == 'daily') {
 		$db->query("UPDATE ".$db->prefix()."onboarding_mail_hold SET status = 'rejected' WHERE status = 'pending'");
 		echo "ok\n";
 	}
+} elseif ($job == 'home') {
+	// home check < YAML: the problems found in a home page layout, one per line
+	dol_include_once('/onboarding/class/home.class.php');
+	list($sections, $problems) = OnboardingHome::read((string) file_get_contents('php://stdin'));
+	echo count($sections)." sections\n".implode("\n", $problems)."\n";
 } elseif ($job == 'connect') {
 	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {

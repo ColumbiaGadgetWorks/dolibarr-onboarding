@@ -6,6 +6,7 @@
 //       pointing straight at Dolibarr, see .github/workflows/test.yml)
 //   node e2e.mjs
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { deflateSync, crc32 } from 'node:zlib';
 import assert from 'node:assert/strict';
 
@@ -182,6 +183,13 @@ step('Givebutter dues recorded as a calendar month: no false lapse, the period r
   assert.ok(c.end >= dayStr(9) && c.end <= dayStr(12), `repaired end date: ${c.end}`);
   assert.equal(c.state, 'active');
 }
+
+step('CGW home page layout: the default reads cleanly, mistakes are named');
+assert.match(tickIn(readFileSync(new URL('../home.default.yaml', import.meta.url), 'utf8'), 'home', 'check'), /^9 sections\s*$/);
+const badLayout = tickIn('sections:\n  - title: X\n    show: numbers\n    numbers: [active_members, bogus]\n  - title: Y\n    show: list\n    list: nope\n', 'home', 'check');
+assert.match(badLayout, /unknown number "bogus"/);
+assert.match(badLayout, /"list:" must be one of/);
+assert.match(tickIn('sections:\n  - title: X\n     show: attention\n', 'home', 'check'), /Line 3/);
 
 // Left for the staff page check in smoke-pages.sh.
 assert.match((await mock('/control/pay', { email: `stranger-left-${Date.now()}@example.test`, amount: 50 })).delivery.status, /unmatched/);
