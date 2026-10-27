@@ -1119,7 +1119,13 @@ class OnboardingReconcile
 		// Banks post a day or two late, so an entry at the very edge may be on the next statement.
 		$w = min(2, self::window());
 		foreach ($ranges as $acc => $list) {
-			$res = $this->db->query("SELECT rowid, fk_account, dateo, amount, label FROM ".$p."bank WHERE fk_account = ".((int) $acc)." AND rappro = 0 ORDER BY dateo, rowid");
+			// The account's first entry is its opening balance, not a transaction a statement shows.
+			$first = 0;
+			$res = $this->db->query("SELECT rowid FROM ".$p."bank WHERE fk_account = ".((int) $acc)." ORDER BY dateo, rowid LIMIT 1");
+			if ($res && ($o = $this->db->fetch_object($res))) {
+				$first = (int) $o->rowid;
+			}
+			$res = $this->db->query("SELECT rowid, fk_account, dateo, amount, label FROM ".$p."bank WHERE fk_account = ".((int) $acc)." AND rappro = 0 AND rowid <> ".$first." ORDER BY dateo, rowid");
 			while ($res && ($o = $this->db->fetch_object($res))) {
 				$d = substr((string) $o->dateo, 0, 10);
 				foreach ($list as $r) {

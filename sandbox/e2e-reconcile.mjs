@@ -59,6 +59,7 @@ assert.deepEqual(open.map((r) => Number(r.amount)).sort(), [-7.5, 25]);
 assert.deepEqual(json('reconcile', 'missing', chk).map((l) => l.rowid), [stray], 'the stray entry; the one from before the statement is not blamed');
 assert.match(tick(['reconcile', 'upload', chk, 'central-bank.csv'], csv), /0 entries reconciled, 2 to check/);
 assert.equal(json('reconcile', 'open', chk).length, 2, 'the same lines are kept once');
+open = json('reconcile', 'open', chk); // Read afresh, so new ids.
 const file = json('reconcile', 'files', chk)[0];
 assert.equal(Number(file.end_balance), 97.51, 'the ending balance, from the newest line');
 assert.equal(file.end_date, day(-8));
@@ -180,6 +181,7 @@ const gbCsv = [
 assert.match(tick(['reconcile', 'upload', gb, 'givebutter.csv'], gbCsv), /4 transactions read from givebutter\.csv, 3 entries reconciled\./);
 assert.equal(json('reconcile', 'open', gb).length, 0, 'no fee line for the covered fee; the old lines set aside');
 assert.equal(json('reconcile', 'aside', gb).before, 3, 'two old payments and the old fee');
+assert.equal(json('reconcile', 'missing', gb).length, 0, 'the opening balance is not a missing transaction');
 
 step('the same month from two exports: the second is a duplicate; an entry reconciled by hand is found');
 const dup = account(`Dup R${stamp}`);
