@@ -80,8 +80,10 @@ if ($canwrite && $action !== '') {
 			$n++;
 		}
 		$msgs[] = $n ? $n.' entries reconciled.' : 'Error: tick some entries first.';
-	} elseif ($action == 'forget') {
-		$msgs[] = $rec->forget((int) GETPOST('file', 'int'));
+	} elseif ($action == 'undo') {
+		$msgs[] = $rec->undo((int) GETPOST('file', 'int'));
+	} elseif ($action == 'unrule') {
+		$msgs[] = $rec->undoRule((int) GETPOST('id', 'int'), $user);
 	}
 	foreach ($msgs as $m) {
 		setEventMessages($m, null, strpos($m, 'Error') === 0 || strpos($m, 'failed') !== false ? 'errors' : 'mesgs');
@@ -150,6 +152,7 @@ foreach ($accounts as $a) {
 		print '<form id="'.$ff.'" method="POST" action="'.$_SERVER['PHP_SELF'].'#acct-'.$aid.'">'.$token.'<input type="hidden" name="action" value="force"></form>';
 	}
 	print '<div id="acct-'.$aid.'"></div><table class="noborder centpercent"><tr class="liste_titre"><td colspan="6">'.dol_escape_htmltag($a->label).'</td></tr>';
+	unset($aside['norule']);
 	if ($aside) {
 		$start = $rec->booksStart($aid);
 		$said = array();
@@ -164,6 +167,9 @@ foreach ($accounts as $a) {
 		}
 		if (!empty($aside['lump'])) {
 			$said[] = $aside['lump'].' matched to entries typed as one total for several of them';
+		}
+		if (!empty($aside['rule'])) {
+			$said[] = $aside['rule'].' entered by the rules (listed below)';
 		}
 		print '<tr class="oddeven"><td colspan="6" class="opacitymedium small">Set aside without asking: '.dol_escape_htmltag(implode('; ', $said)).'.</td></tr>';
 	}
@@ -229,9 +235,6 @@ foreach ($accounts as $a) {
 				return price($c['stmt'][$k]).'<br>'.price($c['doli'][$k]).'<br>'.(abs($diff) < 0.005 ? '<span class="ok">&#10003;</span>' : '<span class="error">'.($diff > 0 ? '+' : '').price($diff).'</span>');
 			};
 			print '<tr class="oddeven"><td class="small">'.dol_escape_htmltag($f->original).'<br>'.dol_print_date($db->jdate($f->begin_date), 'day').' to '.dol_print_date($db->jdate($f->end_date), 'day');
-			if ($canwrite && $f->source == 'upload') {
-				print '<br><a class="opacitymedium" href="'.$_SERVER['PHP_SELF'].'?action=forget&file='.((int) $f->rowid).'&token='.newToken().'" onclick="return confirm(\'Forget the lines of this upload that matched nothing?\')">forget its unmatched lines</a>';
-			}
 			print '</td><td class="small opacitymedium">statement<br>Dolibarr<br>difference</td><td class="right">'.$cell('begin').'</td><td class="right">'.$cell('in').'</td><td class="right">'.$cell('out').'</td><td class="right">'.$cell('end').'</td></tr>';
 			$why = array();
 			$db0 = round($c['doli']['begin'] - $c['stmt']['begin'], 2);
@@ -250,6 +253,26 @@ foreach ($accounts as $a) {
 				print '<tr class="oddeven"><td></td><td colspan="5" class="small">'.dol_escape_htmltag(ucfirst(implode('; ', $why))).'.</td></tr>';
 			}
 		}
+	}
+	// What the rules entered, for a person to look over.
+	$ruled = $rec->byRules($aid);
+	if ($ruled) {
+		print '<tr class="liste_titre"><td colspan="6">Entered by the rules ('.count($ruled).', last 120 days): look them over; Undo takes one back</td></tr>';
+		foreach ($ruled as $r) {
+			print '<tr class="oddeven"><td class="nowraponall">'.dol_print_date($db->jdate($r->dateo), 'day').'</td><td class="right nowraponall">'.price($r->amount).'</td><td colspan="2">'.dol_escape_htmltag($r->label).'</td><td class="small">'.($r->accountancy_code ? 'account '.dol_escape_htmltag($r->accountancy_code) : 'transfer').'</td><td class="right">';
+			if ($canwrite) {
+				print '<a class="button smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=unrule&id='.((int) $r->rowid).'&token='.newToken().'#acct-'.$aid.'">Undo</a>';
+			}
+			print '</td></tr>';
+		}
+	}
+	// Every upload, with Undo (a wrong file, the wrong account, a bad reading).
+	$ups = array();
+	foreach ($files as $f) {
+		$ups[] = dol_escape_htmltag($f->original).($f->date_from ? ' <span class="opacitymedium">('.dol_print_date($db->jdate($f->date_from), 'day').' to '.dol_print_date($db->jdate($f->date_to), 'day').')</span>' : '').($canwrite && $f->source == 'upload' ? ' <a class="opacitymedium" href="'.$_SERVER['PHP_SELF'].'?action=undo&file='.((int) $f->rowid).'&token='.newToken().'#acct-'.$aid.'" onclick="return confirm(\'Undo this upload? Entries it reconciled go back to unreconciled.\')">undo</a>' : '');
+	}
+	if ($ups) {
+		print '<tr class="oddeven"><td colspan="6" class="small">Uploads: '.implode('; ', $ups).'</td></tr>';
 	}
 	print '</table><br>';
 }

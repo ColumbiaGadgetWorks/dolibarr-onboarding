@@ -26,6 +26,8 @@ const line = (acc, n, amount, label) => last(tick(['filing', 'line', acc, day(n)
 const lines = (acc) => json('reconcile', 'lines', acc);
 const reconciled = (acc) => lines(acc).filter((l) => Number(l.rappro) === 1);
 
+tick(['purchase', 'const', 'ONBOARDING_RECONCILE_RULES', '# no rules while matching is tested']);
+
 step('a checking account: a bank export with junk above the columns, withdrawals and deposits');
 const chk = account(`Checking R${stamp}`);
 line(chk, -40, 100, 'Older, before the statement');
@@ -258,6 +260,85 @@ assert.ok(!twl.some((l) => l.rowid === byHandDues), 'the hand copy, linked to no
 assert.equal(Number(twl.find((l) => l.rowid === synced).rappro), 1, 'the copy linked to the member is kept and reconciled');
 assert.equal(json('reconcile', 'missing', tw).length, 0);
 
+step('a file read again keeps its sign, though its entries are reconciled by then');
+const again2 = account(`Again R${stamp}`);
+line(again2, -30, 0.01, 'Opening balance');
+line(again2, -6, 50, 'Dues A');
+line(again2, -4, 50, 'Dues B');
+line(again2, -3, -700, 'Payout, entered as a transfer would be');
+const againCsv = `Date,Description,Amount\n${day(-6)},CGW Membership,50.00\n${day(-4)},CGW Membership,50.00\n${day(-2)},CGW Membership,50.00\n`;
+tick(['reconcile', 'upload', again2, 'again.csv'], againCsv);
+tick(['reconcile', 'upload', again2, 'again.csv'], againCsv);
+assert.deepEqual(json('reconcile', 'open', again2).map((r) => Number(r.amount)), [50], 'still +50, the one nobody entered');
+
+step('a lump is never a transfer or a payout');
+const tr2 = account(`Transfer lump R${stamp}`);
+const bank2 = account(`Transfer bank R${stamp}`);
+line(tr2, -30, 1000, 'Opening balance');
+line(bank2, -30, 0.01, 'Opening balance');
+const [payOut] = last(tick(['reconcile', 'transfer', tr2, bank2, day(-3), '100'])).split(' ');
+tick(['reconcile', 'upload', tr2, 'tr2.csv'], `Date,Description,Amount\n${day(-5)},Refund,-50.00\n${day(-4)},Refund,-50.00\n`);
+assert.equal(Number(lines(tr2).find((l) => l.rowid === payOut).rappro), 0, 'two -50s are not the -100 transfer');
+
+step('undo an upload: what it reconciled is unreconciled again');
+const und = account(`Undo R${stamp}`);
+line(und, -30, 0.01, 'Opening balance');
+const undLine = line(und, -5, 12.34, 'Something');
+tick(['reconcile', 'upload', und, 'undo.csv'], `Date,Description,Amount\n${day(-5)},SOMETHING,12.34\n`);
+assert.equal(Number(lines(und).find((l) => l.rowid === undLine).rappro), 1);
+assert.match(tick(['reconcile', 'undo', json('reconcile', 'files', und)[0].rowid]), /1 entries are unreconciled again/);
+assert.equal(Number(lines(und).find((l) => l.rowid === undLine).rappro), 0);
+assert.equal(json('reconcile', 'files', und).length, 0);
+
+step('dues recorded twice by the sync: the second record goes with its entry');
+const tw2 = account(`Twin2 R${stamp}`);
+line(tw2, -40, 0.01, 'Opening balance');
+line(tw2, -12, 10, 'Something');
+line(tw2, -1, 5, 'Other');
+const twoMember = last(tick(['purchase', 'member', `twin2-${stamp}@example.test`, `CGW-U${String(stamp).slice(-5)}`, 'Twice', 'Recorded']));
+const copyA = line(tw2, -5, 40, 'Dues 2026-10 Twice Recorded');
+const copyB = line(tw2, -5, 40, 'Dues 2026-10 Twice Recorded');
+tick(['reconcile', 'link', copyA, twoMember]);
+tick(['reconcile', 'link', copyB, twoMember]);
+tick(['pp', 'importsub', twoMember, '5']);
+// The same dues recorded twice, as happened live (Dolibarr's own path refuses a second one).
+sql(`INSERT INTO llx_subscription (datec, fk_adherent, fk_type, dateadh, datef, subscription, note) SELECT datec, fk_adherent, fk_type, DATE_ADD(dateadh, INTERVAL 8 DAY), datef, subscription, note FROM llx_subscription WHERE fk_adherent = ${Number(twoMember)}`);
+const subs2 = sql(`SELECT rowid FROM llx_subscription WHERE fk_adherent = ${Number(twoMember)} ORDER BY rowid`).split('\n').map(Number);
+assert.equal(subs2.length, 2);
+sql(`UPDATE llx_subscription SET fk_bank = ${Number(copyA)} WHERE rowid = ${subs2[0]}`);
+sql(`UPDATE llx_subscription SET fk_bank = ${Number(copyB)} WHERE rowid = ${subs2[1]}`);
+tick(['reconcile', 'upload', tw2, 'tw2.csv'], `Date,Description,Amount\n${day(-12)},X,10.00\n${day(-5)},DUES,40.00\n${day(-1)},Y,5.00\n`);
+const loose = json('reconcile', 'missing', tw2).map((l) => l.rowid);
+assert.equal(loose.length, 1);
+assert.match(tick(['reconcile', 'twin', loose[0]]), /Double entry fixed.*recorded twice on the member card/);
+assert.equal(sql(`SELECT COUNT(*) FROM llx_subscription WHERE fk_adherent = ${Number(twoMember)}`), '1');
+assert.equal(lines(tw2).filter((l) => Number(l.amount) === 40).length, 1);
+
+step('rules: fees, soda, a bank charge entered by themselves; a transfer to the bank; undo');
+tick(['purchase', 'const', 'ONBOARDING_RECONCILE_RULES', `Fee: => 6300 Processing fees\nSERVICE CHARGE => 6310 Bank fees\n[Rules R] in: soda => 4900 Other income (soda)\n[PPRule] out: transfer to the bank => transfer RulesBank R${stamp}`]);
+const ru = account(`Rules R${stamp}`);
+line(ru, -30, 0.01, 'Opening balance');
+const ruCsv = `Date,Description,Amount,Fee\n${day(-6)},Soda,1.00,-0.11\n${day(-5)},MONTHLY SERVICE CHARGE,-1.50,\n${day(-4)},Something else,-9.99,\n`;
+tick(['reconcile', 'upload', ru, 'rules.csv'], ruCsv);
+assert.deepEqual(json('reconcile', 'open', ru).map((r) => Number(r.amount)), [-9.99], 'only the line no rule fits waits');
+const ruled = json('reconcile', 'rules', ru);
+assert.deepEqual(ruled.map((r) => r.accountancy_code).sort(), ['4900', '6300', '6310']);
+assert.ok(lines(ru).filter((l) => Number(l.rappro) === 1).length >= 3, 'entered and reconciled');
+const soda = ruled.find((r) => r.accountancy_code === '4900');
+assert.match(tick(['reconcile', 'unrule', soda.rowid]), /Taken back/);
+tick(['reconcile', 'daily']);
+assert.deepEqual(json('reconcile', 'open', ru).map((r) => Number(r.amount)).sort(), [-9.99, 1], 'taken back, and not entered again');
+const ppr = account(`PPRule R${stamp}`);
+const rb = account(`RulesBank R${stamp}`);
+line(ppr, -30, 500, 'Opening balance');
+line(rb, -30, 0.01, 'Opening balance');
+tick(['reconcile', 'upload', ppr, 'ppr.csv'], `Date,Description,Amount\n${day(-4)},PayPal transfer to the bank,-38.11\n`);
+assert.equal(json('reconcile', 'open', ppr).length, 0);
+assert.ok(lines(rb).some((l) => Number(l.amount) === 38.11), 'the bank side of the transfer is made');
+tick(['reconcile', 'upload', rb, 'rb.csv'], `Date,Description,Amount\n${day(-3)},PAYPAL TRANSFER,38.11\n`);
+assert.equal(json('reconcile', 'open', rb).length, 0, 'and the bank statement finds it');
+tick(['purchase', 'const', 'ONBOARDING_RECONCILE_RULES', '# no rules while matching is tested']);
+
 step('a file that is not a statement is refused');
 assert.match(tick(['reconcile', 'upload', chk, 'notes.csv'], 'hello,world\n1,2\n'), /no transactions found/);
 assert.match(tick(['reconcile', 'upload', chk, 'virus.exe'], 'MZ'), /not a statement export/);
@@ -273,10 +354,10 @@ await (await fetch(`${MOCK}/control/paypal`, { method: 'POST', headers: { 'conte
 // The treasurer typed a member's PayPal dues in before the sync saw them: the sync links it, no second copy.
 const deeEmail = `pp-dee-${stamp}@example.test`;
 last(tick(['purchase', 'member', deeEmail, `CGW-D${String(stamp).slice(-5)}`, 'Dee', `Typed${stamp}`]));
-const typed = line(ppAccount, -1, 40, 'Dee dues, typed in');
+const typed = line(ppAccount, -1, 40, `Dee ${stamp} dues, typed in`);
 await (await fetch(`${MOCK}/control/paypal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount: 40, fee: 1.89, days_ago: 1, email: deeEmail, given_name: 'Dee', surname: `Typed${stamp}`, payer_id: `DEE${stamp}` }) })).json();
 tick(['pp', 'sync']);
-const deeLines = lines(ppAccount).filter((l) => /Dee/.test(l.label) && Number(l.amount) === 40);
+const deeLines = lines(ppAccount).filter((l) => l.label.includes(String(stamp)) && /Dee/.test(l.label) && Number(l.amount) === 40);
 assert.deepEqual(deeLines.map((l) => l.rowid), [typed], 'no second copy of the dues');
 assert.equal(sql(`SELECT COUNT(*) FROM llx_subscription WHERE fk_bank = ${Number(typed)}`), '1', 'the typed entry is the subscription\'s');
 const gross = line(ppAccount, -2, amount, 'Sale, entered by hand');
@@ -290,4 +371,5 @@ assert.match(tick(['reconcile', 'daily']), /PayPal/);
 tick(['purchase', 'const', 'ONBOARDING_PAYPAL_CLIENT_ID', '']);
 tick(['purchase', 'const', 'ONBOARDING_PAYPAL_SECRET', '']);
 
+tick(['purchase', 'const', 'ONBOARDING_RECONCILE_RULES', '']);
 console.log('\nAll reconciling checks passed');
