@@ -247,10 +247,10 @@ class OnboardingPurchase
 	public function roleTable()
 	{
 		$what = array(
-			'president' => 'Files for any zone or the General fund. Approves big requests as a director.',
+			'president' => 'Files for any zone or the General fund. Approves big requests as a director. Principal officer on the IRS 990-N; gets questions from the tax filing page.',
 			'vice-president' => 'Approves big requests as a director.',
 			'secretary' => 'Approves big requests as a director.',
-			'treasurer' => 'Files for any zone or the General fund. Approves big requests, and is told when one is ready to pay.',
+			'treasurer' => 'Files for any zone or the General fund. Approves big requests, and is told when one is ready to pay. Gets the yearly tax filing emails.',
 			'director' => 'Any other director who may approve big requests.',
 		);
 		$roles = array();

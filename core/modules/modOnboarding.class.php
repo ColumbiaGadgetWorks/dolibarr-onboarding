@@ -23,11 +23,11 @@ class modOnboarding extends DolibarrModules
 		$this->family = 'hr';
 		$this->module_position = '90';
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
-		$this->description = 'Website signup, paperwork, Givebutter dues and badge tracking for members; deadline reminders on project tasks';
+		$this->description = 'Website signup, paperwork, Givebutter dues and badge tracking for members; deadline reminders on project tasks; yearly tax filings';
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.13.3';
+		$this->version = '0.14.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -92,7 +92,7 @@ class modOnboarding extends DolibarrModules
 				'objectname' => 'OnboardingCron',
 				'method' => 'daily',
 				'parameters' => '',
-				'comment' => 'Sends due payment reminders, marks members non-paying after the grace period, deletes abandoned signups, expires unpaid training registrations, copies new versions of the waiver and agreement from GitHub.',
+				'comment' => 'Sends due payment reminders, marks members non-paying after the grace period, deletes abandoned signups, expires unpaid training registrations, copies new versions of the waiver and agreement from GitHub, and runs the yearly tax filings (opens the year, reminds the treasurer, tells the board as the due date nears).',
 				'frequency' => 1,
 				'unitfrequency' => 86400,
 				'status' => 1,
@@ -180,6 +180,16 @@ class modOnboarding extends DolibarrModules
 		$this->rights[$r][1] = 'See member votes: turnout and results, and start a practice vote (give it to the board)';
 		$this->rights[$r][4] = 'vote';
 		$this->rights[$r][5] = 'read';
+		$r++;
+		$this->rights[$r][0] = $this->numero.'10';
+		$this->rights[$r][1] = 'See yearly tax filings and the statements uploaded for them';
+		$this->rights[$r][4] = 'filing';
+		$this->rights[$r][5] = 'read';
+		$r++;
+		$this->rights[$r][0] = $this->numero.'11';
+		$this->rights[$r][1] = 'Start yearly tax filings and mark their steps done';
+		$this->rights[$r][4] = 'filing';
+		$this->rights[$r][5] = 'write';
 		$r++;
 
 		$this->menu = array();
@@ -324,6 +334,20 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->hasRight("onboarding", "vote", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Yearly filings',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_filings',
+			'url' => '/onboarding/filings.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->hasRight("onboarding", "filing", "read")',
 			'target' => '',
 			'user' => 0,
 		);

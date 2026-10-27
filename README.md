@@ -154,7 +154,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -483,6 +483,53 @@ To set it up: at developer.paypal.com, log in with CGW's PayPal Business account
 Credentials, **Live**, create an app, tick **Transaction search** in its features (PayPal can
 take a few hours to switch it on), and paste its Client ID and Secret on the setup page.
 
+## Yearly filings
+
+CGW, **Yearly filings** runs the IRS return (Form 990-N while gross receipts stay under
+$50,000) and the Missouri annual registration report from the treasurer's inbox. The fiscal
+year comes from Setup, Company (fiscal year start month: June), the EIN from professional ID
+1 and the charter number from professional ID 2; the setup page (Yearly filings) can
+override each.
+
+1. **Statements.** 15 days after the year ends (mid June), the daily job opens the year and
+   emails whoever holds the `treasurer` tag (else the `president`) a link to a page that needs
+   no login. It lists each money account's statements for the twelve months, and the yearly
+   reports on the setup page (Givebutter's transactions report, any 1099-K, Venmo, the cash
+   box). Files named with their month (`2025-06.pdf`, `June 2025.pdf`) are sorted by
+   themselves; others ask which month. A month already reconciled in Dolibarr's bank module
+   counts without a statement, and an account or report that does not apply can be marked
+   none. The treasurer presses **All uploaded** when done (with a reason, if anything is
+   still missing). Reminded every 7 days until then.
+2. **Filing.** That sends a second email with everything to type into the IRS e-Postcard
+   (EIN, tax year dates, legal name, address, principal officer, website, the $50,000
+   answer) and the link to file it. It also gives Dolibarr's estimate of gross receipts with
+   where it comes from: money in on the accounts, Givebutter dues and training fees, leaving
+   out transfers between our own accounts and payouts of money already counted, or the books'
+   income accounts once Accounting is used. It gives the three-year average that decides
+   990-N or 990-EZ, and the officers for the Missouri report with its link. Buttons on the
+   page: **IRS return filed** (with the gross receipts used, kept for next year's average,
+   and the confirmation if you like) and **State report filed**. Reminded every 7 days until
+   both are pressed.
+3. **The board.** 30 and 7 days before the IRS due date (15 October), and on it, the rest of
+   the board (president, vice president, secretary, directors) is emailed where it stands,
+   each with their own link to the page. The same happens before the state due date (27
+   October). When both are filed, the treasurer and the board get a short summary.
+
+A **question** box on the page emails the president. Every email goes through email
+approval like any other. Needs attention shows the open year, urgent within two weeks of a
+due date. A year that ended before this existed shows as "not tracked": start it, or record
+it as filed outside Dolibarr (dates and gross receipts) on Yearly filings. The statements
+are kept under `onboarding/filing/<year>/` in Dolibarr's documents. Members, Onboarding has
+the same page; give board members the right "See yearly tax filings".
+
+### Updating to 0.14
+
+Update from GitHub (it turns the module off and on, which adds the tables). Then, on CGW,
+Yearly filings, record FY2026 as filed (990-N filed August 2026, Missouri report 29 August
+2026) so it is not shown as "not tracked". Check Setup, Company has the address, fiscal
+year start month June, and the EIN and charter number as professional IDs 1 and 2. Make sure
+the treasurer's member card has the `treasurer` tag.
+
 ### Updating to 0.13
 
 Update the module with the command above one last time (it adds **Update from GitHub**),
@@ -507,7 +554,8 @@ a count and a link to where it is dealt with: emails waiting for approval, probl
 emailed about that have not cleared (website, Givebutter, votes), scheduled jobs that failed
 or are over two hours late (Dolibarr's scheduler has stopped), unmatched dues payments, dues
 payment problems, badges to turn on or off, purchase requests to decide or pay, training
-bookings that need someone, trainer dues credits, and overdue deadline tasks. Each line only
+bookings that need someone, trainer dues credits, overdue deadline tasks, and the yearly tax
+filings. Each line only
 shows for people who may act on it. The same list, without the empty lines, is the **Needs
 attention** box on Dolibarr's home page; it is added to the home page when the module is
 enabled, and can be added or removed with the home page's box picker.

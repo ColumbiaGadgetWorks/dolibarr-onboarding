@@ -30,6 +30,7 @@ class OnboardingAttention
 		'VOTE_GITHUB_TOKEN' => 'The GitHub token for votes expires soon or is not working',
 		'VOTE_OFFICERS' => 'A member vote needs the Secretary or President',
 		'VOTE_TAG' => 'A vote\'s final text could not be tagged in GitHub',
+		'CRON_FILINGS' => 'The yearly filings job is failing',
 	);
 
 	/**
@@ -113,6 +114,12 @@ class OnboardingAttention
 			$cut = $this->db->idate($now - 2 * 86400);
 			$add('bookings', 'Training bookings that need someone', 'A comment from a trainer or trainee, a refund to make, a new date to pick, or a session the trainer has not answered for.', $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_booking WHERE entity = ".$e." AND (status IN ('other', 'refund_requested', 'needs_new_date') OR (status = 'confirmed' AND answer IS NULL AND fk_class IS NULL AND session_start < '".$cut."'))"), $base.'trainings.php');
 			$add('credits', 'Trainer dues credits to approve or refund', 'Trainers whose credit reached a month of dues.', $this->count("SELECT COUNT(*) AS n FROM ".$p."onboarding_credit WHERE entity = ".$e." AND status IN ('pending', 'approved')"), $base.'training-accounts.php');
+		}
+
+		if ($user->hasRight('onboarding', 'filing', 'read')) {
+			dol_include_once('/onboarding/class/filing.class.php');
+			$tax = (new OnboardingFiling($this->db))->attention();
+			$add('filing', $tax ? $tax['label'] : 'Yearly tax filings', $tax ? $tax['why'] : 'The IRS return and the state report, from the treasurer\'s statements.', $tax ? 1 : 0, $base.'filings.php', $tax ? $tax['urgent'] : false);
 		}
 
 		if (isModEnabled('project') && $user->hasRight('projet', 'lire')) {

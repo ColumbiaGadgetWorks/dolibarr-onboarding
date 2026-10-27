@@ -57,6 +57,8 @@ jobs:
         run: node e2e-mailgate.mjs
       - name: PayPal sync
         run: node e2e-paypal.mjs
+      - name: Yearly filings
+        run: node e2e-filing.mjs
       - name: Staff pages render
         run: bash smoke-pages.sh
       - name: Logs

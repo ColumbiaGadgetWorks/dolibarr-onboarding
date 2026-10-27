@@ -16,6 +16,7 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
+ *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
  *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
 
@@ -416,6 +417,39 @@ if ($job == 'daily') {
 			unset($row->token);
 		}
 		echo json_encode($row)."\n";
+	}
+} elseif ($job == 'filing') {
+	// Yearly filings: run the daily step as if it were DAY (Y-m-d), and fixtures.
+	dol_include_once('/onboarding/class/filing.class.php');
+	$fi = new OnboardingFiling($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'run') {
+		OnboardingService::$now = strtotime($argv[3].' 12:00:00');
+		echo $fi->run()."\n";
+	} elseif ($what == 'link') {
+		$f = $fi->fetchFy((int) $argv[3]);
+		echo ($f ? $fi->link($f->rowid, $argv[4]) : '')."\n";
+	} elseif ($what == 'show') {
+		$f = $fi->fetchFy((int) $argv[3]);
+		if ($f) {
+			$f->missing = $fi->missingCount($f);
+			$f->form = $fi->form($f);
+		}
+		echo json_encode($f)."\n";
+	} elseif ($what == 'line') {
+		// line ACCOUNT DAY AMOUNT LABEL
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$a = new Account($db);
+		$a->fetch((int) $argv[3]);
+		echo $a->addline(strtotime($argv[4].' 12:00:00'), 'VIR', $argv[6], (float) $argv[5], '', 0, $user)."\n";
+	} elseif ($what == 'reconcile') {
+		$db->query("UPDATE ".$db->prefix()."bank SET rappro = 1, num_releve = '".$db->escape($argv[4])."' WHERE fk_account = ".((int) $argv[3])." AND dateo >= '".$db->escape($argv[4])."-01' AND dateo < '".date('Y-m-d', strtotime($argv[4].'-01 12:00:00 +1 month'))."'");
+		echo "ok\n";
+	} elseif ($what == 'reset') {
+		foreach (array('onboarding_filing_event', 'onboarding_filing_doc', 'onboarding_filing') as $t) {
+			$db->query("DELETE FROM ".$db->prefix().$t);
+		}
+		echo "ok\n";
 	}
 } elseif ($job == 'reinit') {
 	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
