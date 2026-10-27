@@ -154,7 +154,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -483,6 +483,38 @@ To set it up: at developer.paypal.com, log in with CGW's PayPal Business account
 Credentials, **Live**, create an app, tick **Transaction search** in its features (PayPal can
 take a few hours to switch it on), and paste its Client ID and Secret on the setup page.
 
+## Reconcile bank accounts
+
+Reconciling is checking every entry in Dolibarr against the account's own record (the
+statement), so the books are known to be right. Members, Onboarding (and Banks), **Reconcile
+bank accounts** does the matching:
+
+- **PayPal** is read from PayPal through the PayPal sync's connection, from the oldest
+  unreconciled entry on, by the button and by the daily job. The account's ref must be
+  `PAYPAL`.
+- **Every other account**: upload the transactions as downloaded from online banking, CSV,
+  Excel, OFX or QFX (Central Bank's Activity export, the US Bank card's download, Givebutter's
+  Transactions and Payouts exports, Venmo's statement CSV). Lines above the column names are
+  skipped; withdrawals and deposits columns, a single amount column, or PayPal's Gross, Fee
+  and Net are all understood. A card export that shows purchases as positive is turned
+  around. The same file uploaded twice is read once.
+
+Each statement line is matched to an unreconciled entry of the same account with the same
+amount, up to 5 days apart (setup page, Reconciling), the closest first. A payment shown with
+its fee matches either a full-amount entry plus a fee entry, or one entry for what was left
+after the fee. Matched entries are reconciled with the month (`YYYYMM`) as statement number.
+What is left is listed per account:
+
+- **On the statement, not in Dolibarr**: Add to Dolibarr (makes the entry and reconciles
+  it; give it a category or link it afterwards), match it to an entry by hand (for a typo in
+  the amount), or Leave out.
+- **In Dolibarr, not on the statement** (for days a statement covers): open it to fix or
+  delete it, or Reconcile anyway.
+- When the export gives a running balance, the statement's ending balance is shown next to
+  Dolibarr's balance for that day, with any difference.
+
+The count is on Needs attention as "Bank lines to check". Cash accounts are never reconciled.
+
 ## Yearly filings
 
 CGW, **Yearly filings** runs the IRS return (Form 990-N while gross receipts stay under
@@ -524,7 +556,9 @@ the same page; give board members the right "See yearly tax filings".
 
 ### Updating to 0.14
 
-Update from GitHub (it turns the module off and on, which adds the tables). Then, on CGW,
+Update from GitHub (it turns the module off and on, which adds the tables). Reconcile
+bank accounts is new too: press **Reconcile with PayPal now** there, then upload each other
+account's export, oldest month first. Then, on CGW,
 Yearly filings, record FY2026 as filed (990-N filed August 2026, Missouri report 29 August
 2026) so it is not shown as "not tracked". Check Setup, Company has the address, fiscal
 year start month June, and the EIN and charter number as professional IDs 1 and 2. Make sure

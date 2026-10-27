@@ -61,6 +61,7 @@ sections:
       - Purchase requests: /custom/onboarding/purchases.php
       - Deadline reminders: /custom/onboarding/deadlines.php
       - Yearly filings: /custom/onboarding/filings.php
+      - Reconcile bank accounts: /custom/onboarding/reconcile.php
       - Bank accounts: /compta/bank/list.php
       - Scheduled jobs: /cron/list.php
       - Onboarding setup: /custom/onboarding/admin/setup.php

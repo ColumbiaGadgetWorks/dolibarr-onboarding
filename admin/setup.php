@@ -129,6 +129,9 @@ $sections = array(
 		'ONBOARDING_FILING_STATE_DUE' => array('State report due (month-day)', 'text', 'Default 10-27, the incorporation anniversary.'),
 		'ONBOARDING_FILING_STATE_URL' => array('Where the state report is filed', 'text', 'Default https://bsd.sos.mo.gov/ (Missouri Secretary of State, Business Services).'),
 	),
+	'Reconciling' => array(
+		'ONBOARDING_RECONCILE_DAYS' => array('Days apart a statement line and its entry may be', 'text', 'Default 5. Reconcile bank accounts matches a statement line to the Dolibarr entry with the same amount at most this many days away (banks post a day or two after PayPal or Givebutter send).'),
+	),
 	'Reminders' => array(
 		'ONBOARDING_REMINDER_DAYS' => array('Send reminders after (days)', 'text', 'Comma separated days after a payment is cancelled or missed, for example 3,7,14.'),
 		'ONBOARDING_GRACE_DAYS' => array('Mark non-paying after (days)', 'text', 'Counted from the same moment. A member who has already paid for a period keeps it until it runs out.'),

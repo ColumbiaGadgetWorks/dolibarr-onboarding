@@ -98,3 +98,16 @@ Would replace most of the emails above, which could stay as a fallback.
     an email a month after joining asking how it is going.
 28. **Website numbers.** Member count, tools, trainings held and similar figures pushed
     from Dolibarr to the website instead of typed by hand.
+29. **Role dashboards.** Buttons on the setup page, next to "Make it everyone's home page":
+    "Set dashboard for secretary", "for treasurer", "for president". Each gives the people
+    holding that role tag their own CGW home page layout (a YAML per role, kept per user):
+    the treasurer's with bank balances, reconciling, purchase requests to pay and the tax
+    filing; the secretary's with signups, votes, board meetings and member counts; the
+    president's with Needs attention, deadlines and the board packet numbers.
+30. **Access and change alerts.** Who can see and change what (Dolibarr user rights, kept
+    to roles), reviewed yearly. An email, through email approval's approver, when
+    something that should rarely change does: a bank entry edited or deleted after it was
+    reconciled, a bank account's details, user rights or a new admin, module settings
+    (API keys, the email approver), a member's dues dates set by hand, a large refund, or
+    many records deleted at once. Uses Dolibarr's triggers and the audit log (Security
+    events); a daily summary of anything unusual, at once for the serious ones.

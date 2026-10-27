@@ -92,7 +92,7 @@ class modOnboarding extends DolibarrModules
 				'objectname' => 'OnboardingCron',
 				'method' => 'daily',
 				'parameters' => '',
-				'comment' => 'Sends due payment reminders, marks members non-paying after the grace period, deletes abandoned signups, expires unpaid training registrations, copies new versions of the waiver and agreement from GitHub, and runs the yearly tax filings (opens the year, reminds the treasurer, tells the board as the due date nears).',
+				'comment' => 'Sends due payment reminders, marks members non-paying after the grace period, deletes abandoned signups, expires unpaid training registrations, copies new versions of the waiver and agreement from GitHub, runs the yearly tax filings (opens the year, reminds the treasurer, tells the board as the due date nears), and reconciles the PayPal account from PayPal.',
 				'frequency' => 1,
 				'unitfrequency' => 86400,
 				'status' => 1,
@@ -354,6 +354,20 @@ class modOnboarding extends DolibarrModules
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
 			'type' => 'left',
+			'titre' => 'Reconcile bank accounts',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_reconcile',
+			'url' => '/onboarding/reconcile.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding") && isModEnabled("banque")',
+			'perms' => '$user->hasRight("banque", "lire")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
 			'titre' => 'Email approval',
 			'mainmenu' => 'members',
 			'leftmenu' => 'onboarding_mailgate',
@@ -362,6 +376,21 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->admin',
+			'target' => '',
+			'user' => 0,
+		);
+		// Also under Banks, where reconciling is looked for.
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=bank',
+			'type' => 'left',
+			'titre' => 'Reconcile from statements',
+			'mainmenu' => 'bank',
+			'leftmenu' => 'onboarding_reconcile_bank',
+			'url' => '/onboarding/reconcile.php?mainmenu=bank',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding") && isModEnabled("banque")',
+			'perms' => '$user->hasRight("banque", "lire")',
 			'target' => '',
 			'user' => 0,
 		);

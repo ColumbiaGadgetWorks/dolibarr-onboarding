@@ -1,0 +1,127 @@
+// Reconcile bank accounts: statement exports matched to Dolibarr's entries,
+// what does not match left for a person, and PayPal read from PayPal.
+//
+//   node e2e-reconcile.mjs   (after e2e-paypal.mjs, which leaves the PayPal account and its entries)
+import { execFileSync } from 'node:child_process';
+import assert from 'node:assert/strict';
+
+const stamp = Date.now();
+const MOCK = process.env.MOCK_URL || 'http://localhost:8090';
+const tick = (args, input) => execFileSync('docker', ['compose', 'exec', '-T', '-u', 'www-data', 'dolibarr', 'php', '/var/www/html/custom/onboarding/sandbox/tick.php', ...args], { encoding: 'utf8', input }).trim();
+const last = (out) => out.split('\n').pop();
+const json = (...args) => JSON.parse(last(tick(args)));
+const sql = (q) => execFileSync('docker', ['compose', 'exec', '-T', 'db', 'mariadb', '-N', '-udolidbuser', '-pdolidbpass', 'dolidb', '-e', q], { encoding: 'utf8' }).trim();
+const step = (name) => console.log(`\n== ${name}`);
+
+const day = (n) => new Date(Date.now() + n * 86400e3).toISOString().slice(0, 10);
+const us = (n) => { const [y, m, d] = day(n).split('-'); return `${Number(m)}/${Number(d)}/${y}`; };
+function account(label) {
+  const id = last(tick(['purchase', 'bank', label]));
+  assert.ok(Number(id) > 0, `account ${label}`);
+  sql(`UPDATE llx_bank_account SET rappro = 1 WHERE rowid = ${Number(id)}`);
+  return id;
+}
+const line = (acc, n, amount, label) => last(tick(['filing', 'line', acc, day(n), String(amount), label]));
+const lines = (acc) => json('reconcile', 'lines', acc);
+const reconciled = (acc) => lines(acc).filter((l) => Number(l.rappro) === 1);
+
+step('a checking account: a bank export with junk above the columns, withdrawals and deposits');
+const chk = account(`Checking R${stamp}`);
+line(chk, -40, 100, 'Older, before the statement');
+const payout = line(chk, -20, 550.01, 'Givebutter payout');
+line(chk, -15, -650, 'Rent check');
+line(chk, -14, 40, 'Dues A');
+line(chk, -14, 40, 'Dues B');
+const stray = line(chk, -10, -12.34, 'Not on the statement');
+const csv = [
+  'POSTED TRANSACTIONS',
+  'Collapse',
+  'Date,Transaction Type,Description,Withdrawals,Deposits,Balance',
+  `${us(-8)},Mobile Deposit,Check from a donor,,25.00,"$97.51"`,
+  `${us(-12)},Service Charge,MONTHLY FEE,7.50,,72.51`,
+  `${us(-14)},Other Deposit,POSTING CREDIT,,40.00,80.01`,
+  `${us(-14)},Other Deposit,POSTING CREDIT,,40.00,40.01`,
+  `${us(-15)},Check Paid,Check 1203,"$650.00",,0.01`,
+  `${us(-19)},Pre-authorized ACH Credit,GIVEBUTTER STRIPE PAYOUT,,550.01,650.01`,
+].join('\n');
+assert.match(tick(['reconcile', 'upload', chk, 'central-bank.csv'], csv), /6 transactions read from central-bank\.csv, 4 entries reconciled, 2 to check/);
+const after = lines(chk);
+const byId = Object.fromEntries(after.map((l) => [l.rowid, l]));
+assert.equal(Number(byId[payout].rappro), 1, 'the payout, posted a day later, is reconciled');
+assert.equal(byId[payout].num_releve, day(-19).slice(0, 7).replace('-', ''), 'statement number is the month');
+assert.equal(Number(byId[stray].rappro), 0, 'an entry the bank does not show is not');
+assert.equal(after.filter((l) => /^Dues/.test(l.label) && Number(l.rappro) === 1).length, 2, 'two same-day $40 deposits, both matched');
+
+step('what is left: two statement lines, one Dolibarr entry; uploading again changes nothing');
+let open = json('reconcile', 'open', chk);
+assert.deepEqual(open.map((r) => Number(r.amount)).sort(), [-7.5, 25]);
+assert.deepEqual(json('reconcile', 'missing', chk).map((l) => l.rowid), [stray], 'the stray entry; the one from before the statement is not blamed');
+assert.match(tick(['reconcile', 'upload', chk, 'central-bank.csv'], csv), /0 entries reconciled, 2 to check/);
+assert.equal(json('reconcile', 'open', chk).length, 2, 'the same lines are kept once');
+const file = json('reconcile', 'files', chk)[0];
+assert.equal(Number(file.end_balance), 97.51, 'the ending balance, from the newest line');
+assert.equal(file.end_date, day(-8));
+
+step('a person decides: add the fee, match the deposit by hand, reconcile the stray entry');
+const fee = open.find((r) => Number(r.amount) === -7.5);
+assert.match(tick(['reconcile', 'decide', fee.rowid, 'add']), /Added to .* and reconciled/);
+const dep = open.find((r) => Number(r.amount) === 25);
+const typo = line(chk, -9, 52, 'Donation (typed as 52)');
+assert.match(tick(['reconcile', 'decide', dep.rowid, 'match', typo]), /Matched and reconciled/);
+assert.match(tick(['reconcile', 'force', stray]), /Reconciled/);
+assert.equal(json('reconcile', 'open', chk).length, 0);
+assert.equal(json('reconcile', 'missing', chk).length, 0);
+assert.ok(lines(chk).some((l) => Number(l.amount) === -7.5 && Number(l.rappro) === 1), 'the added fee is an entry, reconciled');
+
+step('a card export with purchases shown as positive is turned around');
+const card = account(`Card R${stamp}`);
+line(card, -6, -23.45, 'Hardware store');
+line(card, -5, -10, 'Coffee');
+const cardCsv = `"Date","Transaction","Name","Memo","Amount"\n"${day(-6)}","DEBIT","HARDWARE STORE","x","23.45"\n"${day(-4)}","DEBIT","COFFEE","x","10.00"\n`;
+assert.match(tick(['reconcile', 'upload', card, 'usbank.csv'], cardCsv), /2 entries reconciled/);
+
+step('payments with their fee on one line: full amount plus fee, or after the fee; memo and pending rows skipped');
+const pp = account(`Processor R${stamp}`);
+line(pp, -7, 40, 'Dues gross');
+line(pp, -7, -1.89, 'Fee');
+line(pp, -6, 38.11, 'Dues net');
+const ppCsv = [
+  '"Date","Time","TimeZone","Name","Type","Status","Currency","Gross","Fee","Net","Balance Impact","Transaction ID"',
+  `"${us(-7)}","10:00:00","CDT","Ann","Subscription Payment","Completed","USD","40.00","-1.89","38.11","Credit","TX1"`,
+  `"${us(-6)}","11:00:00","CDT","Bob","Subscription Payment","Completed","USD","40.00","-1.89","38.11","Credit","TX2"`,
+  `"${us(-6)}","11:00:00","CDT","Bob","General Authorization","Pending","USD","40.00","0.00","40.00","Memo","TX3"`,
+].join('\n');
+assert.match(tick(['reconcile', 'upload', pp, 'paypal.csv'], ppCsv), /2 transactions read from paypal\.csv, 3 entries reconciled/);
+assert.equal(json('reconcile', 'open', pp).length, 0, 'the netted fee is not left over');
+
+step('OFX from online banking');
+const ofxAcc = account(`OFX R${stamp}`);
+line(ofxAcc, -3, -45.5, 'Insurance');
+const ofx = `OFXHEADER:100\nDATA:OFXSGML\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>\n<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>${day(-3).replace(/-/g, '')}120000<TRNAMT>-45.50<FITID>A1<NAME>INSURANCE CO\n</BANKTRANLIST><LEDGERBAL><BALAMT>-45.50<DTASOF>${day(-3).replace(/-/g, '')}</LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
+assert.match(tick(['reconcile', 'upload', ofxAcc, 'bank.qfx'], ofx), /1 transactions read from bank\.qfx, 1 entries reconciled/);
+assert.equal(Number(json('reconcile', 'files', ofxAcc)[0].end_balance), -45.5);
+
+step('a file that is not a statement is refused');
+assert.match(tick(['reconcile', 'upload', chk, 'notes.csv'], 'hello,world\n1,2\n'), /no transactions found/);
+assert.match(tick(['reconcile', 'upload', chk, 'virus.exe'], 'MZ'), /not a statement export/);
+
+step('PayPal from PayPal: its entries from the sync are reconciled');
+tick(['purchase', 'const', 'ONBOARDING_PAYPAL_CLIENT_ID', 'sandbox-paypal-id']);
+tick(['purchase', 'const', 'ONBOARDING_PAYPAL_SECRET', 'sandbox-paypal-secret']);
+const ppAccount = sql("SELECT rowid FROM llx_bank_account WHERE ref = 'PAYPAL'");
+sql(`UPDATE llx_bank_account SET rappro = 1 WHERE rowid = ${Number(ppAccount)}`);
+// A payment in PayPal and its entry in Dolibarr, made by hand.
+const amount = (17 + (stamp % 1000) / 100).toFixed(2);
+await (await fetch(`${MOCK}/control/paypal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount, fee: 0.5, days_ago: 2, code: 'T0006', email: `rec-${stamp}@example.test`, given_name: 'Rita' }) })).json();
+const gross = line(ppAccount, -2, amount, 'Sale, entered by hand');
+const feeLine = line(ppAccount, -2, -0.5, 'PayPal fee');
+const out = tick(['reconcile', 'paypal']);
+assert.match(out, /PayPal: \d+ transactions read, \d+ entries reconciled/);
+const pl = Object.fromEntries(lines(ppAccount).map((l) => [l.rowid, l]));
+assert.equal(Number(pl[gross].rappro), 1, `the payment is reconciled (${out})`);
+assert.equal(Number(pl[feeLine].rappro), 1, 'and its fee');
+assert.match(tick(['reconcile', 'daily']), /PayPal/);
+tick(['purchase', 'const', 'ONBOARDING_PAYPAL_CLIENT_ID', '']);
+tick(['purchase', 'const', 'ONBOARDING_PAYPAL_SECRET', '']);
+
+console.log('\nAll reconciling checks passed');
