@@ -61,6 +61,8 @@ jobs:
         run: node e2e-filing.mjs
       - name: Reconcile bank accounts
         run: node e2e-reconcile.mjs
+      - name: Bank feeds (Plaid)
+        run: node e2e-plaid.mjs
       - name: Staff pages render
         run: bash smoke-pages.sh
       - name: Logs

@@ -129,6 +129,13 @@ $sections = array(
 		'ONBOARDING_FILING_STATE_DUE' => array('State report due (month-day)', 'text', 'Default 10-27, the incorporation anniversary.'),
 		'ONBOARDING_FILING_STATE_URL' => array('Where the state report is filed', 'text', 'Default https://bsd.sos.mo.gov/ (Missouri Secretary of State, Business Services).'),
 	),
+	'Bank feeds (Plaid)' => array(
+		'ONBOARDING_PLAID_CLIENT_ID' => array('Plaid Client ID', 'text', 'From the Plaid dashboard, Developers, Keys. With it and the secret set, Banks, Bank feeds (Plaid) connects the organization\'s own accounts, and the hourly job reads their transactions into Reconcile bank accounts.'),
+		'ONBOARDING_PLAID_SECRET' => array('Plaid secret', 'secret', 'The secret for the environment below (Sandbox and Production have different secrets).'),
+		'ONBOARDING_PLAID_ENV' => array('Environment (sandbox or production)', 'text', 'Default sandbox: Plaid\'s test banks only (user_good / pass_good). production once Plaid approves the account. Changing it does not move connected banks: disconnect them and connect again.'),
+		'ONBOARDING_PLAID_REDIRECT_URI' => array('Redirect address', 'text', 'For banks with their own login page (OAuth, e.g. US Bank): this Dolibarr\'s Bank feeds page, e.g. https://dolibarr.adman.casa/custom/onboarding/plaid.php . Add the same address in the Plaid dashboard, Developers, API, Allowed redirect URIs.'),
+		'ONBOARDING_PLAID_API_BASE' => array('Plaid API address', 'text', 'Only change this to point at the sandbox.'),
+	),
 	'Reconciling' => array(
 		'ONBOARDING_RECONCILE_DAYS' => array('Days apart a statement line and its entry may be', 'text', 'Default 5. Reconcile bank accounts matches a statement line to the Dolibarr entry with the same amount at most this many days away (banks post a day or two after PayPal or Givebutter send).'),
 		'ONBOARDING_RECONCILE_RULES' => array('Rules for lines nobody entered', 'area', 'A statement line that matches no entry and fits a rule is entered by itself (on the accounting account given, or as a transfer between our accounts), reconciled, and listed under "Entered by the rules" with an Undo. The comments at the top explain the format. Empty: the built-in rules.'),

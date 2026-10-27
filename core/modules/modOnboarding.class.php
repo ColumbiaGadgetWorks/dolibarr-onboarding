@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.14.4';
+		$this->version = '0.15.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -78,7 +78,7 @@ class modOnboarding extends DolibarrModules
 				'objectname' => 'OnboardingCron',
 				'method' => 'reconcile',
 				'parameters' => '',
-				'comment' => 'Pulls recent Givebutter transactions and plan statuses so a missed webhook cannot leave a member in the wrong state.',
+				'comment' => 'Pulls recent Givebutter transactions and plan statuses so a missed webhook cannot leave a member in the wrong state; PayPal dues; and the bank feeds connected through Plaid.',
 				'frequency' => 1,
 				'unitfrequency' => 3600,
 				'status' => 1,
@@ -368,6 +368,20 @@ class modOnboarding extends DolibarrModules
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
 			'type' => 'left',
+			'titre' => 'Bank feeds (Plaid)',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_plaid',
+			'url' => '/onboarding/plaid.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding") && isModEnabled("banque")',
+			'perms' => '$user->hasRight("banque", "lire")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
 			'titre' => 'Email approval',
 			'mainmenu' => 'members',
 			'leftmenu' => 'onboarding_mailgate',
@@ -376,6 +390,20 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->admin',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=bank',
+			'type' => 'left',
+			'titre' => 'Bank feeds (Plaid)',
+			'mainmenu' => 'bank',
+			'leftmenu' => 'onboarding_plaid_bank',
+			'url' => '/onboarding/plaid.php?mainmenu=bank',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding") && isModEnabled("banque")',
+			'perms' => '$user->hasRight("banque", "lire")',
 			'target' => '',
 			'user' => 0,
 		);

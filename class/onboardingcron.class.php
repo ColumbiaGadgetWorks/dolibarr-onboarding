@@ -39,6 +39,16 @@ class OnboardingCron
 		} elseif (getDolGlobalString('ONBOARDING_GB_API_KEY') !== '') {
 			$svc->alertClear('givebutter-sync', 'The hourly Givebutter sync works again.');
 		}
+		dol_include_once('/onboarding/class/plaid.class.php');
+		if (OnboardingPlaid::configured()) {
+			$feeds = (new OnboardingPlaid($this->db, $svc))->sync();
+			$this->output .= '; '.$feeds;
+			if (strpos($feeds, 'failed') !== false || strpos($feeds, 'login again') !== false) {
+				$svc->alert('plaid-sync', 'A bank feed needs attention', 'Reading the bank feeds said: '.$feeds."\n\nOpen Banks, Bank feeds (Plaid): Reconnect asks the bank for the login again.");
+			} else {
+				$svc->alertClear('plaid-sync', 'The bank feeds read cleanly again.');
+			}
+		}
 		dol_include_once('/onboarding/class/paypal.class.php');
 		if (OnboardingPaypal::configured()) {
 			$pp = (new OnboardingPaypal($this->db, $svc))->sync();

@@ -154,7 +154,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -553,6 +553,37 @@ at once:
 
 The count is on Needs attention as "Bank lines to check". Cash accounts are never reconciled.
 
+## Bank feeds (Plaid)
+
+With Plaid, the bank and card accounts send their transactions to Dolibarr every hour,
+so no statements need uploading. Banks (or CGW), **Bank feeds (Plaid)**:
+
+- **Connect a bank** opens Plaid's own window, where the bank login is typed (Dolibarr never
+  sees it). Dolibarr keeps the access Plaid gives back, encrypted, and lists the login's
+  accounts. Administrators only.
+- Choose which Dolibarr account each one **feeds** (an account whose name or last four digits
+  fit is chosen for you) and Save. Accounts left "not fed" are not read.
+- Every hour, and on **Read now**, new posted transactions go to Reconcile bank accounts
+  exactly like an uploaded export: matched to the entries, entered by the rules, or listed
+  for a person. Pending ones wait until they post; one the bank takes back is removed from
+  the list. Plaid gives up to two years back on the first read; lines before the account's
+  first Dolibarr entry are set aside as usual.
+- Each account shows its balance at the bank against Dolibarr's, and the difference (a card's
+  balance owed shows as negative, as in Dolibarr).
+- When the bank wants the login again, the page shows "the bank wants the login again", Needs
+  attention shows **Bank feeds to reconnect** and an alert is sent: press **Reconnect** and log
+  in again in Plaid's window. **Disconnect** deletes the access at Plaid and in Dolibarr; what it
+  already fed stays in the books.
+
+Set up on the setup page, Bank feeds (Plaid): the Client ID and the secret (Plaid dashboard,
+Developers, Keys), the environment (`sandbox` or `production`; each has its own secret) and,
+for banks that log in on their own site (OAuth, e.g. US Bank), the redirect address
+`https://<your Dolibarr>/custom/onboarding/plaid.php`, entered there and under Allowed
+redirect URIs in the Plaid dashboard. Ask Plaid only for the Transactions product.
+
+In the sandbox environment the test bank logs in with `user_good` / `pass_good`. Feed a test
+Dolibarr account from it, never a real one, and disconnect when done.
+
 ## Yearly filings
 
 CGW, **Yearly filings** runs the IRS return (Form 990-N while gross receipts stay under
@@ -591,6 +622,12 @@ due date. A year that ended before this existed shows as "not tracked": start it
 it as filed outside Dolibarr (dates and gross receipts) on Yearly filings. The statements
 are kept under `onboarding/filing/<year>/` in Dolibarr's documents. Members, Onboarding has
 the same page; give board members the right "See yearly tax filings".
+
+### Updating to 0.15
+
+Update from GitHub (it turns the module off and on, which adds the tables). For bank feeds,
+enter the Plaid keys on the setup page, then follow Bank feeds (Plaid) above. Statement
+uploads keep working for accounts that are not fed.
 
 ### Updating to 0.14
 

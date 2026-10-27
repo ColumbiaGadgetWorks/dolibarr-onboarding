@@ -616,8 +616,8 @@ ACCTVERIFY => 4900 Other income (account checks)
 				$this->db->query("UPDATE ".$p."onboarding_stmt_file SET datec = '".$this->db->idate(OnboardingService::now())."', begin_balance = ".($begin !== null ? price2num($begin) : 'NULL').", begin_date = ".($beginDate ? "'".$beginDate."'" : 'NULL').", end_balance = ".($end !== null ? price2num($end) : 'NULL').", end_date = ".($endDate ? "'".$endDate."'" : 'NULL')." WHERE rowid = ".$fileId);
 			}
 		}
-		if ($file['source'] == 'api') {
-			$res = $this->db->query("SELECT rowid, date_from, date_to FROM ".$p."onboarding_stmt_file WHERE fk_account = ".((int) $accountId)." AND source = 'api'");
+		if ($file['source'] == 'api' || $file['source'] == 'plaid') {
+			$res = $this->db->query("SELECT rowid, date_from, date_to FROM ".$p."onboarding_stmt_file WHERE fk_account = ".((int) $accountId)." AND source = '".$this->db->escape($file['source'])."'");
 			$o = $res ? $this->db->fetch_object($res) : null;
 			if ($o) {
 				$fileId = (int) $o->rowid;

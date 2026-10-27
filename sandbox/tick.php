@@ -16,6 +16,7 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
+ *   php tick.php plaid connect PUBLIC_TOKEN NAME | items | map PLAIDACCOUNT BANK | sync | token [ITEM] | disconnect ITEM | stored
  *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | compare FILE | aside ACCOUNT | why ROW | transfer FROM TO DAY AMOUNT | link LINE MEMBER | twin LINE | undo FILE | rules ACCOUNT | unrule ROW | decide ID add|ignore|match [LINE] | force LINE
  *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
  *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
@@ -418,6 +419,29 @@ if ($job == 'daily') {
 			unset($row->token);
 		}
 		echo json_encode($row)."\n";
+	}
+} elseif ($job == 'plaid') {
+	// Bank feeds without the page: plaid connect PUBLIC_TOKEN NAME | items | map PLAIDACCOUNT BANKACCOUNT | sync
+	dol_include_once('/onboarding/class/plaid.class.php');
+	$pl = new OnboardingPlaid($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'connect') {
+		echo $pl->connect($argv[3], isset($argv[4]) ? $argv[4] : 'Test Bank')."\n";
+	} elseif ($what == 'items') {
+		echo json_encode(array_values($pl->items()))."\n";
+	} elseif ($what == 'map') {
+		$pl->map((int) $argv[3], (int) $argv[4]);
+		echo "ok\n";
+	} elseif ($what == 'sync') {
+		echo $pl->sync()."\n";
+	} elseif ($what == 'token') {
+		echo $pl->linkToken($user, isset($argv[3]) ? (int) $argv[3] : 0)."\n";
+	} elseif ($what == 'disconnect') {
+		echo $pl->disconnect((int) $argv[3])."\n";
+	} elseif ($what == 'stored') {
+		$res = $db->query("SELECT access_token FROM ".$db->prefix()."onboarding_plaid_item ORDER BY rowid DESC LIMIT 1");
+		$o = $db->fetch_object($res);
+		echo ($o ? substr($o->access_token, 0, 9) : '')."\n";
 	}
 } elseif ($job == 'reconcile') {
 	// Reconcile bank accounts, without the page.

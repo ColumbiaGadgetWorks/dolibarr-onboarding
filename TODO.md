@@ -103,8 +103,9 @@ Would replace most of the emails above, which could stay as a fallback.
     Google, GitHub, Cloudflare), at least two people with access to each, and a yearly
     review that asks each owner to confirm.
 12. **Bank statement upload and monthly close.** Central Bank has no free feed
-    (SimpleFIN does not cover business checking; Plaid being checked). Upload QFX, OFX or
-    CSV each month to add the bank lines, then the treasurer signs off the month by email
+    (SimpleFIN does not cover business checking). Bank feeds through Plaid are built (0.15);
+    they go live once Plaid's production review passes. Until then upload the statement each
+    month. Still to build: the treasurer signs off the month by email
     button. Yearly filings would then find every month already there.
 13. **Recurring bills.** Rent ($875 a month), the lathe payments, insurance: expected each
     month, matched to bank lines, flagged when missing. The lease ends 2027-04-30: start

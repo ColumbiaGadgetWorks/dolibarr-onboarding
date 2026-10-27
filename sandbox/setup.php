@@ -41,6 +41,7 @@ $consts = array(
 	'ONBOARDING_GB_API_BASE' => 'http://givebutter:8090/v1',
 	// The PayPal sync is off until e2e-paypal.mjs sets a Client ID and Secret.
 	'ONBOARDING_PAYPAL_API_BASE' => 'http://givebutter:8090',
+	'ONBOARDING_PLAID_API_BASE' => 'http://givebutter:8090/plaid',
 	'ONBOARDING_GB_CAMPAIGN_CODE' => 'SANDBOX',
 	'ONBOARDING_TRAINING_CAMPAIGN_CODE' => 'TRAINING',
 	'ONBOARDING_TRAINING_LOOKUP_URL' => 'http://'.$host.':8787/training/',
