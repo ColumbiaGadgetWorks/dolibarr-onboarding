@@ -388,7 +388,9 @@ class OnboardingHome
 		if (OnboardingSelfUpdate::cannotWrite() !== '') {
 			return '<a class="butAction" style="'.$style.'" href="'.$setup.'#module-updates">'.$text.'</a>';
 		}
-		return '<a class="butAction" style="'.$style.'" href="'.$setup.'?action=selfupdate&token='.newToken().'" onclick="return confirm(\'Update Member onboarding from GitHub and turn it off and on?\')" title="'.dol_escape_htmltag($newer ? 'Version '.$latest.' is on GitHub' : 'Already the newest version on GitHub; updating again does no harm').'">'.$text.'</a>';
+		// Back to this page when done, not the setup page.
+		$back = isset($_SERVER['REQUEST_URI']) ? '&backtopage='.urlencode((string) $_SERVER['REQUEST_URI']) : '';
+		return '<a class="butAction" style="'.$style.'" href="'.$setup.'?action=selfupdate&token='.newToken().dol_escape_htmltag($back).'" onclick="return confirm(\'Update Member onboarding from GitHub and turn it off and on?\')" title="'.dol_escape_htmltag($newer ? 'Version '.$latest.' is on GitHub' : 'Already the newest version on GitHub; updating again does no harm').'">'.$text.'</a>';
 	}
 
 	/**

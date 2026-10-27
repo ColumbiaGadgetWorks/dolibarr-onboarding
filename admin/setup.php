@@ -26,6 +26,15 @@ if (!$user->admin) {
 $svc = new OnboardingService($db);
 $docs = $svc->docs();
 
+/**
+ * @return string The page to go back to after an update: a path on this site, or ''
+ */
+function onboarding_back()
+{
+	$back = (string) GETPOST('backtopage', 'alphanohtml');
+	return preg_match('#^/(?![/\\\\])[^\s\\\\]*$#', $back) ? $back : '';
+}
+
 // name => array(label, kind, help). Kinds: text, secret, area.
 $sections = array(
 	'Website connection' => array(
@@ -206,14 +215,21 @@ if ($action == 'selfupdate' || $action == 'checkupdate') {
 	setEventMessages($r['message'], null, $r['ok'] ? 'mesgs' : 'errors');
 	// The new code is only loaded by the next request: turn the module off and
 	// on there, so it sets itself up with its own installer.
-	header('Location: '.$_SERVER['PHP_SELF'].($r['ok'] ? '?action=reenable&token='.newToken() : ''));
+	$back = onboarding_back();
+	if ($r['ok']) {
+		header('Location: '.$_SERVER['PHP_SELF'].'?action=reenable&token='.newToken().($back !== '' ? '&backtopage='.urlencode($back) : ''));
+	} else {
+		header('Location: '.($back !== '' ? $back : $_SERVER['PHP_SELF']));
+	}
 	exit;
 }
 if ($action == 'reenable') {
 	dol_include_once('/onboarding/class/selfupdate.class.php');
 	$err = (new OnboardingSelfUpdate($db))->reenable();
 	setEventMessages($err === '' ? 'Member onboarding was turned off and on again, so version '.OnboardingSelfUpdate::installed().' is set up. Your settings are kept.' : $err, null, $err === '' ? 'mesgs' : 'errors');
-	header('Location: '.$_SERVER['PHP_SELF']);
+	// Back where the Update button was pressed (the CGW home page), else here.
+	$back = onboarding_back();
+	header('Location: '.($back !== '' ? $back : $_SERVER['PHP_SELF']));
 	exit;
 }
 if (in_array($action, array('homeeveryone', 'homeoff', 'homereset'), true)) {
