@@ -59,6 +59,7 @@ assert.deepEqual(open.map((r) => Number(r.amount)).sort(), [-7.5, 25]);
 assert.deepEqual(json('reconcile', 'missing', chk).map((l) => l.rowid), [stray], 'the stray entry; the one from before the statement is not blamed');
 assert.match(tick(['reconcile', 'upload', chk, 'central-bank.csv'], csv), /0 entries reconciled, 2 to check/);
 assert.equal(json('reconcile', 'open', chk).length, 2, 'the same lines are kept once');
+open = json('reconcile', 'open', chk); // Read afresh, so new ids.
 const file = json('reconcile', 'files', chk)[0];
 assert.equal(Number(file.end_balance), 97.51, 'the ending balance, from the newest line');
 assert.equal(file.end_date, day(-8));
@@ -163,6 +164,50 @@ assert.equal(Number(pf.end_balance), 545.73, 'the ending balance from the PDF');
 assert.equal(pf.end_date, day(-1));
 assert.equal(lines(pdfAcc).find((l) => l.rowid === transfer).num_releve, day(-15).slice(0, 7).replace('-', ''));
 assert.match(tick(['reconcile', 'upload', pdfAcc, 'scan.pdf'], pdf([])), /no transactions found in the PDF/);
+
+step('lines from before the books are set aside; a fee the donor covered is no fee');
+const gb = account(`Givebutter R${stamp}`);
+line(gb, -20, 0.01, 'Opening balance');
+line(gb, -10, 40, 'Dues, fee covered');
+line(gb, -9, 25, 'Donation gross');
+line(gb, -9, -1.05, 'Givebutter fee');
+const gbCsv = [
+  '"Campaign Title","Reference Number","First Name","Last Name","Status Friendly","Amount","Fee","Fee Covered","Donated","Payout","Transaction Date (UTC)"',
+  `"CGW Membership","111","Old","Member","Succeeded","$40.00","$1.50","$1.50","$40.00","$40.00","${day(-400)} 10:00:00"`,
+  `"One Time Donation","112","Old","Donor","Succeeded","$700.00","$21.22","","$700.00","$678.78","${day(-390)} 10:00:00"`,
+  `"CGW Membership","113","Ann","Covered","Succeeded","$40.00","$1.50","$1.50","$40.00","$40.00","${day(-10)} 10:00:00"`,
+  `"One Time Donation","114","Bob","Gives","Succeeded","$25.00","$1.05","","$25.00","$23.95","${day(-9)} 10:00:00"`,
+].join('\n');
+assert.match(tick(['reconcile', 'upload', gb, 'givebutter.csv'], gbCsv), /4 transactions read from givebutter\.csv, 3 entries reconciled\./);
+assert.equal(json('reconcile', 'open', gb).length, 0, 'no fee line for the covered fee; the old lines set aside');
+assert.equal(json('reconcile', 'aside', gb).before, 3, 'two old payments and the old fee');
+assert.equal(json('reconcile', 'missing', gb).length, 0, 'the opening balance is not a missing transaction');
+
+step('the same month from two exports: the second is a duplicate; an entry reconciled by hand is found');
+const dup = account(`Dup R${stamp}`);
+line(dup, -30, 500, 'Opening balance');
+line(dup, -6, -75, 'Electric');
+const byHand = line(dup, -5, -19.99, 'Software');
+assert.match(tick(['reconcile', 'force', byHand]), /Reconciled/);
+tick(['reconcile', 'upload', dup, 'month.csv'], `Date,Description,Amount,Balance\n${day(-6)},ELECTRIC CO,-75.00,425.00\n`);
+const again = `OFXHEADER:100\n<OFX><STMTTRN><DTPOSTED>${day(-6).replace(/-/g, '')}<TRNAMT>-75.00<FITID>E1<NAME>ELECTRIC</STMTTRN><STMTTRN><DTPOSTED>${day(-5).replace(/-/g, '')}<TRNAMT>-19.99<FITID>S1<NAME>SOFTWARE</STMTTRN></OFX>`;
+tick(['reconcile', 'upload', dup, 'month.qfx'], again);
+assert.equal(json('reconcile', 'open', dup).length, 0);
+assert.deepEqual(json('reconcile', 'aside', dup), { already: 1, duplicate: 1 });
+
+step('a statement against Dolibarr: where a difference comes from');
+const cmpAcc = account(`Compare R${stamp}`);
+line(cmpAcc, -40, 1000, 'Opening balance, typed wrong');
+line(cmpAcc, -8, 200, 'Deposit');
+const cmpCsv = `Date,Description,Withdrawals,Deposits,Balance\n${day(-4)},CHECK 1186,1142.00,,8.00\n${day(-8)},DEPOSIT,,200.00,1150.00\n`;
+tick(['reconcile', 'upload', cmpAcc, 'compare.csv'], cmpCsv);
+const cf = json('reconcile', 'files', cmpAcc)[0];
+assert.equal(Number(cf.begin_balance), 950, 'the balance before the first line');
+const cmp = json('reconcile', 'compare', cf.rowid);
+assert.deepEqual(cmp.stmt, { begin: 950, in: 200, out: 1142, end: 8 });
+assert.deepEqual(cmp.doli, { begin: 1000, in: 200, out: 0, end: 1200 }, 'Dolibarr: 50 too high at the start, the check never entered');
+const check = json('reconcile', 'open', cmpAcc)[0];
+assert.match(tick(['reconcile', 'why', check.rowid]), /Nothing like it in Dolibarr/);
 
 step('a file that is not a statement is refused');
 assert.match(tick(['reconcile', 'upload', chk, 'notes.csv'], 'hello,world\n1,2\n'), /no transactions found/);
