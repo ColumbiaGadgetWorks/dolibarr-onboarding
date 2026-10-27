@@ -507,6 +507,17 @@ Each statement line is matched to an unreconciled entry of the same account with
 amount, up to 5 days apart (setup page, Reconciling), the closest first. A payment shown with
 its fee matches either a full-amount entry plus a fee entry, or one entry for what was left
 after the fee. Matched entries are reconciled with the month (`YYYYMM`) as statement number.
+More is matched without anyone: entries typed as one total for many lines (a month of $1
+Venmo sodas and their fees, card purchases recorded as the payment that paid them) are matched
+to the lines from the 45 days before them that add up to them exactly; and the other half of a
+transfer between our own accounts (a Givebutter payout, a card payment) is reconciled once the
+side on the other account's statement is. Where an export gives what actually arrived (PayPal's
+Net, Givebutter's Payout), the fee is the difference, so no fee line appears where nothing was
+taken. An entry no statement shows that has a twin (the same amount a few days away, matched)
+is offered as a double entry: **Fix the double entry** keeps the copy linked to the member or
+payment and deletes the other. The PayPal sync uses a PayPal entry the treasurer already typed in
+(the same amount, three days either side, linked to nothing) instead of adding a second one.
+
 Some lines need nobody and are set aside, with a count shown: lines dated before the
 account's first entry in Dolibarr (an export reaching back years before the books started),
 the same transaction from a second upload (the CSV and the PDF of one month), and lines whose
