@@ -16,6 +16,8 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
+ *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | decide ID add|ignore|match [LINE] | force LINE
+ *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
  *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
 
@@ -416,6 +418,71 @@ if ($job == 'daily') {
 			unset($row->token);
 		}
 		echo json_encode($row)."\n";
+	}
+} elseif ($job == 'reconcile') {
+	// Reconcile bank accounts, without the page.
+	dol_include_once('/onboarding/class/reconcile.class.php');
+	$rec = new OnboardingReconcile($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'upload') {
+		$tmp = tempnam(sys_get_temp_dir(), 'stmt');
+		file_put_contents($tmp, file_get_contents('php://stdin'));
+		echo $rec->upload((int) $argv[3], $tmp, $argv[4], $user)."\n";
+		@unlink($tmp);
+	} elseif ($what == 'paypal') {
+		echo $rec->paypal($user)."\n";
+	} elseif ($what == 'daily') {
+		echo $rec->daily()."\n";
+	} elseif ($what == 'open') {
+		echo json_encode($rec->open((int) $argv[3]))."\n";
+	} elseif ($what == 'missing') {
+		echo json_encode($rec->missing((int) $argv[3]))."\n";
+	} elseif ($what == 'files') {
+		echo json_encode($rec->files((int) $argv[3]))."\n";
+	} elseif ($what == 'lines') {
+		$out = array();
+		$res = $db->query("SELECT rowid, dateo, amount, label, rappro, num_releve FROM ".$db->prefix()."bank WHERE fk_account = ".((int) $argv[3])." ORDER BY rowid");
+		while ($res && ($o = $db->fetch_object($res))) {
+			$out[] = $o;
+		}
+		echo json_encode($out)."\n";
+	} elseif ($what == 'decide') {
+		echo $rec->decide((int) $argv[3], $argv[4], isset($argv[5]) ? (int) $argv[5] : 0, $user)."\n";
+	} elseif ($what == 'force') {
+		echo $rec->forceLine((int) $argv[3], $user)."\n";
+	}
+} elseif ($job == 'filing') {
+	// Yearly filings: run the daily step as if it were DAY (Y-m-d), and fixtures.
+	dol_include_once('/onboarding/class/filing.class.php');
+	$fi = new OnboardingFiling($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'run') {
+		OnboardingService::$now = strtotime($argv[3].' 12:00:00');
+		echo $fi->run()."\n";
+	} elseif ($what == 'link') {
+		$f = $fi->fetchFy((int) $argv[3]);
+		echo ($f ? $fi->link($f->rowid, $argv[4]) : '')."\n";
+	} elseif ($what == 'show') {
+		$f = $fi->fetchFy((int) $argv[3]);
+		if ($f) {
+			$f->missing = $fi->missingCount($f);
+			$f->form = $fi->form($f);
+		}
+		echo json_encode($f)."\n";
+	} elseif ($what == 'line') {
+		// line ACCOUNT DAY AMOUNT LABEL
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$a = new Account($db);
+		$a->fetch((int) $argv[3]);
+		echo $a->addline(strtotime($argv[4].' 12:00:00'), 'VIR', $argv[6], (float) $argv[5], '', 0, $user)."\n";
+	} elseif ($what == 'reconcile') {
+		$db->query("UPDATE ".$db->prefix()."bank SET rappro = 1, num_releve = '".$db->escape($argv[4])."' WHERE fk_account = ".((int) $argv[3])." AND dateo >= '".$db->escape($argv[4])."-01' AND dateo < '".date('Y-m-d', strtotime($argv[4].'-01 12:00:00 +1 month'))."'");
+		echo "ok\n";
+	} elseif ($what == 'reset') {
+		foreach (array('onboarding_filing_event', 'onboarding_filing_doc', 'onboarding_filing') as $t) {
+			$db->query("DELETE FROM ".$db->prefix().$t);
+		}
+		echo "ok\n";
 	}
 } elseif ($job == 'reinit') {
 	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';

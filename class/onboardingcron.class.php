@@ -68,6 +68,24 @@ class OnboardingCron
 		dol_include_once('/onboarding/class/mailgate.class.php');
 		$gate = new OnboardingMailGate($this->db);
 		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$training->expireRegistrations().'; '.$purchase->purge().'; '.$svc->fetchDocs().'; '.$gate->daily();
+		dol_include_once('/onboarding/class/filing.class.php');
+		try {
+			$this->output .= '; '.(new OnboardingFiling($this->db, $svc))->run();
+			$svc->alertClear('cron-filings', 'The yearly filings step of the daily job runs cleanly again.');
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			$svc->alert('cron-filings', 'The yearly filings job failed', 'The yearly filings step of "Onboarding: payment reminders, lapses and cleanup" stopped with: '.$e->getMessage()."\n\nThe treasurer is not being reminded about the tax filings until it runs cleanly.");
+			return 1;
+		}
+		dol_include_once('/onboarding/class/reconcile.class.php');
+		try {
+			$this->output .= '; '.(new OnboardingReconcile($this->db, $svc))->daily();
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			$svc->alert('cron-reconcile', 'Reconciling bank accounts failed', 'The reconciling step of "Onboarding: payment reminders, lapses and cleanup" stopped with: '.$e->getMessage());
+			return 1;
+		}
+		$svc->alertClear('cron-reconcile', 'Reconciling bank accounts works again.');
 		return 0;
 	}
 

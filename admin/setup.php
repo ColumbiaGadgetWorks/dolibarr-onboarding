@@ -26,6 +26,15 @@ if (!$user->admin) {
 $svc = new OnboardingService($db);
 $docs = $svc->docs();
 
+/**
+ * @return string The page to go back to after an update: a path on this site, or ''
+ */
+function onboarding_back()
+{
+	$back = (string) GETPOST('backtopage', 'alphanohtml');
+	return preg_match('#^/(?![/\\\\])[^\s\\\\]*$#', $back) ? $back : '';
+}
+
 // name => array(label, kind, help). Kinds: text, secret, area.
 $sections = array(
 	'Website connection' => array(
@@ -103,6 +112,25 @@ $sections = array(
 	'Purchase requests' => array(
 		'ONBOARDING_PURCHASE_LEAD_LIMIT' => array('Zone lead limit', 'text', 'Largest request a zone lead may approve alone, in dollars.'),
 		'ONBOARDING_PURCHASE_RECEIPT_DAYS' => array('Receipt within (days)', 'text', 'A reimbursement must be filed within this many days of buying. Keeps reimbursements tax free for the member under the IRS accountable plan rules.'),
+	),
+	'Yearly filings' => array(
+		'ONBOARDING_FILING_AUTOSTART' => array('Open each year by itself (1 or 0)', 'text', 'Default 1: the daily job opens the year and emails whoever holds the treasurer tag (else the president). 0: only the Start button on CGW, Yearly filings opens it. The fiscal year comes from Setup, Company (fiscal year start month).'),
+		'ONBOARDING_FILING_START_DAYS' => array('Open it this many days after the year ends', 'text', 'Default 15, so the last month\'s statements are out.'),
+		'ONBOARDING_FILING_REMIND_DAYS' => array('Remind the treasurer every (days)', 'text', 'Default 7, until the statements are in, then until both filings are marked done.'),
+		'ONBOARDING_FILING_ESCALATE' => array('Tell the board (days before due)', 'text', 'Default 30,7,0: the rest of the board (president, vice president, secretary, directors) is emailed this many days before the IRS due date while it is not filed, then the same before the state due date.'),
+		'ONBOARDING_FILING_ACCOUNTS' => array('Money accounts', 'text', 'Bank accounts (ref or label, comma separated) whose monthly statements are asked for. Empty: every open bank account in Dolibarr.'),
+		'ONBOARDING_FILING_YEARLY' => array('Yearly reports to ask for', 'area', 'One per line, "Name: what to upload". A line whose name is part of a money account\'s name is skipped (that account\'s statements are already asked for). Empty: Givebutter report, 1099-K, Venmo, cash box.'),
+		'ONBOARDING_FILING_EIN' => array('EIN', 'text', 'Empty: Setup, Company, professional ID 1.'),
+		'ONBOARDING_FILING_LEGAL_NAME' => array('Legal name', 'text', 'Empty: the company name in Setup, Company.'),
+		'ONBOARDING_FILING_ADDRESS' => array('Mailing address', 'text', 'Empty: the address in Setup, Company.'),
+		'ONBOARDING_FILING_OFFICER' => array('Principal officer', 'text', 'Empty: whoever holds the president tag.'),
+		'ONBOARDING_FILING_STATE' => array('State', 'text', 'Default Missouri.'),
+		'ONBOARDING_FILING_STATE_ID' => array('State charter number', 'text', 'Empty: Setup, Company, professional ID 2.'),
+		'ONBOARDING_FILING_STATE_DUE' => array('State report due (month-day)', 'text', 'Default 10-27, the incorporation anniversary.'),
+		'ONBOARDING_FILING_STATE_URL' => array('Where the state report is filed', 'text', 'Default https://bsd.sos.mo.gov/ (Missouri Secretary of State, Business Services).'),
+	),
+	'Reconciling' => array(
+		'ONBOARDING_RECONCILE_DAYS' => array('Days apart a statement line and its entry may be', 'text', 'Default 5. Reconcile bank accounts matches a statement line to the Dolibarr entry with the same amount at most this many days away (banks post a day or two after PayPal or Givebutter send).'),
 	),
 	'Reminders' => array(
 		'ONBOARDING_REMINDER_DAYS' => array('Send reminders after (days)', 'text', 'Comma separated days after a payment is cancelled or missed, for example 3,7,14.'),
@@ -190,14 +218,21 @@ if ($action == 'selfupdate' || $action == 'checkupdate') {
 	setEventMessages($r['message'], null, $r['ok'] ? 'mesgs' : 'errors');
 	// The new code is only loaded by the next request: turn the module off and
 	// on there, so it sets itself up with its own installer.
-	header('Location: '.$_SERVER['PHP_SELF'].($r['ok'] ? '?action=reenable&token='.newToken() : ''));
+	$back = onboarding_back();
+	if ($r['ok']) {
+		header('Location: '.$_SERVER['PHP_SELF'].'?action=reenable&token='.newToken().($back !== '' ? '&backtopage='.urlencode($back) : ''));
+	} else {
+		header('Location: '.($back !== '' ? $back : $_SERVER['PHP_SELF']));
+	}
 	exit;
 }
 if ($action == 'reenable') {
 	dol_include_once('/onboarding/class/selfupdate.class.php');
 	$err = (new OnboardingSelfUpdate($db))->reenable();
 	setEventMessages($err === '' ? 'Member onboarding was turned off and on again, so version '.OnboardingSelfUpdate::installed().' is set up. Your settings are kept.' : $err, null, $err === '' ? 'mesgs' : 'errors');
-	header('Location: '.$_SERVER['PHP_SELF']);
+	// Back where the Update button was pressed (the CGW home page), else here.
+	$back = onboarding_back();
+	header('Location: '.($back !== '' ? $back : $_SERVER['PHP_SELF']));
 	exit;
 }
 if (in_array($action, array('homeeveryone', 'homeoff', 'homereset'), true)) {
@@ -373,6 +408,10 @@ foreach ($sections as $title => $fields) {
 			}
 			if ($name == 'ONBOARDING_AGREEMENT_TEXT' && $value === '') {
 				$shown = $docs['agreement']['text'];
+			}
+			if ($name == 'ONBOARDING_FILING_YEARLY' && $value === '') {
+				dol_include_once('/onboarding/class/filing.class.php');
+				$shown = OnboardingFiling::DEFAULT_YEARLY;
 			}
 			if ($name == 'ONBOARDING_HOME_YAML') {
 				$shown = OnboardingHome::layoutText();

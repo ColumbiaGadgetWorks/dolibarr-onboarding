@@ -91,7 +91,7 @@ class OnboardingPaypal
 	 * @param string $path Path with query
 	 * @return array|null
 	 */
-	private function get($path)
+	public function get($path)
 	{
 		$token = $this->token();
 		if ($token === '') {

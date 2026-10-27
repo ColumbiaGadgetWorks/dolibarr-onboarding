@@ -49,6 +49,13 @@ check 'admin/setup.php' 'Never held for'
 check 'purchases.php' 'PR-0'
 check 'purchases.php' 'Paid'
 check 'admin/setup.php' 'Purchase request roles'
+check 'filings.php' 'Yearly filings'
+check 'reconcile.php' 'Upload a statement export'
+check 'reconcile.php' 'Nothing to check'
+check 'admin/setup.php' 'Days apart a statement line'
+check 'filings.php' 'Gross receipts'
+check 'admin/setup.php' 'Tell the board (days before due)'
+check 'attention.php' 'filings.php'
 check 'admin/setup.php' 'Create the role tags'
 check 'training-tools.php' '3D printers'
 check 'training-tools.php' 'Closed days'
@@ -107,4 +114,11 @@ T4=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/setup.php" | grep -o 'acti
 curl -s -b "$JAR" -o /dev/null "$BASE/custom/onboarding/admin/setup.php?action=reenable&token=$T4"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-Onboarding-Key: sandbox-key-sandbox-key-sandbox-key' "$BASE/custom/onboarding/public/api.php?action=docs")
 if [ "$code" = "200" ]; then echo "ok   module off and on from the setup page"; else echo "FAIL module off and on: the API answers $code"; fail=1; fi
+# After an update from the CGW home page's button, back to that page; never to another site.
+T6=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/setup.php" | grep -o 'action=checkupdate&\(amp;\)\?token=[a-z0-9]*' | head -1 | sed 's/.*token=//')
+to=$(curl -s -b "$JAR" -o /dev/null -w '%{redirect_url}' "$BASE/custom/onboarding/admin/setup.php?action=reenable&token=$T6&backtopage=%2Fcustom%2Fonboarding%2Fhome.php%3Fmainmenu%3Dcgw")
+case "$to" in */custom/onboarding/home.php?mainmenu=cgw) echo "ok   back to the page after an update";; *) echo "FAIL back after an update: $to"; fail=1;; esac
+T7=$(curl -s -b "$JAR" "$BASE/custom/onboarding/admin/setup.php" | grep -o 'action=checkupdate&\(amp;\)\?token=[a-z0-9]*' | head -1 | sed 's/.*token=//')
+to=$(curl -s -b "$JAR" -o /dev/null -w '%{redirect_url}' "$BASE/custom/onboarding/admin/setup.php?action=reenable&token=$T7&backtopage=%2F%2Fevil.example%2F")
+case "$to" in *evil*) echo "FAIL update went to another site: $to"; fail=1;; *) echo "ok   update never goes to another site";; esac
 exit $fail
