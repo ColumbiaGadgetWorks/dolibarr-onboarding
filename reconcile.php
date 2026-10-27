@@ -50,10 +50,36 @@ if ($canwrite && $action !== '') {
 			$n += $rec->match((int) $a->rowid, $user);
 		}
 		$msgs[] = $n.' more entries reconciled.';
-	} elseif (in_array($action, array('add', 'ignore', 'match'), true)) {
-		$msgs[] = $rec->decide((int) GETPOST('id', 'int'), $action, (int) GETPOST('line', 'int'), $user);
+	} elseif ($action == 'decide') {
+		// One line's own button ("add:12"), or the ticked lines with a bulk button.
+		$one = GETPOST('one', 'alphanohtml');
+		$picks = (array) GETPOST('match', 'array');
+		if (preg_match('/^(add|ignore|match):(\d+)$/', $one, $m)) {
+			$msgs[] = $rec->decide((int) $m[2], $m[1], isset($picks[$m[2]]) ? (int) $picks[$m[2]] : 0, $user);
+		} else {
+			$what = GETPOST('bulk', 'aZ09');
+			$n = 0;
+			foreach ((array) GETPOST('ids', 'array') as $id) {
+				if (in_array($what, array('add', 'ignore'), true) && strpos($rec->decide((int) $id, $what, 0, $user), 'Error') !== 0) {
+					$n++;
+				}
+			}
+			$msgs[] = $n ? ($what == 'add' ? $n.' lines added to Dolibarr and reconciled. Give them categories (or link them) from the account\'s entries.' : $n.' lines left out.') : 'Error: tick some lines first.';
+		}
 	} elseif ($action == 'force') {
-		$msgs[] = $rec->forceLine((int) GETPOST('line', 'int'), $user);
+		$n = 0;
+		foreach ((array) GETPOST('lines', 'array') as $l) {
+			$rec->forceLine((int) $l, $user);
+			$n++;
+		}
+		$one = (int) GETPOST('line', 'int');
+		if ($one) {
+			$rec->forceLine($one, $user);
+			$n++;
+		}
+		$msgs[] = $n ? $n.' entries reconciled.' : 'Error: tick some entries first.';
+	} elseif ($action == 'forget') {
+		$msgs[] = $rec->forget((int) GETPOST('file', 'int'));
 	}
 	foreach ($msgs as $m) {
 		setEventMessages($m, null, strpos($m, 'Error') === 0 || strpos($m, 'failed') !== false ? 'errors' : 'mesgs');
@@ -104,55 +130,113 @@ if ($canwrite && $accounts) {
 }
 
 // What a person needs to look at, per account.
+print '<script>function onbTick(box, name, form){document.querySelectorAll(\'input[name="\'+name+\'"][form="\'+form+\'"]\').forEach(function(c){c.checked=box.checked;});}</script>';
 foreach ($accounts as $a) {
 	$aid = (int) $a->rowid;
 	$open = $rec->open($aid);
 	$missing = $rec->missing($aid);
 	$files = $rec->files($aid);
+	$aside = $rec->setAside($aid);
 	if (!$open && !$missing && !$files) {
 		continue;
 	}
-	print '<div id="acct-'.$aid.'"></div><table class="noborder centpercent"><tr class="liste_titre"><td colspan="5">'.dol_escape_htmltag($a->label).'</td></tr>';
+	// A form cannot hold table rows, so the rows' fields name their form.
+	$fd = 'dec-'.$aid;
+	$ff = 'frc-'.$aid;
+	if ($canwrite) {
+		print '<form id="'.$fd.'" method="POST" action="'.$_SERVER['PHP_SELF'].'#acct-'.$aid.'">'.$token.'<input type="hidden" name="action" value="decide"></form>';
+		print '<form id="'.$ff.'" method="POST" action="'.$_SERVER['PHP_SELF'].'#acct-'.$aid.'">'.$token.'<input type="hidden" name="action" value="force"></form>';
+	}
+	print '<div id="acct-'.$aid.'"></div><table class="noborder centpercent"><tr class="liste_titre"><td colspan="6">'.dol_escape_htmltag($a->label).'</td></tr>';
+	if ($aside) {
+		$start = $rec->booksStart($aid);
+		$said = array();
+		if (!empty($aside['before'])) {
+			$said[] = $aside['before'].' from before this account\'s first entry in Dolibarr'.($start ? ' ('.dol_print_date($db->jdate($start), 'day').')' : '');
+		}
+		if (!empty($aside['duplicate'])) {
+			$said[] = $aside['duplicate'].' that another upload already had';
+		}
+		if (!empty($aside['already'])) {
+			$said[] = $aside['already'].' matched to entries reconciled earlier by hand';
+		}
+		print '<tr class="oddeven"><td colspan="6" class="opacitymedium small">Set aside without asking: '.dol_escape_htmltag(implode('; ', $said)).'.</td></tr>';
+	}
 	if ($open) {
-		print '<tr class="liste_titre"><td colspan="5">On the statement, not in Dolibarr ('.count($open).'): add it, say which entry it is, or leave it out</td></tr>';
+		$key = 'ids-'.$aid;
+		print '<tr class="liste_titre"><td colspan="6">On the statement, not in Dolibarr ('.count($open).')</td></tr>';
+		if ($canwrite) {
+			print '<tr class="oddeven"><td colspan="6"><label><input type="checkbox" onclick="onbTick(this, \'ids[]\', \''.$fd.'\')"> all</label> &nbsp; ';
+			print '<button type="submit" form="'.$fd.'" name="bulk" value="add" class="button smallpaddingimp" onclick="return confirm(\'Make a Dolibarr entry for each ticked line and reconcile it?\')">Add ticked to Dolibarr</button> ';
+			print '<button type="submit" form="'.$fd.'" name="bulk" value="ignore" class="button smallpaddingimp">Leave ticked out</button>';
+			print ' <span class="opacitymedium small">Add when the line is real and nobody entered it (a fee, a service charge, a sale). Leave out when it is not money of this account.</span></td></tr>';
+		}
 		foreach ($open as $r) {
-			print '<tr class="oddeven"><td class="nowraponall">'.dol_print_date($db->jdate($r->dateo), 'day').'</td><td class="right nowraponall">'.price($r->amount).'</td><td>'.dol_escape_htmltag($r->label).($r->kind == 'fee' ? ' <span class="opacitymedium">(the fee on a payment)</span>' : '').'</td><td class="nowraponall">';
+			print '<tr class="oddeven"><td class="nowraponall">'.($canwrite ? '<input type="checkbox" form="'.$fd.'" name="ids[]" value="'.((int) $r->rowid).'"> ' : '').dol_print_date($db->jdate($r->dateo), 'day').'</td><td class="right nowraponall">'.price($r->amount).'</td>';
+			print '<td>'.dol_escape_htmltag($r->label).($r->kind == 'fee' ? ' <span class="opacitymedium">(the fee on a payment)</span>' : '').'<br><span class="opacitymedium small">'.dol_escape_htmltag($rec->why($r)).'</span></td><td class="nowraponall">';
 			if ($canwrite) {
-				print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block">'.$token.'<input type="hidden" name="id" value="'.((int) $r->rowid).'"><input type="hidden" name="action" value="match"><select name="line" class="maxwidth300"><option value="">It is this entry...</option>';
+				print '<select form="'.$fd.'" name="match['.((int) $r->rowid).']" class="maxwidth300"><option value="">It is this entry...</option>';
 				foreach ($rec->nearby($r) as $l) {
 					print '<option value="'.((int) $l->rowid).'">'.dol_escape_htmltag(dol_print_date($db->jdate($l->dateo), 'day').' '.price($l->amount).' '.dol_trunc($l->label, 40)).'</option>';
 				}
-				print '</select> <button type="submit" class="button smallpaddingimp">Match</button></form>';
+				print '</select> <button type="submit" form="'.$fd.'" name="one" value="match:'.((int) $r->rowid).'" class="button smallpaddingimp">Match</button>';
 			}
-			print '</td><td class="right nowraponall">';
+			print '</td><td class="right nowraponall" colspan="2">';
 			if ($canwrite) {
-				print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block">'.$token.'<input type="hidden" name="id" value="'.((int) $r->rowid).'"><button type="submit" name="action" value="add" class="button smallpaddingimp" title="Make a Dolibarr entry for it and reconcile it">Add to Dolibarr</button> <button type="submit" name="action" value="ignore" class="button smallpaddingimp" title="Not a real transaction, or already handled another way">Leave out</button></form>';
+				print '<button type="submit" form="'.$fd.'" name="one" value="add:'.((int) $r->rowid).'" class="button smallpaddingimp" title="Make a Dolibarr entry for it and reconcile it">Add</button> <button type="submit" form="'.$fd.'" name="one" value="ignore:'.((int) $r->rowid).'" class="button smallpaddingimp" title="Not a real transaction of this account, or already handled another way">Leave out</button>';
 			}
 			print '</td></tr>';
 		}
 	}
 	if ($missing) {
-		print '<tr class="liste_titre"><td colspan="5">In Dolibarr, not on any statement uploaded for those days ('.count($missing).'): fix or delete it, or reconcile it if you checked it</td></tr>';
+		print '<tr class="liste_titre"><td colspan="6">In Dolibarr, not on any statement uploaded for those days ('.count($missing).'): fix or delete it, or reconcile it if you checked it</td></tr>';
+		if ($canwrite) {
+			print '<tr class="oddeven"><td colspan="6"><label><input type="checkbox" onclick="onbTick(this, \'lines[]\', \''.$ff.'\')"> all</label> &nbsp; <button type="submit" form="'.$ff.'" class="button smallpaddingimp">Reconcile ticked anyway</button></td></tr>';
+		}
 		foreach ($missing as $l) {
-			print '<tr class="oddeven"><td class="nowraponall">'.dol_print_date($db->jdate($l->dateo), 'day').'</td><td class="right nowraponall">'.price($l->amount).'</td><td>'.dol_escape_htmltag($l->label).'</td><td><a href="'.DOL_URL_ROOT.'/compta/bank/line.php?rowid='.((int) $l->rowid).'">Open the entry</a></td><td class="right">';
-			if ($canwrite) {
-				print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block">'.$token.'<input type="hidden" name="action" value="force"><input type="hidden" name="line" value="'.((int) $l->rowid).'"><button type="submit" class="button smallpaddingimp">Reconcile anyway</button></form>';
-			}
-			print '</td></tr>';
+			print '<tr class="oddeven"><td class="nowraponall">'.($canwrite ? '<input type="checkbox" form="'.$ff.'" name="lines[]" value="'.((int) $l->rowid).'"> ' : '').dol_print_date($db->jdate($l->dateo), 'day').'</td><td class="right nowraponall">'.price($l->amount).'</td><td colspan="3">'.dol_escape_htmltag($l->label).'</td><td class="right"><a href="'.DOL_URL_ROOT.'/compta/bank/line.php?rowid='.((int) $l->rowid).'">Open the entry</a></td></tr>';
 		}
 	}
 	if (!$open && !$missing) {
-		print '<tr class="oddeven"><td colspan="5"><span class="ok">Nothing to check.</span></td></tr>';
+		print '<tr class="oddeven"><td colspan="6"><span class="ok">Nothing to check.</span></td></tr>';
 	}
-	// The balance each statement ends on, against Dolibarr's.
+	// Each statement against Dolibarr: where a balance difference comes from.
+	$cmp = array();
 	foreach ($files as $f) {
-		if ($f->end_balance === null || !$f->end_date) {
-			continue;
+		if (($c = $rec->compare($f))) {
+			$cmp[] = array($f, $c);
 		}
-		$day = substr((string) $f->end_date, 0, 10);
-		$ours = $rec->balanceAt($aid, $day);
-		$ok = abs($ours - (float) $f->end_balance) < 0.005;
-		print '<tr class="oddeven"><td colspan="5" class="small">'.dol_escape_htmltag($f->original).': the statement ends on '.dol_print_date($db->jdate($f->end_date), 'day').' at <strong>'.price($f->end_balance).'</strong>; Dolibarr has <strong>'.price($ours).'</strong> '.($ok ? '<span class="ok">&#10003; the same</span>' : '<span class="error">a difference of '.price(round($ours - (float) $f->end_balance, 2)).'</span> (usual causes: a transfer entered on one side only, a fee left out, something dated in the wrong month)').'</td></tr>';
+	}
+	if ($cmp) {
+		print '<tr class="liste_titre"><td>Statement</td><td></td><td class="right">Starts at</td><td class="right">Money in</td><td class="right">Money out</td><td class="right">Ends at</td></tr>';
+		foreach ($cmp as $fc) {
+			list($f, $c) = $fc;
+			$cell = function ($k) use ($c) {
+				$diff = round($c['doli'][$k] - $c['stmt'][$k], 2);
+				return price($c['stmt'][$k]).'<br>'.price($c['doli'][$k]).'<br>'.(abs($diff) < 0.005 ? '<span class="ok">&#10003;</span>' : '<span class="error">'.($diff > 0 ? '+' : '').price($diff).'</span>');
+			};
+			print '<tr class="oddeven"><td class="small">'.dol_escape_htmltag($f->original).'<br>'.dol_print_date($db->jdate($f->begin_date), 'day').' to '.dol_print_date($db->jdate($f->end_date), 'day');
+			if ($canwrite && $f->source == 'upload') {
+				print '<br><a class="opacitymedium" href="'.$_SERVER['PHP_SELF'].'?action=forget&file='.((int) $f->rowid).'&token='.newToken().'" onclick="return confirm(\'Forget the lines of this upload that matched nothing?\')">forget its unmatched lines</a>';
+			}
+			print '</td><td class="small opacitymedium">statement<br>Dolibarr<br>difference</td><td class="right">'.$cell('begin').'</td><td class="right">'.$cell('in').'</td><td class="right">'.$cell('out').'</td><td class="right">'.$cell('end').'</td></tr>';
+			$why = array();
+			$db0 = round($c['doli']['begin'] - $c['stmt']['begin'], 2);
+			if (abs($db0) >= 0.005) {
+				$why[] = 'Dolibarr was already '.price(abs($db0)).' '.($db0 > 0 ? 'higher' : 'lower').' when this statement starts: the opening balance, or an earlier month, is off';
+			}
+			$di = round($c['doli']['in'] - $c['stmt']['in'], 2);
+			if (abs($di) >= 0.005) {
+				$why[] = 'money in: Dolibarr has '.price(abs($di)).' '.($di > 0 ? 'more (an entry twice, a transfer counted as income, or something dated in this month that the bank put in another)' : 'less (deposits not entered: see the lines above)');
+			}
+			$do = round($c['doli']['out'] - $c['stmt']['out'], 2);
+			if (abs($do) >= 0.005) {
+				$why[] = 'money out: Dolibarr has '.price(abs($do)).' '.($do > 0 ? 'more (an entry twice, or dated in the wrong month)' : 'less (checks, fees or payments not entered: see the lines above)');
+			}
+			if ($why) {
+				print '<tr class="oddeven"><td></td><td colspan="5" class="small">'.dol_escape_htmltag(ucfirst(implode('; ', $why))).'.</td></tr>';
+			}
+		}
 	}
 	print '</table><br>';
 }

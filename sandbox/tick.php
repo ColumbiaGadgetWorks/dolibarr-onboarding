@@ -16,7 +16,7 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
- *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | decide ID add|ignore|match [LINE] | force LINE
+ *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | compare FILE | aside ACCOUNT | why ROW | decide ID add|ignore|match [LINE] | force LINE
  *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
  *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
@@ -446,6 +446,13 @@ if ($job == 'daily') {
 			$out[] = $o;
 		}
 		echo json_encode($out)."\n";
+	} elseif ($what == 'compare') {
+		$res = $db->query("SELECT * FROM ".$db->prefix()."onboarding_stmt_file WHERE rowid = ".((int) $argv[3]));
+		echo json_encode($rec->compare($db->fetch_object($res)))."\n";
+	} elseif ($what == 'aside') {
+		echo json_encode($rec->setAside((int) $argv[3]))."\n";
+	} elseif ($what == 'why') {
+		echo $rec->why($rec->row((int) $argv[3]))."\n";
 	} elseif ($what == 'decide') {
 		echo $rec->decide((int) $argv[3], $argv[4], isset($argv[5]) ? (int) $argv[5] : 0, $user)."\n";
 	} elseif ($what == 'force') {

@@ -226,7 +226,7 @@ class OnboardingReconcile
 		$head = (string) @file_get_contents($path, false, null, 0, 4096);
 		if ($ext == 'pdf' || strpos($head, '%PDF') === 0) {
 			$pdf = self::readPdf((string) file_get_contents($path));
-			return array('rows' => $pdf['rows'], 'end' => $pdf['end'], 'error' => $pdf['rows'] ? '' : $name.': no transactions found in the PDF. A scanned statement (a picture of the page) has no text to read; download the statement from online banking, or its CSV export.');
+			return array('rows' => $pdf['rows'], 'end' => $pdf['end'], 'begin' => $pdf['begin'], 'error' => $pdf['rows'] ? '' : $name.': no transactions found in the PDF. A scanned statement (a picture of the page) has no text to read; download the statement from online banking, or its CSV export.');
 		}
 		if (in_array($ext, array('ofx', 'qfx', 'qbo'), true) || stripos($head, '<OFX>') !== false || stripos($head, 'OFXHEADER') !== false) {
 			return array('rows' => self::readOfx((string) file_get_contents($path)), 'error' => '');
@@ -302,7 +302,7 @@ class OnboardingReconcile
 		$rows = array();
 		$sign = 0;
 		$balance = null;
-		$end = null;
+		$begin = $end = null;
 		$prev = -1;
 		foreach ($lines as $line) {
 			$low = strtolower(trim($line));
@@ -318,8 +318,10 @@ class OnboardingReconcile
 				$prev = -1;
 				continue;
 			}
-			if (preg_match('/^(beginning|opening|previous|starting) balance\b.*?('.$money.')\s*$/', $plain, $m)) {
-				$balance = self::amount($m[2]);
+			if (preg_match('/^(beginning|opening|previous|starting) balance\b(.*?)('.$money.')\s*$/', $plain, $m)) {
+				$balance = self::amount($m[3]);
+				$d = $day(preg_match('/'.$dateRe.'/i', $m[2], $dm) ? $dm[0] : '');
+				$begin = array('date' => $d, 'balance' => (float) $balance);
 				$prev = -1;
 				continue;
 			}
@@ -379,7 +381,7 @@ class OnboardingReconcile
 				$prev = -1;
 			}
 		}
-		return array('rows' => $rows, 'end' => $end);
+		return array('rows' => $rows, 'end' => $end, 'begin' => $begin);
 	}
 
 	/**
@@ -429,6 +431,7 @@ class OnboardingReconcile
 			'fee' => array('fee', 'amount (fee)', 'fees'),
 			'net' => array('net', 'payout'),
 			'donated' => array('donated'),
+			'covered' => array('fee covered'),
 			'out' => array('withdrawals', 'withdrawal', 'debit', 'debits', 'amount debit', 'money out'),
 			'in' => array('deposits', 'deposit', 'credit', 'credits', 'amount credit', 'money in'),
 			'label' => array('description', 'name', 'payee', 'note', 'memo', 'transaction', 'type', 'transaction type', 'item title', 'campaign title', 'from', 'to'),
@@ -500,6 +503,11 @@ class OnboardingReconcile
 			$fee = $fee === null ? 0.0 : (float) $fee;
 			// A fee is money out of the account, whatever sign the column uses.
 			$fee = abs($fee) < 0.005 ? 0.0 : -abs($fee);
+			// Givebutter: a fee the donor chose to cover never left the organization's money.
+			$covered = self::amount($cell($row, 'covered'));
+			if ($covered !== null && abs($covered) + 0.005 >= abs($fee)) {
+				$fee = 0.0;
+			}
 			$alts = array();
 			foreach (array('net', 'donated') as $k) {
 				$v = self::amount($cell($row, $k));
@@ -554,14 +562,31 @@ class OnboardingReconcile
 				break;
 			}
 		}
+		// The balance it starts from: given, else the oldest line's balance less that line.
+		$begin = isset($file['begin']['balance']) ? (float) $file['begin']['balance'] : null;
+		$beginDate = isset($file['begin']['date']) ? (string) $file['begin']['date'] : '';
+		if ($begin === null) {
+			foreach ($newestFirst ? array_reverse($rows) : $rows as $r) {
+				if ($r['date'] === $from && $r['balance'] !== null) {
+					$begin = round((float) $r['balance'] - $r['amount'] - $r['fee'], 2);
+					$beginDate = date('Y-m-d', strtotime($from.' 12:00:00') - 86400);
+				}
+				break;
+			}
+		}
+		if ($begin !== null && $beginDate === '' && $from !== '') {
+			$beginDate = date('Y-m-d', strtotime($from.' 12:00:00') - 86400);
+		}
 		$fileId = 0;
 		if ($file['source'] == 'upload') {
 			// The same export uploaded again: one record of it.
 			$res = $this->db->query("SELECT rowid FROM ".$p."onboarding_stmt_file WHERE fk_account = ".((int) $accountId)." AND source = 'upload' AND original = '".$this->db->escape(dol_trunc($file['original'], 250, 'right', 'UTF-8', 1))."' AND date_from ".($from ? "= '".$from."'" : 'IS NULL')." AND date_to ".($to ? "= '".$to."'" : 'IS NULL')." AND nrows = ".count($rows));
 			$o = $res ? $this->db->fetch_object($res) : null;
 			if ($o) {
+				// Read again: its unmatched lines are read afresh, so a better reading replaces them.
 				$fileId = (int) $o->rowid;
-				$this->db->query("UPDATE ".$p."onboarding_stmt_file SET datec = '".$this->db->idate(OnboardingService::now())."' WHERE rowid = ".$fileId);
+				$this->db->query("DELETE FROM ".$p."onboarding_stmt WHERE fk_file = ".$fileId." AND status = 'open'");
+				$this->db->query("UPDATE ".$p."onboarding_stmt_file SET datec = '".$this->db->idate(OnboardingService::now())."', begin_balance = ".($begin !== null ? price2num($begin) : 'NULL').", begin_date = ".($beginDate ? "'".$beginDate."'" : 'NULL').", end_balance = ".($end !== null ? price2num($end) : 'NULL').", end_date = ".($endDate ? "'".$endDate."'" : 'NULL')." WHERE rowid = ".$fileId);
 			}
 		}
 		if ($file['source'] == 'api') {
@@ -575,7 +600,7 @@ class OnboardingReconcile
 			}
 		}
 		if (!$fileId) {
-			$this->db->query("INSERT INTO ".$p."onboarding_stmt_file (entity, fk_account, source, filename, original, date_from, date_to, end_balance, end_date, nrows, who, datec) VALUES (".((int) $conf->entity).", ".((int) $accountId).", '".$this->db->escape($file['source'])."', ".($file['filename'] !== '' ? "'".$this->db->escape($file['filename'])."'" : 'NULL').", '".$this->db->escape(dol_trunc($file['original'], 250, 'right', 'UTF-8', 1))."', ".($from ? "'".$from."'" : 'NULL').", ".($to ? "'".$to."'" : 'NULL').", ".($end !== null ? price2num($end) : 'NULL').", ".($endDate ? "'".$endDate."'" : 'NULL').", ".count($rows).", '".$this->db->escape(dol_trunc($file['who'], 250, 'right', 'UTF-8', 1))."', '".$this->db->idate(OnboardingService::now())."')");
+			$this->db->query("INSERT INTO ".$p."onboarding_stmt_file (entity, fk_account, source, filename, original, date_from, date_to, begin_balance, begin_date, end_balance, end_date, nrows, who, datec) VALUES (".((int) $conf->entity).", ".((int) $accountId).", '".$this->db->escape($file['source'])."', ".($file['filename'] !== '' ? "'".$this->db->escape($file['filename'])."'" : 'NULL').", '".$this->db->escape(dol_trunc($file['original'], 250, 'right', 'UTF-8', 1))."', ".($from ? "'".$from."'" : 'NULL').", ".($to ? "'".$to."'" : 'NULL').", ".($begin !== null ? price2num($begin) : 'NULL').", ".($beginDate ? "'".$beginDate."'" : 'NULL').", ".($end !== null ? price2num($end) : 'NULL').", ".($endDate ? "'".$endDate."'" : 'NULL').", ".count($rows).", '".$this->db->escape(dol_trunc($file['who'], 250, 'right', 'UTF-8', 1))."', '".$this->db->idate(OnboardingService::now())."')");
 			$fileId = (int) $this->db->last_insert_id($p.'onboarding_stmt_file');
 		}
 		$seen = array();
@@ -620,6 +645,11 @@ class OnboardingReconcile
 	{
 		$p = $this->db->prefix();
 		$w = self::window();
+		// Lines from before the account's first entry in Dolibarr: the books did not exist yet.
+		$start = $this->booksStart($accountId);
+		if ($start !== '') {
+			$this->db->query("UPDATE ".$p."onboarding_stmt SET status = 'ignored', note = 'before' WHERE fk_account = ".((int) $accountId)." AND status = 'open' AND dateo < '".$this->db->escape($start)."'");
+		}
 		$rows = array();
 		$res = $this->db->query("SELECT rowid, dateo, amount, alt_amount, kind, fk_pair FROM ".$p."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND status = 'open' ORDER BY dateo, rowid");
 		$from = $to = '';
@@ -684,7 +714,177 @@ class OnboardingReconcile
 				}
 			}
 		}
+		$this->settleLeftovers($accountId);
 		return $done;
+	}
+
+	/**
+	 * @param int $accountId Account
+	 * @return string Day of its first entry in Dolibarr (the opening balance), '' when it has none
+	 */
+	public function booksStart($accountId)
+	{
+		$res = $this->db->query("SELECT MIN(dateo) AS d FROM ".$this->db->prefix()."bank WHERE fk_account = ".((int) $accountId));
+		$o = $res ? $this->db->fetch_object($res) : null;
+		return $o && $o->d ? substr((string) $o->d, 0, 10) : '';
+	}
+
+	/**
+	 * Statement lines with no unreconciled entry that need no person:
+	 * - an entry of that amount nearby was reconciled earlier, by hand or before
+	 *   this page (and no other statement line claims it): matched to it;
+	 * - the same transaction from another upload of the account (a CSV and the
+	 *   PDF of the same month) that is already matched: left out as a duplicate.
+	 *
+	 * @param int $accountId Account
+	 * @return void
+	 */
+	private function settleLeftovers($accountId)
+	{
+		$p = $this->db->prefix();
+		$w = self::window();
+		$open = array();
+		$res = $this->db->query("SELECT rowid, fk_file, dateo, amount, alt_amount FROM ".$p."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND status = 'open' ORDER BY dateo, rowid");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$open[(int) $o->rowid] = $o;
+		}
+		if (!$open) {
+			return;
+		}
+		$amounts = function ($o) {
+			$a = array(number_format(round((float) $o->amount, 2), 2, '.', ''));
+			if ($o->alt_amount !== null && $o->alt_amount !== '') {
+				$a[] = number_format(round((float) $o->alt_amount, 2), 2, '.', '');
+			}
+			return $a;
+		};
+		// Reconciled entries no statement line points to.
+		$free = array();
+		$sql = "SELECT b.rowid, b.dateo, b.amount FROM ".$p."bank AS b WHERE b.fk_account = ".((int) $accountId)." AND b.rappro = 1";
+		$sql .= " AND NOT EXISTS (SELECT 1 FROM ".$p."onboarding_stmt AS s WHERE s.fk_bank = b.rowid)";
+		$res = $this->db->query($sql);
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$free[number_format(round((float) $o->amount, 2), 2, '.', '')][] = array((int) $o->rowid, substr((string) $o->dateo, 0, 10));
+		}
+		foreach ($open as $id => $o) {
+			$best = null;
+			foreach ($amounts($o) as $k) {
+				foreach (isset($free[$k]) ? $free[$k] : array() as $i => $f) {
+					$d = self::apart(substr((string) $o->dateo, 0, 10), $f[1]);
+					if ($d <= $w && ($best === null || $d < $best[0])) {
+						$best = array($d, $k, $i, $f[0]);
+					}
+				}
+			}
+			if ($best) {
+				$this->db->query("UPDATE ".$p."onboarding_stmt SET status = 'matched', note = 'already', fk_bank = ".((int) $best[3])." WHERE rowid = ".((int) $id));
+				unset($free[$best[1]][$best[2]], $open[$id]);
+			}
+		}
+		// The same line from another upload, already matched.
+		$taken = array();
+		foreach ($open as $id => $o) {
+			$in = implode(' OR ', array_map(function ($k) {
+				return 'ABS(amount - '.$k.') < 0.005';
+			}, $amounts($o)));
+			$d = substr((string) $o->dateo, 0, 10);
+			$sql = "SELECT rowid, fk_bank FROM ".$p."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND status IN ('matched', 'added') AND fk_file <> ".((int) $o->fk_file);
+			$sql .= " AND (".$in.") AND dateo >= '".date('Y-m-d', strtotime($d.' 12:00:00') - $w * 86400)."' AND dateo <= '".date('Y-m-d', strtotime($d.' 12:00:00') + $w * 86400)."'";
+			$sql .= " ORDER BY ABS(DATEDIFF(dateo, '".$d."')), rowid";
+			$res = $this->db->query($sql);
+			while ($res && ($t = $this->db->fetch_object($res))) {
+				if (!isset($taken[(int) $t->rowid])) {
+					$taken[(int) $t->rowid] = true;
+					$this->db->query("UPDATE ".$p."onboarding_stmt SET status = 'ignored', note = 'duplicate', fk_bank = ".($t->fk_bank ? (int) $t->fk_bank : 'NULL')." WHERE rowid = ".((int) $id));
+					break;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Why a statement line found no entry, in a few words, for the person looking.
+	 *
+	 * @param object $row Statement line
+	 * @return string
+	 */
+	public function why($row)
+	{
+		$p = $this->db->prefix();
+		$d = substr((string) $row->dateo, 0, 10);
+		$w = self::window();
+		$a = round((float) $row->amount, 2);
+		$res = $this->db->query("SELECT rowid, dateo, rappro FROM ".$p."bank WHERE fk_account = ".((int) $row->fk_account)." AND ABS(amount - ".price2num($a).") < 0.005 AND dateo >= '".date('Y-m-d', strtotime($d.' 12:00:00') - 60 * 86400)."' AND dateo <= '".date('Y-m-d', strtotime($d.' 12:00:00') + 60 * 86400)."' ORDER BY ABS(DATEDIFF(dateo, '".$this->db->escape($d)."')) LIMIT 1");
+		$o = $res ? $this->db->fetch_object($res) : null;
+		if ($o) {
+			$n = self::apart($d, substr((string) $o->dateo, 0, 10));
+			return 'Dolibarr has '.self::money($a).' on '.dol_print_date($this->db->jdate($o->dateo), 'day').', '.$n.' days away'.((int) $o->rappro ? ', already reconciled with another line' : ', more than '.$w.' days, so not matched: if it is this, match it');
+		}
+		$res = $this->db->query("SELECT amount FROM ".$p."bank WHERE fk_account = ".((int) $row->fk_account)." AND rappro = 0 AND dateo >= '".date('Y-m-d', strtotime($d.' 12:00:00') - 2 * 86400)."' AND dateo <= '".date('Y-m-d', strtotime($d.' 12:00:00') + 2 * 86400)."' LIMIT 4");
+		$near = array();
+		while ($res && ($x = $this->db->fetch_object($res))) {
+			$near[] = self::money((float) $x->amount);
+		}
+		return $near ? 'Unmatched entries those days in Dolibarr: '.implode(', ', $near).' (a typo or a lump sum?)' : 'Nothing like it in Dolibarr: it was probably never entered';
+	}
+
+	/**
+	 * What was set aside without a person, by reason.
+	 *
+	 * @param int $accountId Account
+	 * @return array<string,int> before, duplicate, already => count
+	 */
+	public function setAside($accountId)
+	{
+		$out = array();
+		$res = $this->db->query("SELECT note, COUNT(*) AS n FROM ".$this->db->prefix()."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND note IS NOT NULL GROUP BY note");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$out[(string) $o->note] = (int) $o->n;
+		}
+		return $out;
+	}
+
+	/**
+	 * A statement against Dolibarr: balances at both ends, money in and out between.
+	 *
+	 * @param object $f Statement file (with begin and end balances)
+	 * @return array{stmt:array{begin:float,in:float,out:float,end:float},doli:array{begin:float,in:float,out:float,end:float}}|null
+	 */
+	public function compare($f)
+	{
+		if ($f->begin_balance === null || $f->end_balance === null || !$f->begin_date || !$f->end_date) {
+			return null;
+		}
+		$p = $this->db->prefix();
+		$b = substr((string) $f->begin_date, 0, 10);
+		$e = substr((string) $f->end_date, 0, 10);
+		$res = $this->db->query("SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS i, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS o FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $f->rowid)." AND (note IS NULL OR note <> 'duplicate')");
+		$s = $res ? $this->db->fetch_object($res) : null;
+		$res = $this->db->query("SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS i, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS o FROM ".$p."bank WHERE fk_account = ".((int) $f->fk_account)." AND dateo > '".$b." 23:59:59' AND dateo <= '".$e." 23:59:59'");
+		$d = $res ? $this->db->fetch_object($res) : null;
+		return array(
+			'stmt' => array('begin' => round((float) $f->begin_balance, 2), 'in' => round((float) ($s ? $s->i : 0), 2), 'out' => round((float) ($s ? $s->o : 0), 2), 'end' => round((float) $f->end_balance, 2)),
+			'doli' => array('begin' => $this->balanceAt((int) $f->fk_account, $b), 'in' => round((float) ($d ? $d->i : 0), 2), 'out' => round((float) ($d ? $d->o : 0), 2), 'end' => $this->balanceAt((int) $f->fk_account, $e)),
+		);
+	}
+
+	/**
+	 * Forget an upload's lines that matched nothing (a wrong file, or the wrong account).
+	 *
+	 * @param int $fileId Upload
+	 * @return string What happened
+	 */
+	public function forget($fileId)
+	{
+		$p = $this->db->prefix();
+		$this->db->query("DELETE FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $fileId)." AND status IN ('open', 'ignored')");
+		$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $fileId));
+		$o = $res ? $this->db->fetch_object($res) : null;
+		if ($o && (int) $o->n === 0) {
+			$this->db->query("DELETE FROM ".$p."onboarding_stmt_file WHERE rowid = ".((int) $fileId)." AND source = 'upload'");
+			return 'The upload is forgotten.';
+		}
+		return 'Its unmatched lines are forgotten; the entries it reconciled stay reconciled.';
 	}
 
 	/**
@@ -744,10 +944,14 @@ class OnboardingReconcile
 		$stored = dol_print_date(OnboardingService::now(), '%Y%m%d%H%M%S').'-'.substr(sha1($name.mt_rand()), 0, 6).'.'.$ext;
 		is_uploaded_file($tmp) ? move_uploaded_file($tmp, $dir.'/'.$stored) : @copy($tmp, $dir.'/'.$stored);
 		$end = isset($read['end']) ? $read['end'] : null;
+		$begin = isset($read['begin']) ? $read['begin'] : null;
 		if ($end && $flipped) {
 			$end['balance'] = -$end['balance'];
 		}
-		$this->store($accountId, $rows, array('source' => 'upload', 'original' => dol_sanitizeFileName(basename($name)), 'filename' => $stored, 'who' => trim($user->getFullName($GLOBALS['langs']).' ('.$user->login.')'), 'end' => $end));
+		if ($begin && $flipped) {
+			$begin['balance'] = -$begin['balance'];
+		}
+		$this->store($accountId, $rows, array('source' => 'upload', 'original' => dol_sanitizeFileName(basename($name)), 'filename' => $stored, 'who' => trim($user->getFullName($GLOBALS['langs']).' ('.$user->login.')'), 'end' => $end, 'begin' => $begin));
 		$done = $this->match($accountId, $user);
 		$left = $this->openCount($accountId);
 		return $accounts[$accountId]->label.': '.count($rows).' transactions read from '.$name.', '.$done.' entries reconciled'.($left ? ', '.$left.' to check below' : '').'.';

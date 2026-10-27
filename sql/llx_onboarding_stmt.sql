@@ -3,6 +3,9 @@
 --   alt_amount: what the money came to after the fee, tried when amount finds nothing
 --   status: open (no entry found yet), matched (fk_bank), added (an entry was made
 --           for it), ignored (a person said so, or its fee was netted in the payment)
+--   note:   why it was set aside or matched without a person: before (dated before the
+--           account's first Dolibarr entry), duplicate (the same line from another upload),
+--           already (an entry reconciled before, by hand)
 --   hash:   the same transaction read twice is kept once
 CREATE TABLE llx_onboarding_stmt(
 	rowid integer AUTO_INCREMENT PRIMARY KEY NOT NULL,
@@ -18,6 +21,7 @@ CREATE TABLE llx_onboarding_stmt(
 	fk_pair integer,
 	fk_bank integer,
 	status varchar(8) DEFAULT 'open' NOT NULL,
+	note varchar(12),
 	hash varchar(40) NOT NULL,
 	datec datetime
 ) ENGINE=innodb;

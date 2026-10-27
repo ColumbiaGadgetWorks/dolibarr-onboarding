@@ -507,15 +507,25 @@ Each statement line is matched to an unreconciled entry of the same account with
 amount, up to 5 days apart (setup page, Reconciling), the closest first. A payment shown with
 its fee matches either a full-amount entry plus a fee entry, or one entry for what was left
 after the fee. Matched entries are reconciled with the month (`YYYYMM`) as statement number.
-What is left is listed per account:
+Some lines need nobody and are set aside, with a count shown: lines dated before the
+account's first entry in Dolibarr (an export reaching back years before the books started),
+the same transaction from a second upload (the CSV and the PDF of one month), and lines whose
+entry was reconciled earlier by hand. A Givebutter fee the donor chose to cover is not a fee.
+Uploading the same file again reads its unmatched lines afresh. What is left is listed per
+account, each line with a few words on why it found nothing (the same amount further away, a
+different amount that day, or nothing like it at all), with tick boxes to add or leave out many
+at once:
 
 - **On the statement, not in Dolibarr**: Add to Dolibarr (makes the entry and reconciles
   it; give it a category or link it afterwards), match it to an entry by hand (for a typo in
   the amount), or Leave out.
 - **In Dolibarr, not on the statement** (for days a statement covers): open it to fix or
   delete it, or Reconcile anyway.
-- When the export gives a running balance, the statement's ending balance is shown next to
-  Dolibarr's balance for that day, with any difference.
+- When the statement gives balances (a PDF, or an export with a balance column), it is set
+  against Dolibarr: the balance it starts from, money in, money out and the balance it ends
+  on, each with the difference. A difference at the start means the opening balance or an
+  earlier month is off; in money in or out, entries missing or entered twice. An upload's
+  unmatched lines can be forgotten (a wrong file, or the wrong account).
 
 The count is on Needs attention as "Bank lines to check". Cash accounts are never reconciled.
 
