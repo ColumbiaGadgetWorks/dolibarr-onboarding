@@ -508,6 +508,12 @@ class OnboardingReconcile
 			if ($covered !== null && abs($covered) + 0.005 >= abs($fee)) {
 				$fee = 0.0;
 			}
+			// What actually arrived (Net, Payout) settles it: the fee is the difference.
+			$net = self::amount($cell($row, 'net'));
+			if ($net !== null && abs($net) > 0.005 && ($net > 0) === ($a > 0)) {
+				$fee = round($net - $a, 2);
+				$fee = abs($fee) < 0.005 || $fee > 0 ? 0.0 : $fee;
+			}
 			$alts = array();
 			foreach (array('net', 'donated') as $k) {
 				$v = self::amount($cell($row, $k));
@@ -660,7 +666,7 @@ class OnboardingReconcile
 			$to = ($to === '' || $o->dateo > $to) ? $o->dateo : $to;
 		}
 		if (!$rows) {
-			return 0;
+			return $this->transfers($accountId, $user);
 		}
 		$lines = array();
 		$a = date('Y-m-d', strtotime($from.' 12:00:00') - $w * 86400);
@@ -714,7 +720,7 @@ class OnboardingReconcile
 				}
 			}
 		}
-		$this->settleLeftovers($accountId);
+		$this->settleLeftovers($accountId, $user);
 		return $done;
 	}
 
@@ -739,10 +745,12 @@ class OnboardingReconcile
 	 * @param int $accountId Account
 	 * @return void
 	 */
-	private function settleLeftovers($accountId)
+	private function settleLeftovers($accountId, $user)
 	{
 		$p = $this->db->prefix();
 		$w = self::window();
+		$this->lumps($accountId, $user);
+		$this->transfers($accountId, $user);
 		$open = array();
 		$res = $this->db->query("SELECT rowid, fk_file, dateo, amount, alt_amount FROM ".$p."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND status = 'open' ORDER BY dateo, rowid");
 		while ($res && ($o = $this->db->fetch_object($res))) {
@@ -800,6 +808,236 @@ class OnboardingReconcile
 				}
 			}
 		}
+	}
+
+	/**
+	 * Entries typed as one total for many statement lines (a month of $1 Venmo
+	 * sodas, card purchases recorded as the payment that paid them): the lines
+	 * from the 45 days before the entry (and the matching window after) that add
+	 * up to it exactly, fees with fees and payments with payments, are matched to
+	 * it, and it is reconciled.
+	 *
+	 * @param int $accountId Account
+	 * @param User $user Who
+	 * @return int Entries reconciled
+	 */
+	private function lumps($accountId, $user)
+	{
+		$p = $this->db->prefix();
+		$w = self::window();
+		$rows = array();
+		$res = $this->db->query("SELECT rowid, dateo, amount, kind FROM ".$p."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND status = 'open' ORDER BY dateo DESC, rowid DESC");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$rows[(int) $o->rowid] = array('date' => substr((string) $o->dateo, 0, 10), 'cents' => (int) round((float) $o->amount * 100), 'kind' => (string) $o->kind);
+		}
+		if (count($rows) < 2) {
+			return 0;
+		}
+		$first = 0;
+		$res = $this->db->query("SELECT rowid FROM ".$p."bank WHERE fk_account = ".((int) $accountId)." ORDER BY dateo, rowid LIMIT 1");
+		if ($res && ($o = $this->db->fetch_object($res))) {
+			$first = (int) $o->rowid;
+		}
+		$done = 0;
+		$res = $this->db->query("SELECT rowid, dateo, amount FROM ".$p."bank WHERE fk_account = ".((int) $accountId)." AND rappro = 0 AND rowid <> ".$first." ORDER BY dateo, rowid");
+		$entries = array();
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$entries[] = $o;
+		}
+		foreach ($entries as $e) {
+			$target = (int) round((float) $e->amount * 100);
+			$day = substr((string) $e->dateo, 0, 10);
+			if ($target == 0 || abs($target) > 500000) {
+				continue;
+			}
+			$lo = date('Y-m-d', strtotime($day.' 12:00:00') - 45 * 86400);
+			$hi = date('Y-m-d', strtotime($day.' 12:00:00') + $w * 86400);
+			foreach (array('main', 'fee') as $kind) {
+				// Closest to the entry first: a lump usually covers the days just before it.
+				$cand = array();
+				foreach ($rows as $id => $r) {
+					if ($r['kind'] === $kind && $r['date'] >= $lo && $r['date'] <= $hi && ($r['cents'] > 0) === ($target > 0) && abs($r['cents']) <= abs($target)) {
+						$cand[$id] = abs($r['cents']);
+					}
+				}
+				if (count($cand) < 2) {
+					continue;
+				}
+				$set = self::subset($cand, abs($target));
+				if (count($set) < 2) {
+					continue;
+				}
+				if ($this->reconcileLine((int) $e->rowid, $day, $user)) {
+					$this->db->query("UPDATE ".$p."onboarding_stmt SET status = 'matched', note = 'lump', fk_bank = ".((int) $e->rowid)." WHERE rowid IN (".implode(',', array_map('intval', $set)).")");
+					foreach ($set as $id) {
+						unset($rows[$id]);
+					}
+					$done++;
+				}
+				break;
+			}
+		}
+		return $done;
+	}
+
+	/**
+	 * Lines whose amounts add up to the target: the closest ones in order if
+	 * they do, else any combination of the first 40.
+	 *
+	 * @param array<int,int> $cand Line => cents, closest first
+	 * @param int $target Cents
+	 * @return int[] Lines, empty when none add up
+	 */
+	public static function subset($cand, $target)
+	{
+		$sum = 0;
+		$take = array();
+		foreach ($cand as $id => $c) {
+			$sum += $c;
+			$take[] = $id;
+			if ($sum === $target) {
+				return $take;
+			}
+			if ($sum > $target) {
+				break;
+			}
+		}
+		// Which sums can be made, and from which line each was first reached.
+		$ids = array_slice(array_keys($cand), 0, 40);
+		$from = array(0 => array(-1, -1));
+		foreach ($ids as $i => $id) {
+			$c = $cand[$id];
+			foreach (array_keys($from) as $s) {
+				$n = $s + $c;
+				if ($n <= $target && !isset($from[$n])) {
+					$from[$n] = array($s, $i);
+				}
+			}
+			if (isset($from[$target])) {
+				break;
+			}
+			if (count($from) > 200000) {
+				return array();
+			}
+		}
+		if (!isset($from[$target])) {
+			return array();
+		}
+		$out = array();
+		for ($s = $target; $s > 0; $s = $from[$s][0]) {
+			$out[] = $ids[$from[$s][1]];
+		}
+		return $out;
+	}
+
+	/**
+	 * The other half of a transfer between our own accounts: when one side is
+	 * reconciled on its statement (a Givebutter payout seen arriving at the bank),
+	 * the side here is reconciled too.
+	 *
+	 * @param int $accountId Account
+	 * @param User $user Who
+	 * @return int Entries reconciled
+	 */
+	public function transfers($accountId, $user)
+	{
+		$p = $this->db->prefix();
+		$sql = "SELECT b.rowid, b.dateo, o.num_releve FROM ".$p."bank AS b";
+		$sql .= " INNER JOIN ".$p."bank_url AS u ON u.fk_bank = b.rowid AND u.type = 'banktransfert'";
+		$sql .= " INNER JOIN ".$p."bank AS o ON o.rowid = u.url_id AND o.rappro = 1";
+		$sql .= " WHERE b.fk_account = ".((int) $accountId)." AND b.rappro = 0";
+		$res = $this->db->query($sql);
+		$n = 0;
+		$todo = array();
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$todo[] = $o;
+		}
+		foreach ($todo as $o) {
+			if ($this->reconcileLine((int) $o->rowid, substr((string) $o->dateo, 0, 10), $user)) {
+				$n++;
+			}
+		}
+		return $n;
+	}
+
+	/**
+	 * An entry no statement shows that has a twin: the same amount a few days
+	 * away, reconciled to a statement line. Usually the same payment entered
+	 * twice (by hand, and by the PayPal sync).
+	 *
+	 * @param object $line Entry (rowid, fk_account, dateo, amount)
+	 * @return object|null The twin (rowid, dateo, label)
+	 */
+	public function twin($line)
+	{
+		$p = $this->db->prefix();
+		$d = substr((string) $line->dateo, 0, 10);
+		$w = self::window();
+		$res = $this->db->query("SELECT b.rowid, b.dateo, b.label FROM ".$p."bank AS b WHERE b.fk_account = ".((int) $line->fk_account)." AND b.rowid <> ".((int) $line->rowid)." AND b.rappro = 1 AND ABS(b.amount - ".price2num((float) $line->amount).") < 0.005 AND b.dateo >= '".date('Y-m-d', strtotime($d.' 12:00:00') - $w * 86400)."' AND b.dateo <= '".date('Y-m-d', strtotime($d.' 12:00:00') + $w * 86400)."' AND EXISTS (SELECT 1 FROM ".$p."onboarding_stmt AS s WHERE s.fk_bank = b.rowid) ORDER BY ABS(DATEDIFF(b.dateo, '".$this->db->escape($d)."')) LIMIT 1");
+		return $res ? ($this->db->fetch_object($res) ?: null) : null;
+	}
+
+	/**
+	 * @param object $line Entry (rowid)
+	 * @return string The other account, when the entry is one side of a transfer between our own accounts
+	 */
+	public function transferOf($line)
+	{
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT ba.label FROM ".$p."bank_url AS u INNER JOIN ".$p."bank AS o ON o.rowid = u.url_id INNER JOIN ".$p."bank_account AS ba ON ba.rowid = o.fk_account WHERE u.fk_bank = ".((int) $line->rowid)." AND u.type = 'banktransfert' LIMIT 1");
+		$o = $res ? $this->db->fetch_object($res) : null;
+		return $o ? (string) $o->label : '';
+	}
+
+	/**
+	 * @param int $lineId Bank entry
+	 * @return bool Something is linked to it (a member, payment, subscription or transfer)
+	 */
+	private function linked($lineId)
+	{
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT (SELECT COUNT(*) FROM ".$p."bank_url WHERE fk_bank = ".((int) $lineId).") + (SELECT COUNT(*) FROM ".$p."subscription WHERE fk_bank = ".((int) $lineId).") AS n");
+		$o = $res ? $this->db->fetch_object($res) : null;
+		return $o && (int) $o->n > 0;
+	}
+
+	/**
+	 * Fix a payment entered twice: keep the copy something is linked to (the
+	 * PayPal sync's, linked to the member), delete the other, and leave the kept
+	 * one reconciled to the statement.
+	 *
+	 * @param int $lineId The copy no statement shows
+	 * @param User $user Who
+	 * @return string What happened
+	 */
+	public function fixTwin($lineId, $user)
+	{
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT rowid, fk_account, dateo, amount, label FROM ".$p."bank WHERE rowid = ".((int) $lineId)." AND rappro = 0");
+		$line = $res ? $this->db->fetch_object($res) : null;
+		$twin = $line ? $this->twin($line) : null;
+		if (!$twin) {
+			return 'Error: no second copy found.';
+		}
+		$mineLinked = $this->linked((int) $line->rowid);
+		$twinLinked = $this->linked((int) $twin->rowid);
+		if ($mineLinked && $twinLinked) {
+			return 'Error: both copies are linked to something; open them and delete the wrong one by hand.';
+		}
+		$keep = $twinLinked || !$mineLinked ? (int) $twin->rowid : (int) $line->rowid;
+		$drop = $keep === (int) $twin->rowid ? (int) $line->rowid : (int) $twin->rowid;
+		$res = $this->db->query("SELECT num_releve FROM ".$p."bank WHERE rowid = ".((int) $twin->rowid));
+		$o = $res ? $this->db->fetch_object($res) : null;
+		$num = $o ? (string) $o->num_releve : '';
+		$this->db->query("UPDATE ".$p."onboarding_stmt SET fk_bank = ".$keep." WHERE fk_bank = ".$drop);
+		$this->db->query("UPDATE ".$p."bank SET rappro = 1, num_releve = '".$this->db->escape($num)."', fk_user_rappro = ".((int) $user->id)." WHERE rowid = ".$keep);
+		$this->db->query("UPDATE ".$p."bank SET rappro = 0 WHERE rowid = ".$drop);
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$al = new AccountLine($this->db);
+		if ($al->fetch($drop) <= 0 || $al->delete($user) <= 0) {
+			return 'Error: the second copy could not be deleted: '.$al->error;
+		}
+		return 'Double entry fixed: one copy deleted, the other kept and reconciled.';
 	}
 
 	/**

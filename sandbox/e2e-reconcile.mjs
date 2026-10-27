@@ -171,15 +171,17 @@ line(gb, -20, 0.01, 'Opening balance');
 line(gb, -10, 40, 'Dues, fee covered');
 line(gb, -9, 25, 'Donation gross');
 line(gb, -9, -1.05, 'Givebutter fee');
+line(gb, -8, 50, 'Dues, fee not taken');
 const gbCsv = [
   '"Campaign Title","Reference Number","First Name","Last Name","Status Friendly","Amount","Fee","Fee Covered","Donated","Payout","Transaction Date (UTC)"',
   `"CGW Membership","111","Old","Member","Succeeded","$40.00","$1.50","$1.50","$40.00","$40.00","${day(-400)} 10:00:00"`,
   `"One Time Donation","112","Old","Donor","Succeeded","$700.00","$21.22","","$700.00","$678.78","${day(-390)} 10:00:00"`,
   `"CGW Membership","113","Ann","Covered","Succeeded","$40.00","$1.50","$1.50","$40.00","$40.00","${day(-10)} 10:00:00"`,
   `"One Time Donation","114","Bob","Gives","Succeeded","$25.00","$1.05","","$25.00","$23.95","${day(-9)} 10:00:00"`,
+  `"CGW Membership","115","Cy","Full","Succeeded","$50.00","$1.80","","$50.00","$50.00","${day(-8)} 10:00:00"`,
 ].join('\n');
-assert.match(tick(['reconcile', 'upload', gb, 'givebutter.csv'], gbCsv), /4 transactions read from givebutter\.csv, 3 entries reconciled\./);
-assert.equal(json('reconcile', 'open', gb).length, 0, 'no fee line for the covered fee; the old lines set aside');
+assert.match(tick(['reconcile', 'upload', gb, 'givebutter.csv'], gbCsv), /5 transactions read from givebutter\.csv, 4 entries reconciled\./);
+assert.equal(json('reconcile', 'open', gb).length, 0, 'no fee line for the covered fee, nor where the payout was the full amount; the old lines set aside');
 assert.equal(json('reconcile', 'aside', gb).before, 3, 'two old payments and the old fee');
 assert.equal(json('reconcile', 'missing', gb).length, 0, 'the opening balance is not a missing transaction');
 
@@ -209,6 +211,53 @@ assert.deepEqual(cmp.doli, { begin: 1000, in: 200, out: 0, end: 1200 }, 'Dolibar
 const check = json('reconcile', 'open', cmpAcc)[0];
 assert.match(tick(['reconcile', 'why', check.rowid]), /Nothing like it in Dolibarr/);
 
+step('entries typed as one total: a month of $1 sodas and their fees, card purchases paid in one go');
+const vm = account(`Venmo R${stamp}`);
+line(vm, -30, 0.01, 'Opening balance');
+line(vm, -3, 4, 'Sodas, by the month');
+line(vm, -3, -0.44, 'Venmo fees, by the month');
+const venmo = ['Account Statement - (@Columbia-Gadget-Works)', 'Account Activity',
+  ',ID,Datetime,Type,Status,Note,From,To,Amount (total),Amount (tip),Amount (fee)',
+  ...[-10, -8, -6, -4].map((n, i) => `,${stamp}${i},${day(n)}T15:00:00,Payment,Complete,Soda,Someone,Columbia Gadget Works,+ $1.00,,- $0.11`)].join('\n');
+assert.match(tick(['reconcile', 'upload', vm, 'venmo.csv'], venmo), /4 transactions read from venmo\.csv/);
+assert.equal(json('reconcile', 'open', vm).length, 0, 'every soda and every fee matched to its total');
+assert.equal(json('reconcile', 'aside', vm).lump, 8);
+const cardL = account(`Card lump R${stamp}`);
+line(cardL, -40, 0.01, 'Opening balance');
+const lump = line(cardL, -2, -77.72, 'Card charges paid by the bank payment');
+const cardLump = `Date,Name,Amount\n${day(-5)},WESTLAKE,-7.10\n${day(-20)},AMAZON A,-7.99\n${day(-20)},AMAZON B,-46.36\n${day(-20)},AMAZON C,-5.39\n${day(-25)},AMAZON D,-17.98\n`;
+tick(['reconcile', 'upload', cardL, 'card.csv'], cardLump);
+assert.deepEqual(json('reconcile', 'open', cardL).map((r) => Number(r.amount)), [-7.1], 'the four that add up to it are matched; the new one is left');
+assert.equal(Number(lines(cardL).find((l) => l.rowid === lump).rappro), 1);
+
+step('a transfer between our own accounts: reconciled on one statement, the other side follows');
+const bankT = account(`Bank T R${stamp}`);
+const gbT = account(`Wallet T R${stamp}`);
+line(bankT, -30, 0.01, 'Opening balance');
+line(gbT, -30, 1000, 'Opening balance');
+const [outLine, inLine] = last(tick(['reconcile', 'transfer', gbT, bankT, day(-6), '700'])).split(' ');
+tick(['reconcile', 'upload', bankT, 'bank-t.csv'], `Date,Description,Amount\n${day(-5)},GIVEBUTTER PAYOUT,700.00\n`);
+assert.equal(Number(lines(bankT).find((l) => l.rowid === inLine).rappro), 1, 'the bank side, from the bank statement');
+tick(['reconcile', 'daily']);
+assert.equal(Number(lines(gbT).find((l) => l.rowid === outLine).rappro), 1, 'the wallet side, because the bank side is');
+
+step('a payment entered twice: the copy the statement did not match is offered as a double entry');
+const tw = account(`Twin R${stamp}`);
+line(tw, -40, 0.01, 'Opening balance');
+line(tw, -12, 10, 'Something');
+const byHandDues = line(tw, -5, 40, 'Dues typed by hand');
+const synced = line(tw, -5, 40, 'Dues 2026-10 Ann (from the sync)');
+const twMember = last(tick(['purchase', 'member', `twin-${stamp}@example.test`, `CGW-T${String(stamp).slice(-5)}`, 'Twin', 'Member']));
+tick(['reconcile', 'link', synced, twMember]);
+line(tw, -1, 5, 'Other');
+tick(['reconcile', 'upload', tw, 'twin.csv'], `Date,Description,Amount\n${day(-12)},X,10.00\n${day(-5)},DUES,40.00\n${day(-1)},Y,5.00\n`);
+assert.deepEqual(json('reconcile', 'missing', tw).map((l) => l.rowid), [synced]);
+assert.match(tick(['reconcile', 'twin', synced]), /Double entry fixed/);
+const twl = lines(tw);
+assert.ok(!twl.some((l) => l.rowid === byHandDues), 'the hand copy, linked to nothing, is deleted');
+assert.equal(Number(twl.find((l) => l.rowid === synced).rappro), 1, 'the copy linked to the member is kept and reconciled');
+assert.equal(json('reconcile', 'missing', tw).length, 0);
+
 step('a file that is not a statement is refused');
 assert.match(tick(['reconcile', 'upload', chk, 'notes.csv'], 'hello,world\n1,2\n'), /no transactions found/);
 assert.match(tick(['reconcile', 'upload', chk, 'virus.exe'], 'MZ'), /not a statement export/);
@@ -221,6 +270,15 @@ sql(`UPDATE llx_bank_account SET rappro = 1 WHERE rowid = ${Number(ppAccount)}`)
 // A payment in PayPal and its entry in Dolibarr, made by hand.
 const amount = (17 + (stamp % 1000) / 100).toFixed(2);
 await (await fetch(`${MOCK}/control/paypal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount, fee: 0.5, days_ago: 2, code: 'T0006', email: `rec-${stamp}@example.test`, given_name: 'Rita' }) })).json();
+// The treasurer typed a member's PayPal dues in before the sync saw them: the sync links it, no second copy.
+const deeEmail = `pp-dee-${stamp}@example.test`;
+last(tick(['purchase', 'member', deeEmail, `CGW-D${String(stamp).slice(-5)}`, 'Dee', `Typed${stamp}`]));
+const typed = line(ppAccount, -1, 40, 'Dee dues, typed in');
+await (await fetch(`${MOCK}/control/paypal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount: 40, fee: 1.89, days_ago: 1, email: deeEmail, given_name: 'Dee', surname: `Typed${stamp}`, payer_id: `DEE${stamp}` }) })).json();
+tick(['pp', 'sync']);
+const deeLines = lines(ppAccount).filter((l) => /Dee/.test(l.label) && Number(l.amount) === 40);
+assert.deepEqual(deeLines.map((l) => l.rowid), [typed], 'no second copy of the dues');
+assert.equal(sql(`SELECT COUNT(*) FROM llx_subscription WHERE fk_bank = ${Number(typed)}`), '1', 'the typed entry is the subscription\'s');
 const gross = line(ppAccount, -2, amount, 'Sale, entered by hand');
 const feeLine = line(ppAccount, -2, -0.5, 'PayPal fee');
 const out = tick(['reconcile', 'paypal']);

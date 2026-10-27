@@ -66,6 +66,8 @@ if ($canwrite && $action !== '') {
 			}
 			$msgs[] = $n ? ($what == 'add' ? $n.' lines added to Dolibarr and reconciled. Give them categories (or link them) from the account\'s entries.' : $n.' lines left out.') : 'Error: tick some lines first.';
 		}
+	} elseif ($action == 'force' && GETPOST('twin', 'int')) {
+		$msgs[] = $rec->fixTwin((int) GETPOST('twin', 'int'), $user);
 	} elseif ($action == 'force') {
 		$n = 0;
 		foreach ((array) GETPOST('lines', 'array') as $l) {
@@ -160,6 +162,9 @@ foreach ($accounts as $a) {
 		if (!empty($aside['already'])) {
 			$said[] = $aside['already'].' matched to entries reconciled earlier by hand';
 		}
+		if (!empty($aside['lump'])) {
+			$said[] = $aside['lump'].' matched to entries typed as one total for several of them';
+		}
 		print '<tr class="oddeven"><td colspan="6" class="opacitymedium small">Set aside without asking: '.dol_escape_htmltag(implode('; ', $said)).'.</td></tr>';
 	}
 	if ($open) {
@@ -194,7 +199,15 @@ foreach ($accounts as $a) {
 			print '<tr class="oddeven"><td colspan="6"><label><input type="checkbox" onclick="onbTick(this, \'lines[]\', \''.$ff.'\')"> all</label> &nbsp; <button type="submit" form="'.$ff.'" class="button smallpaddingimp">Reconcile ticked anyway</button></td></tr>';
 		}
 		foreach ($missing as $l) {
-			print '<tr class="oddeven"><td class="nowraponall">'.($canwrite ? '<input type="checkbox" form="'.$ff.'" name="lines[]" value="'.((int) $l->rowid).'"> ' : '').dol_print_date($db->jdate($l->dateo), 'day').'</td><td class="right nowraponall">'.price($l->amount).'</td><td colspan="3">'.dol_escape_htmltag($l->label).'</td><td class="right"><a href="'.DOL_URL_ROOT.'/compta/bank/line.php?rowid='.((int) $l->rowid).'">Open the entry</a></td></tr>';
+			// Say what it probably is: a second copy of a matched entry, or half of a transfer.
+			$twin = $rec->twin($l);
+			$other = $twin ? '' : $rec->transferOf($l);
+			$hint = $twin ? 'Looks like a second copy of "'.$twin->label.'" ('.dol_print_date($db->jdate($twin->dateo), 'day').'), which the statement matched.' : ($other !== '' ? 'Half of a transfer with '.$other.': reconciled by itself once that side is, so upload '.$other.'\'s statement.' : '');
+			print '<tr class="oddeven"><td class="nowraponall">'.($canwrite ? '<input type="checkbox" form="'.$ff.'" name="lines[]" value="'.((int) $l->rowid).'"> ' : '').dol_print_date($db->jdate($l->dateo), 'day').'</td><td class="right nowraponall">'.price($l->amount).'</td><td colspan="3">'.dol_escape_htmltag($l->label).($hint !== '' ? '<br><span class="opacitymedium small">'.dol_escape_htmltag($hint).'</span>' : '').'</td><td class="right nowraponall">';
+			if ($twin && $canwrite) {
+				print '<button type="submit" form="'.$ff.'" name="twin" value="'.((int) $l->rowid).'" class="button smallpaddingimp" title="Keep the copy linked to the member (or payment), delete the other">Fix the double entry</button> ';
+			}
+			print '<a href="'.DOL_URL_ROOT.'/compta/bank/line.php?rowid='.((int) $l->rowid).'">Open the entry</a></td></tr>';
 		}
 	}
 	if (!$open && !$missing) {

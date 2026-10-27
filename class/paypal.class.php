@@ -423,16 +423,48 @@ class OnboardingPaypal
 		}
 		$actor = $this->svc->actor();
 		$month = date('Y-m', $when);
-		$line = $acc->addline($when, 'VIR', 'Dues '.$month.' '.$who, (float) $row->amount, '', 0, $actor);
+		// The treasurer may have entered it by hand already: use that entry, not a second one.
+		$line = $this->handEntry((int) $acc->id, (float) $row->amount, $when);
+		if (!$line) {
+			$line = $acc->addline($when, 'VIR', 'Dues '.$month.' '.$who, (float) $row->amount, '', 0, $actor);
+		}
 		if ($line <= 0) {
 			dol_syslog('Onboarding: PayPal bank line failed: '.$acc->error, LOG_WARNING);
 			return false;
 		}
 		$acc->add_url_line($line, $adh->id, DOL_URL_ROOT.'/adherents/card.php?rowid=', $who, 'member');
 		$this->db->query("UPDATE ".$this->db->prefix()."subscription SET fk_bank = ".((int) $line)." WHERE rowid = ".((int) $subid));
-		if ((float) $row->fee > 0) {
-			$acc->addline($when, 'VIR', 'PayPal fee, dues '.$month.' '.$who, -(float) $row->fee, '', 0, $actor);
+		$fee = (float) $row->fee > 0 ? $this->handEntry((int) $acc->id, -(float) $row->fee, $when) : 0;
+		if ((float) $row->fee > 0 && !$fee) {
+			$fee = $acc->addline($when, 'VIR', 'PayPal fee, dues '.$month.' '.$who, -(float) $row->fee, '', 0, $actor);
+		}
+		if ($fee > 0) {
+			// Linked too, so it is never taken for a typed-in fee later.
+			$acc->add_url_line($fee, $adh->id, DOL_URL_ROOT.'/adherents/card.php?rowid=', $who, 'member');
 		}
 		return true;
+	}
+
+	/**
+	 * An entry of this amount, three days either side, that nothing is linked to
+	 * (no member, payment or subscription): one somebody typed in.
+	 *
+	 * @param int $accountId PayPal account
+	 * @param float $amount Amount
+	 * @param int $when Payment time
+	 * @return int The entry, 0 when there is none
+	 */
+	private function handEntry($accountId, $amount, $when)
+	{
+		$p = $this->db->prefix();
+		$sql = "SELECT b.rowid FROM ".$p."bank AS b WHERE b.fk_account = ".((int) $accountId)." AND ABS(b.amount - ".price2num($amount).") < 0.005";
+		$sql .= " AND b.dateo >= '".$this->db->idate($when - 3 * 86400)."' AND b.dateo <= '".$this->db->idate($when + 3 * 86400)."'";
+		$sql .= " AND b.label NOT LIKE 'Dues %' AND b.label NOT LIKE 'PayPal fee, dues %'"; // This sync's own
+		$sql .= " AND NOT EXISTS (SELECT 1 FROM ".$p."bank_url AS u WHERE u.fk_bank = b.rowid)";
+		$sql .= " AND NOT EXISTS (SELECT 1 FROM ".$p."subscription AS s WHERE s.fk_bank = b.rowid)";
+		$sql .= " ORDER BY ABS(DATEDIFF(b.dateo, '".$this->db->idate($when)."')), b.rowid LIMIT 1";
+		$res = $this->db->query($sql);
+		$o = $res ? $this->db->fetch_object($res) : null;
+		return $o ? (int) $o->rowid : 0;
 	}
 }
