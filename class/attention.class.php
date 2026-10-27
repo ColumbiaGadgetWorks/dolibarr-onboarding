@@ -32,6 +32,7 @@ class OnboardingAttention
 		'VOTE_TAG' => 'A vote\'s final text could not be tagged in GitHub',
 		'CRON_FILINGS' => 'The yearly filings job is failing',
 		'CRON_RECONCILE' => 'Reconciling bank accounts is failing',
+		'PLAID_SYNC' => 'A bank feed (Plaid) is failing or wants the login again',
 	);
 
 	/**
@@ -120,6 +121,10 @@ class OnboardingAttention
 		if ((isModEnabled('banque') || isModEnabled('bank')) && $user->hasRight('banque', 'consolidate')) {
 			dol_include_once('/onboarding/class/reconcile.class.php');
 			$rec = new OnboardingReconcile($this->db);
+			dol_include_once('/onboarding/class/plaid.class.php');
+			if (OnboardingPlaid::configured()) {
+				$add('plaid', 'Bank feeds to reconnect', 'A bank connected through Plaid wants its login again, or cannot be read.', (new OnboardingPlaid($this->db))->needing(), $base.'plaid.php', true);
+			}
 			$add('reconcile', 'Bank lines to check', 'Statement lines with no Dolibarr entry, and entries no statement shows, from Reconcile bank accounts.', $rec->openCount() + count($rec->missing()), $base.'reconcile.php');
 		}
 

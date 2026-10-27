@@ -164,6 +164,10 @@ const github = [];
 const PAYPAL_ID = 'sandbox-paypal-id';
 const PAYPAL_SECRET = 'sandbox-paypal-secret';
 const paypalTx = [];
+// Fake Plaid. The sandbox's keys:
+const PLAID_ID = 'sandbox-plaid-id';
+const PLAID_SECRET = 'sandbox-plaid-secret';
+const plaidItems = [];
 let PAYPAL_SEARCH = true;
 let GITHUB_EXPIRES = '2099-01-01 00:00:00 UTC';
 
@@ -174,6 +178,58 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
   try {
+    // Fake Plaid: link tokens, the token exchange, accounts and transactions sync,
+    // fed by POST /control/plaid. Keys as on the setup page in the sandbox.
+    if (path.startsWith('/plaid/') && req.method === 'POST') {
+      const b = await readBody(req);
+      const route = path.slice('/plaid'.length);
+      if (b.client_id !== PLAID_ID || b.secret !== PLAID_SECRET) return json(res, 400, { error_type: 'INVALID_INPUT', error_code: 'INVALID_API_KEYS', error_message: 'invalid client_id or secret provided' });
+      const item = plaidItems.find((i) => i.access_token === b.access_token);
+      if (route === '/link/token/create') return json(res, 200, { link_token: `link-sandbox-${++seq}`, expiration: new Date(Date.now() + 4 * 3600e3).toISOString() });
+      if (route === '/sandbox/public_token/create') return json(res, 200, { public_token: `public-sandbox-${b.institution_id || 'ins_1'}-${++seq}` });
+      if (route === '/item/public_token/exchange') {
+        if (!/^public-sandbox-/.test(b.public_token || '')) return json(res, 400, { error_code: 'INVALID_PUBLIC_TOKEN', error_message: 'bad public token' });
+        const n = ++seq;
+        const it = { item_id: `item-${n}`, access_token: `access-sandbox-${n}`, login_required: false, tx: [], accounts: [
+          { account_id: `acc-${n}-chk`, name: 'Business Checking', official_name: 'Central Bank Business Checking', mask: '9681', type: 'depository', subtype: 'checking', balances: { current: 1000, available: 1000, iso_currency_code: 'USD' } },
+          { account_id: `acc-${n}-cc`, name: 'MasterCard', official_name: 'US Bank MasterCard', mask: '4944', type: 'credit', subtype: 'credit card', balances: { current: 77.72, available: null, iso_currency_code: 'USD' } },
+        ] };
+        plaidItems.push(it);
+        return json(res, 200, { access_token: it.access_token, item_id: it.item_id });
+      }
+      if (!item) return json(res, 400, { error_code: 'INVALID_ACCESS_TOKEN', error_message: 'invalid access token' });
+      if (item.login_required) return json(res, 400, { error_type: 'ITEM_ERROR', error_code: 'ITEM_LOGIN_REQUIRED', error_message: 'the login details of this item have changed' });
+      if (route === '/accounts/get') return json(res, 200, { accounts: item.accounts, item: { item_id: item.item_id } });
+      if (route === '/item/remove') { plaidItems.splice(plaidItems.indexOf(item), 1); return json(res, 200, {}); }
+      if (route === '/transactions/sync') {
+        // The cursor is how many changes were sent; one change per transaction event.
+        const from = Number(b.cursor || 0);
+        const size = Number(b.count || 100);
+        const page = item.tx.slice(from, from + size);
+        return json(res, 200, {
+          added: page.filter((e) => e.kind === 'added').map((e) => e.t),
+          modified: page.filter((e) => e.kind === 'modified').map((e) => e.t),
+          removed: page.filter((e) => e.kind === 'removed').map((e) => ({ transaction_id: e.t.transaction_id })),
+          next_cursor: String(from + page.length), has_more: from + page.length < item.tx.length, accounts: item.accounts,
+        });
+      }
+      return json(res, 404, { error_code: 'NOT_FOUND', error_message: route });
+    }
+    if (path === '/control/plaid' && req.method === 'POST') {
+      // { item, add: {account: 'chk'|'cc', amount, date, name, pending} } | { item, remove: id } | { item, login_required }
+      const b = await readBody(req);
+      const it = b.item ? plaidItems.find((i) => i.item_id === b.item) : plaidItems.at(-1);
+      if (!it) return json(res, 404, { error: 'no item' });
+      if (b.login_required !== undefined) it.login_required = !!b.login_required;
+      if (b.add) {
+        const t = { transaction_id: `tx-${++seq}`, account_id: it.accounts.find((a) => a.account_id.endsWith(b.add.account || 'chk')).account_id, amount: Number(b.add.amount), date: b.add.date, name: b.add.name || 'Something', merchant_name: b.add.merchant || null, pending: !!b.add.pending, iso_currency_code: 'USD' };
+        it.tx.push({ kind: 'added', t });
+        return json(res, 200, { item: it.item_id, transaction_id: t.transaction_id });
+      }
+      if (b.remove) it.tx.push({ kind: 'removed', t: { transaction_id: b.remove } });
+      if (b.balance !== undefined) it.accounts[0].balances.current = Number(b.balance);
+      return json(res, 200, { item: it.item_id });
+    }
     // Fake PayPal: OAuth and Transaction search, fed by POST /control/paypal.
     if (path === '/v1/oauth2/token' && req.method === 'POST') {
       const want = 'Basic ' + Buffer.from(`${PAYPAL_ID}:${PAYPAL_SECRET}`).toString('base64');
