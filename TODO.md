@@ -4,6 +4,29 @@ Not started unless marked. Each needs a decision before it is built. The numbere
 the end came from the bylaws, the website, the wiki, InfoSheets, the kiosk, label printer
 and management repositories: things the makerspace tracks by hand today.
 
+## High priority: records, privacy and access policy
+
+Needed for Plaid's production review (and good practice before bank feeds go live).
+
+- **Records retention policy, adopted by the board.** One paragraph in the board minutes, for
+  example: financial records and bank data are kept 7 years, then deleted; member data is kept
+  while someone is a member, and its financial part 7 years after; unfinished signups are
+  deleted after 30 days; a disconnected Plaid account's access is removed the same day; the
+  Secretary reviews this policy each April at the annual meeting. Then answer Yes to Plaid's
+  "defined and enforced data deletion and retention policy, reviewed periodically".
+- **Privacy page.** Add to the website's `content/privacy.md`: "Our own bank records. Our
+  bookkeeping system reads Columbia Gadget Works' own bank, card and payment-service accounts
+  through Plaid, to keep the books. It does not connect to members' or donors' bank accounts.
+  Transactions are kept with our financial records for 7 years, then deleted."
+- **Dolibarr admins down to two** (Treasurer and technical admin), as `PERMISSIONS.md` in
+  cgwmanagement plans; the President and Secretary get their rights through groups. Do this
+  before Plaid connects real accounts.
+- **Yearly access review**, with item 11 below: each spring, list who can log in to Dolibarr,
+  the bank, PayPal, Givebutter, Venmo, Plaid, GitHub and Cloudflare, and remove anyone who no
+  longer needs it.
+- Code to support it, once adopted: delete statement lines and Plaid transactions older than 7
+  years in the daily job, and show the policy's dates on the setup page.
+
 ## Door access emails
 
 What happens today: when someone's first dues payment arrives, the membership team address
