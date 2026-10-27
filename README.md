@@ -492,11 +492,15 @@ bank accounts** does the matching:
 - **PayPal** is read from PayPal through the PayPal sync's connection, from the oldest
   unreconciled entry on, by the button and by the daily job. The account's ref must be
   `PAYPAL`.
-- **Every other account**: upload the transactions as downloaded from online banking, CSV,
-  Excel, OFX or QFX (Central Bank's Activity export, the US Bank card's download, Givebutter's
+- **Every other account**: upload the monthly statement PDF, or the transactions as
+  downloaded from online banking, CSV, Excel, OFX or QFX (Central Bank's Activity export, the US Bank card's download, Givebutter's
   Transactions and Payouts exports, Venmo's statement CSV). Lines above the column names are
   skipped; withdrawals and deposits columns, a single amount column, or PayPal's Gross, Fee
-  and Net are all understood. A card export that shows purchases as positive is turned
+  and Net are all understood. In a statement PDF, dated lines with an amount at the end are
+  signed by the section they are in (Deposits, Checks, Withdrawals and other charges,
+  Purchases, Payments and credits), checks listed two to a line are read, the year comes from
+  the statement period and the ending balance is checked. Checked against three years of
+  Central Bank statements. A scanned statement has no text to read. A card export that shows purchases as positive is turned
   around. The same file uploaded twice is read once.
 
 Each statement line is matched to an unreconciled entry of the same account with the same

@@ -4,6 +4,7 @@
 //   node e2e-reconcile.mjs   (after e2e-paypal.mjs, which leaves the PayPal account and its entries)
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { deflateSync } from 'node:zlib';
 
 const stamp = Date.now();
 const MOCK = process.env.MOCK_URL || 'http://localhost:8090';
@@ -100,6 +101,68 @@ line(ofxAcc, -3, -45.5, 'Insurance');
 const ofx = `OFXHEADER:100\nDATA:OFXSGML\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>\n<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>${day(-3).replace(/-/g, '')}120000<TRNAMT>-45.50<FITID>A1<NAME>INSURANCE CO\n</BANKTRANLIST><LEDGERBAL><BALAMT>-45.50<DTASOF>${day(-3).replace(/-/g, '')}</LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
 assert.match(tick(['reconcile', 'upload', ofxAcc, 'bank.qfx'], ofx), /1 transactions read from bank\.qfx, 1 entries reconciled/);
 assert.equal(Number(json('reconcile', 'files', ofxAcc)[0].end_balance), -45.5);
+
+step('a statement PDF: sections give the sign, checks two to a line, the year from the period, the ending balance');
+// A small PDF laid out like Central Bank's statements, its page compressed.
+function pdf(rows) {
+  const esc = (t) => t.replace(/[\\()]/g, (c) => `\\${c}`);
+  const content = Buffer.from(rows.map(([x, y, t]) => `BT /F1 9 Tf ${x} ${y} Td (${esc(t)}) Tj ET`).join('\n'));
+  const z = deflateSync(content);
+  const objs = [
+    Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
+    Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+    Buffer.from('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>'),
+    Buffer.concat([Buffer.from(`<< /Length ${z.length} /Filter /FlateDecode >>\nstream\n`), z, Buffer.from('\nendstream')]),
+    Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'),
+  ];
+  const parts = [Buffer.from('%PDF-1.4\n')];
+  const offsets = [];
+  let at = parts[0].length;
+  objs.forEach((o, i) => {
+    const b = Buffer.concat([Buffer.from(`${i + 1} 0 obj\n`), o, Buffer.from('\nendobj\n')]);
+    offsets.push(at);
+    parts.push(b);
+    at += b.length;
+  });
+  const xref = `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${at}\n%%EOF\n`;
+  return Buffer.concat([...parts, Buffer.from(xref)]);
+}
+const short = (n) => { const d = new Date(`${day(n)}T12:00:00Z`); return `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}. ${String(d.getUTCDate()).padStart(2, '0')}`; };
+const long = (n) => new Date(`${day(n)}T12:00:00Z`).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const mdy = (n) => { const [y, m, d] = day(n).split('-'); return `${m}/${d}/${y}`; };
+let y = 760;
+const row = (...cells) => { y -= 14; return cells.map((t, i) => [40 + i * 120, y, t]); };
+const statement = pdf([
+  ...row('COLUMBIA GADGET WORKS', 'Period', `${mdy(-20)} - ${mdy(-1)}`),
+  ...row('Small Business Checking'),
+  ...row('No. 001', 'Beginning Balance', long(-21), '$', '1,000.00'),
+  ...row('Deposits'),
+  ...row(short(-15), 'PAYPAL TRANSFER', '310.67'),
+  ...row('MORE DETAIL ON THE NEXT LINE'),
+  ...row('Total', '+$', '310.67'),
+  ...row('Checks'),
+  ...row('Check No.', 'Paid', 'Amount', 'Check No.', 'Paid', 'Amount'),
+  ...row('1201', short(-12), '650.00', '1202', short(-11), '25.00'),
+  ...row('Total', '-$', '675.00'),
+  ...row('Withdrawals and other charges'),
+  ...row(short(-9), 'MEETUP ORG ULTD NEW YO', '89.94'),
+  ...row('Total', '-$', '89.94'),
+  ...row('Ending Balance', long(-1), '$', '545.73'),
+  ...row('Low ledger balance', '500.00'),
+]);
+const pdfAcc = account(`PDF R${stamp}`);
+line(pdfAcc, -30, 1000, 'Opening balance');
+const transfer = line(pdfAcc, -14, 310.67, 'PayPal transfer');
+line(pdfAcc, -12, -650, 'Rent, check 1201');
+line(pdfAcc, -11, -25, 'Check 1202');
+line(pdfAcc, -9, -89.94, 'Meetup');
+assert.match(tick(['reconcile', 'upload', pdfAcc, 'statement.pdf'], statement), /4 transactions read from statement\.pdf, 4 entries reconciled\./);
+assert.equal(json('reconcile', 'open', pdfAcc).length, 0);
+const pf = json('reconcile', 'files', pdfAcc)[0];
+assert.equal(Number(pf.end_balance), 545.73, 'the ending balance from the PDF');
+assert.equal(pf.end_date, day(-1));
+assert.equal(lines(pdfAcc).find((l) => l.rowid === transfer).num_releve, day(-15).slice(0, 7).replace('-', ''));
+assert.match(tick(['reconcile', 'upload', pdfAcc, 'scan.pdf'], pdf([])), /no transactions found in the PDF/);
 
 step('a file that is not a statement is refused');
 assert.match(tick(['reconcile', 'upload', chk, 'notes.csv'], 'hello,world\n1,2\n'), /no transactions found/);

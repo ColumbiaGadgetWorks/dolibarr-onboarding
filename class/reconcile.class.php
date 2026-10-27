@@ -27,7 +27,7 @@ dol_include_once('/onboarding/class/onboarding.class.php');
  */
 class OnboardingReconcile
 {
-	const TYPES = array('csv', 'txt', 'xlsx', 'xls', 'ofx', 'qfx', 'qbo');
+	const TYPES = array('csv', 'txt', 'xlsx', 'xls', 'ofx', 'qfx', 'qbo', 'pdf');
 	const MAX_FILE_BYTES = 10485760;
 
 	/** @var DoliDB */
@@ -215,15 +215,19 @@ class OnboardingReconcile
 	 *
 	 * @param string $path File
 	 * @param string $name Its name, for its type
-	 * @return array{rows:array<int,array{date:string,amount:float,fee:float,alts:float[],label:string,ref:string,balance:float|null}>,error:string}
+	 * @return array{rows:array<int,array{date:string,amount:float,fee:float,alts:float[],label:string,ref:string,balance:float|null}>,error:string,end?:array{date:string,balance:float}|null}
 	 */
 	public static function read($path, $name)
 	{
 		$ext = strtolower(pathinfo((string) $name, PATHINFO_EXTENSION));
 		if (!in_array($ext, self::TYPES, true)) {
-			return array('rows' => array(), 'error' => $name.': not a statement export (CSV, Excel, OFX or QFX).');
+			return array('rows' => array(), 'error' => $name.': not a statement export (PDF, CSV, Excel, OFX or QFX).');
 		}
 		$head = (string) @file_get_contents($path, false, null, 0, 4096);
+		if ($ext == 'pdf' || strpos($head, '%PDF') === 0) {
+			$pdf = self::readPdf((string) file_get_contents($path));
+			return array('rows' => $pdf['rows'], 'end' => $pdf['end'], 'error' => $pdf['rows'] ? '' : $name.': no transactions found in the PDF. A scanned statement (a picture of the page) has no text to read; download the statement from online banking, or its CSV export.');
+		}
 		if (in_array($ext, array('ofx', 'qfx', 'qbo'), true) || stripos($head, '<OFX>') !== false || stripos($head, 'OFXHEADER') !== false) {
 			return array('rows' => self::readOfx((string) file_get_contents($path)), 'error' => '');
 		}
@@ -234,6 +238,148 @@ class OnboardingReconcile
 		}
 		$rows = self::readTable($table);
 		return array('rows' => $rows, 'error' => $rows ? '' : $name.': no transactions found. It needs a row of column names with a date and an amount (or withdrawals and deposits).');
+	}
+
+	/**
+	 * A PDF statement as printed: dated lines with an amount at the end, signed by
+	 * the section they are in (Deposits, Checks, Withdrawals and other charges,
+	 * Purchases, Payments and credits...), a column of checks (number, date,
+	 * amount, two to a line), the year from the statement period, and the ending
+	 * balance. A line in no known section is tried both ways when matching.
+	 *
+	 * @param string $data PDF bytes
+	 * @return array{rows:array<int,array>,end:array{date:string,balance:float}|null}
+	 */
+	public static function readPdf($data)
+	{
+		dol_include_once('/onboarding/class/pdftext.class.php');
+		$lines = array();
+		foreach (OnboardingPdfText::lines($data) as $page) {
+			foreach ($page as $l) {
+				$lines[] = $l;
+			}
+		}
+		$all = implode("\n", $lines);
+		// The period: "09/01/2020 - 09/30/2020", else the newest full date.
+		$to = '';
+		if (preg_match('/(\d{1,2}\/\d{1,2}\/\d{2,4})\s*(?:-|to|through|thru)\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i', $all, $m)) {
+			$to = self::date($m[2]);
+		}
+		if ($to === '' && preg_match_all('/\b(\d{1,2}\/\d{1,2}\/\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2}, \d{4})\b/i', $all, $mm)) {
+			foreach ($mm[1] as $d) {
+				$d = self::date(str_replace('.', '', $d));
+				$to = $d > $to ? $d : $to;
+			}
+		}
+		if ($to === '') {
+			$to = date('Y-m-d', OnboardingService::now());
+		}
+		$months = array('jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'may' => 5, 'jun' => 6, 'jul' => 7, 'aug' => 8, 'sep' => 9, 'oct' => 10, 'nov' => 11, 'dec' => 12);
+		$mon = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d{1,2}(?:,?\s+\d{4})?';
+		$num = '\d{1,2}\/\d{1,2}(?:\/\d{2,4})?';
+		$dateRe = '(?:'.$mon.'|'.$num.'|\d{4}-\d{2}-\d{2})';
+		// A day with no year: the statement's year, or the one before for a December line on a January statement.
+		$day = function ($t) use ($to, $months) {
+			$t = trim(str_replace('.', '', strtolower($t)));
+			if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $t) || preg_match('/\d{4}$/', $t) || preg_match('/^\d{1,2}\/\d{1,2}\/\d{2}$/', $t)) {
+				return self::date(preg_match('/^[a-z]/', $t) ? ucwords($t) : $t);
+			}
+			if (preg_match('/^([a-z]{3})[a-z]*\s*(\d{1,2})$/', $t, $m) && isset($months[$m[1]])) {
+				list($mo, $d) = array($months[$m[1]], (int) $m[2]);
+			} elseif (preg_match('/^(\d{1,2})\/(\d{1,2})$/', $t, $m)) {
+				list($mo, $d) = array((int) $m[1], (int) $m[2]);
+			} else {
+				return '';
+			}
+			$y = (int) substr($to, 0, 4);
+			if (!checkdate($mo, $d, $y) && !checkdate($mo, $d, $y - 1)) {
+				return '';
+			}
+			$cand = sprintf('%04d-%02d-%02d', $y, $mo, $d);
+			return $cand > date('Y-m-d', strtotime($to.' 12:00:00') + 7 * 86400) ? sprintf('%04d-%02d-%02d', $y - 1, $mo, $d) : $cand;
+		};
+		$money = '-?\(?\$?\s?[\d,]*\d\.\d{2}\)?-?';
+		$rows = array();
+		$sign = 0;
+		$balance = null;
+		$end = null;
+		$prev = -1;
+		foreach ($lines as $line) {
+			$low = strtolower(trim($line));
+			$plain = trim(preg_replace('/\s+/', ' ', $low));
+			// Section headings decide the sign of what follows.
+			if (preg_match('/^(deposits|credits|other credits|additions|deposits (and|&) (other )?(credits|additions)|payments(,)? (and )?(other )?credits|payments|money in|incoming|interest (paid|earned))\b/', $plain) && !preg_match('/'.$money.'\s*$/', $plain)) {
+				$sign = 1;
+				$prev = -1;
+				continue;
+			}
+			if (preg_match('/^(checks|checks paid|withdrawals|debits|other debits|withdrawals (and|&) other (charges|debits)|charges|fees|service charges|purchases|purchases (and|&) (adjustments|advances)|electronic (withdrawals|debits|payments)|money out|outgoing|card (transactions|purchases)|atm)\b/', $plain) && !preg_match('/'.$money.'\s*$/', $plain)) {
+				$sign = -1;
+				$prev = -1;
+				continue;
+			}
+			if (preg_match('/^(beginning|opening|previous|starting) balance\b.*?('.$money.')\s*$/', $plain, $m)) {
+				$balance = self::amount($m[2]);
+				$prev = -1;
+				continue;
+			}
+			if (preg_match('/^(ending|closing|new) balance\b(.*?)('.$money.')\s*$/', $plain, $m)) {
+				$d = $day(preg_match('/'.$dateRe.'/i', $m[2], $dm) ? $dm[0] : '');
+				$end = array('date' => $d !== '' ? $d : $to, 'balance' => (float) self::amount($m[3]));
+				$prev = -1;
+				continue;
+			}
+			if (preg_match('/^(total|subtotal|balance|daily balance|date\b|check no)/', $plain)) {
+				$prev = -1;
+				continue;
+			}
+			$cols = explode('   ', trim($line));
+			// Checks, often two to a line: number, date paid, amount.
+			if (preg_match('/^\d{1,7}\*?\s/', $plain) && preg_match_all('/(?:^|\s)(\d{1,7})\*?\s+('.$dateRe.')\s+('.$money.')(?=\s|$)/i', $plain, $cm, PREG_SET_ORDER)) {
+				foreach ($cm as $c) {
+					$d = $day($c[2]);
+					$a = self::amount($c[3]);
+					if ($d !== '' && $a !== null) {
+						$rows[] = array('date' => $d, 'amount' => -abs($a), 'fee' => 0.0, 'alts' => array(), 'label' => 'Check '.$c[1], 'ref' => 'check '.$c[1], 'balance' => null);
+					}
+				}
+				$prev = -1;
+				continue;
+			}
+			if (count($cols) >= 2 && preg_match('/^'.$dateRe.'$/i', trim($cols[0])) && ($d = $day($cols[0])) !== '') {
+				// The amounts at the end: the transaction, then maybe the balance after it.
+				$amounts = array();
+				while (count($cols) > 1 && count($amounts) < 2 && preg_match('/^'.$money.'$/', str_replace(' ', '', trim(end($cols))))) {
+					array_unshift($amounts, trim(array_pop($cols)));
+				}
+				if (!$amounts) {
+					continue;
+				}
+				$a = self::amount($amounts[0]);
+				$bal = isset($amounts[1]) ? self::amount($amounts[1]) : null;
+				if ($a === null || abs($a) < 0.005) {
+					continue;
+				}
+				$explicit = preg_match('/^-|-$|^\(/', str_replace(' ', '', $amounts[0]));
+				$s = $explicit ? ($a < 0 ? -1 : 1) : $sign;
+				if (!$explicit && $bal !== null && $balance !== null) {
+					$s = round($bal - $balance, 2) == round(-abs($a), 2) ? -1 : (round($bal - $balance, 2) == round(abs($a), 2) ? 1 : $s);
+				}
+				if ($bal !== null) {
+					$balance = $bal;
+				}
+				$amt = $s == 0 ? abs($a) : $s * abs($a);
+				$rows[] = array('date' => $d, 'amount' => $amt, 'fee' => 0.0, 'alts' => $s == 0 ? array(-abs($a)) : array(), 'label' => dol_trunc(trim(implode(' ', array_slice($cols, 1))), 250, 'right', 'UTF-8', 1), 'ref' => '', 'balance' => $bal);
+				$prev = count($rows) - 1;
+				continue;
+			}
+			// A description carried onto the next line.
+			if ($prev >= 0 && !preg_match('/'.$money.'\s*$/', $plain) && strlen($plain) < 80) {
+				$rows[$prev]['label'] = dol_trunc($rows[$prev]['label'].' '.trim($line), 250, 'right', 'UTF-8', 1);
+				$prev = -1;
+			}
+		}
+		return array('rows' => $rows, 'end' => $end);
 	}
 
 	/**
@@ -397,11 +543,11 @@ class OnboardingReconcile
 			$from = ($from === '' || $r['date'] < $from) ? $r['date'] : $from;
 			$to = ($to === '' || $r['date'] > $to) ? $r['date'] : $to;
 		}
-		// The balance the statement ends on: the newest day's, in the file's own order.
-		$end = null;
-		$endDate = '';
+		// The balance the statement ends on: given (a PDF's Ending Balance), else the newest day's, in the file's own order.
+		$end = isset($file['end']['balance']) ? (float) $file['end']['balance'] : null;
+		$endDate = isset($file['end']['date']) ? (string) $file['end']['date'] : '';
 		$newestFirst = $rows && $rows[0]['date'] > $rows[count($rows) - 1]['date'];
-		foreach ($newestFirst ? $rows : array_reverse($rows) as $r) {
+		foreach ($end !== null ? array() : ($newestFirst ? $rows : array_reverse($rows)) as $r) {
 			if ($r['date'] === $to && $r['balance'] !== null) {
 				$end = (float) $r['balance'];
 				$endDate = $to;
@@ -580,7 +726,8 @@ class OnboardingReconcile
 			return 'Error: '.$read['error'];
 		}
 		$rows = $read['rows'];
-		if ($this->signScore($accountId, $rows, -1) > $this->signScore($accountId, $rows, 1)) {
+		$flipped = $this->signScore($accountId, $rows, -1) > $this->signScore($accountId, $rows, 1);
+		if ($flipped) {
 			foreach ($rows as &$r) {
 				$r['amount'] = -$r['amount'];
 				$r['fee'] = -$r['fee'];
@@ -596,7 +743,11 @@ class OnboardingReconcile
 		$ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
 		$stored = dol_print_date(OnboardingService::now(), '%Y%m%d%H%M%S').'-'.substr(sha1($name.mt_rand()), 0, 6).'.'.$ext;
 		is_uploaded_file($tmp) ? move_uploaded_file($tmp, $dir.'/'.$stored) : @copy($tmp, $dir.'/'.$stored);
-		$this->store($accountId, $rows, array('source' => 'upload', 'original' => dol_sanitizeFileName(basename($name)), 'filename' => $stored, 'who' => trim($user->getFullName($GLOBALS['langs']).' ('.$user->login.')')));
+		$end = isset($read['end']) ? $read['end'] : null;
+		if ($end && $flipped) {
+			$end['balance'] = -$end['balance'];
+		}
+		$this->store($accountId, $rows, array('source' => 'upload', 'original' => dol_sanitizeFileName(basename($name)), 'filename' => $stored, 'who' => trim($user->getFullName($GLOBALS['langs']).' ('.$user->login.')'), 'end' => $end));
 		$done = $this->match($accountId, $user);
 		$left = $this->openCount($accountId);
 		return $accounts[$accountId]->label.': '.count($rows).' transactions read from '.$name.', '.$done.' entries reconciled'.($left ? ', '.$left.' to check below' : '').'.';
