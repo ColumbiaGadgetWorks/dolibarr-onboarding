@@ -29,6 +29,27 @@ class OnboardingReconcile
 {
 	const TYPES = array('csv', 'txt', 'xlsx', 'xls', 'ofx', 'qfx', 'qbo', 'pdf');
 	const MAX_FILE_BYTES = 10485760;
+	// Reconciling rules: what to do with a statement line nobody entered.
+	const DEFAULT_RULES = "# A statement line that matches no entry, and fits a rule, is entered by itself.
+# One rule per line:   [account] in: words => accounting account (and its name)
+#                  or: [account] in: words => transfer ACCOUNT
+# [account] (part of the account's name or ref) and in:/out: are optional.
+# The words are found anywhere in the line's description, in any case. The
+# first rule that fits wins. Lines no rule fits wait for a person.
+Fee: => 6300 Processing fees
+SERVICE CHARGE => 6310 Bank fees
+out: SECRETARY OF S => 6600 Filing fees
+ACCTVERIFY => 4900 Other income (account checks)
+[Venmo] in: soda => 4900 Other income (soda)
+[Venmo] in: to Columbia Gadget Works => 4900 Other income (soda)
+[Givebutter] in: Membership => 4000 Membership dues
+[Givebutter] in: Training Fee => 4300 Class fees
+[Givebutter] in: Donation => 4100 Donations
+[PayPal] out: transfer to the bank => transfer CENTRAL
+[Central] in: PAYPAL => transfer PAYPAL
+[Central] in: GIVEBUTTER => transfer GIVEBUTTER
+[Central] in: VENMO => transfer VENMO
+";
 
 	/** @var DoliDB */
 	public $db;
@@ -721,6 +742,7 @@ class OnboardingReconcile
 			}
 		}
 		$this->settleLeftovers($accountId, $user);
+		$this->applyRules($accountId, $user);
 		return $done;
 	}
 
@@ -839,7 +861,8 @@ class OnboardingReconcile
 			$first = (int) $o->rowid;
 		}
 		$done = 0;
-		$res = $this->db->query("SELECT rowid, dateo, amount FROM ".$p."bank WHERE fk_account = ".((int) $accountId)." AND rappro = 0 AND rowid <> ".$first." ORDER BY dateo, rowid");
+		// Never a transfer, a payout or a member's payment: only an entry linked to nothing.
+		$res = $this->db->query("SELECT b.rowid, b.dateo, b.amount FROM ".$p."bank AS b WHERE b.fk_account = ".((int) $accountId)." AND b.rappro = 0 AND b.rowid <> ".$first." AND NOT EXISTS (SELECT 1 FROM ".$p."bank_url AS u WHERE u.fk_bank = b.rowid) AND NOT EXISTS (SELECT 1 FROM ".$p."subscription AS sb WHERE sb.fk_bank = b.rowid) ORDER BY b.dateo, b.rowid");
 		$entries = array();
 		while ($res && ($o = $this->db->fetch_object($res))) {
 			$entries[] = $o;
@@ -1019,13 +1042,39 @@ class OnboardingReconcile
 		if (!$twin) {
 			return 'Error: no second copy found.';
 		}
-		$mineLinked = $this->linked((int) $line->rowid);
-		$twinLinked = $this->linked((int) $twin->rowid);
-		if ($mineLinked && $twinLinked) {
-			return 'Error: both copies are linked to something; open them and delete the wrong one by hand.';
+		// Keep the copy a subscription points to, else the one linked to something,
+		// else the one the statement matched.
+		$weigh = function ($id) use ($p) {
+			$res = $this->db->query("SELECT (SELECT COUNT(*) FROM ".$p."subscription WHERE fk_bank = ".((int) $id).") AS s, (SELECT COUNT(*) FROM ".$p."bank_url WHERE fk_bank = ".((int) $id)." AND type IN ('payment', 'payment_supplier', 'payment_various', 'banktransfert', 'payment_donation', 'payment_expensereport', 'payment_salary', 'payment_sc', 'payment_vat')) AS pay, (SELECT COUNT(*) FROM ".$p."bank_url WHERE fk_bank = ".((int) $id).") AS u");
+			$o = $res ? $this->db->fetch_object($res) : null;
+			return $o ? array((int) $o->s, (int) $o->pay, (int) $o->u) : array(0, 0, 0);
+		};
+		$mine = $weigh((int) $line->rowid);
+		$theirs = $weigh((int) $twin->rowid);
+		if ($mine[1] && $theirs[1]) {
+			return 'Error: both copies belong to a payment or transfer; open them and delete the wrong one by hand.';
 		}
-		$keep = $twinLinked || !$mineLinked ? (int) $twin->rowid : (int) $line->rowid;
-		$drop = $keep === (int) $twin->rowid ? (int) $line->rowid : (int) $twin->rowid;
+		$keepMine = $mine[0] > $theirs[0] || ($mine[0] == $theirs[0] && ($mine[1] > $theirs[1] || ($mine[1] == $theirs[1] && $mine[2] > $theirs[2])));
+		$keep = $keepMine ? (int) $line->rowid : (int) $twin->rowid;
+		$drop = $keepMine ? (int) $twin->rowid : (int) $line->rowid;
+		$extra = '';
+		// Both copies are a subscription's: the dues were recorded twice. The second
+		// one goes with its entry, and the member's paid-until date is worked out again.
+		$res = $this->db->query("SELECT rowid FROM ".$p."subscription WHERE fk_bank = ".$drop);
+		$sub = $res ? $this->db->fetch_object($res) : null;
+		if ($sub && $mine[0] && $theirs[0]) {
+			require_once DOL_DOCUMENT_ROOT.'/adherents/class/subscription.class.php';
+			$so = new Subscription($this->db);
+			if ($so->fetch((int) $sub->rowid) > 0) {
+				$this->db->query("UPDATE ".$p."subscription SET fk_bank = NULL WHERE rowid = ".((int) $sub->rowid));
+				$so->fk_bank = 0;
+				if ($so->delete($user) > 0) {
+					$extra = ' The dues had been recorded twice on the member card too; the second record was removed.';
+				}
+			}
+		} elseif ($sub) {
+			$this->db->query("UPDATE ".$p."subscription SET fk_bank = ".$keep." WHERE rowid = ".((int) $sub->rowid));
+		}
 		$res = $this->db->query("SELECT num_releve FROM ".$p."bank WHERE rowid = ".((int) $twin->rowid));
 		$o = $res ? $this->db->fetch_object($res) : null;
 		$num = $o ? (string) $o->num_releve : '';
@@ -1037,7 +1086,231 @@ class OnboardingReconcile
 		if ($al->fetch($drop) <= 0 || $al->delete($user) <= 0) {
 			return 'Error: the second copy could not be deleted: '.$al->error;
 		}
-		return 'Double entry fixed: one copy deleted, the other kept and reconciled.';
+		return 'Double entry fixed: one copy deleted, the other kept and reconciled.'.$extra;
+	}
+
+	/**
+	 * The rules on the setup page (or the built-in ones).
+	 *
+	 * @return array<int,array{text:string,account:string,sign:int,words:string,code:string,name:string,transfer:string}>
+	 */
+	public static function rules()
+	{
+		$text = getDolGlobalString('ONBOARDING_RECONCILE_RULES', self::DEFAULT_RULES);
+		$out = array();
+		foreach (preg_split('/\r\n|\r|\n/', $text) as $line) {
+			$line = trim($line);
+			if ($line === '' || $line[0] === '#' || strpos($line, '=>') === false) {
+				continue;
+			}
+			list($left, $right) = array_map('trim', explode('=>', $line, 2));
+			$r = array('text' => $line, 'account' => '', 'sign' => 0, 'words' => '', 'code' => '', 'name' => '', 'transfer' => '');
+			if (preg_match('/^\[([^\]]+)\]\s*(.*)$/', $left, $m)) {
+				$r['account'] = strtolower(trim($m[1]));
+				$left = $m[2];
+			}
+			if (preg_match('/^(in|out):\s*(.*)$/i', $left, $m)) {
+				$r['sign'] = strtolower($m[1]) === 'in' ? 1 : -1;
+				$left = $m[2];
+			}
+			$r['words'] = strtolower(trim($left));
+			if (preg_match('/^transfer\s+(.+)$/i', $right, $m)) {
+				$r['transfer'] = trim($m[1]);
+			} elseif (preg_match('/^(\S+)\s*(.*)$/', $right, $m)) {
+				$r['code'] = $m[1];
+				$r['name'] = trim($m[2]);
+			}
+			if ($r['words'] !== '' && ($r['code'] !== '' || $r['transfer'] !== '')) {
+				$out[] = $r;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @param object $acc Account (ref, label)
+	 * @param object $row Statement line (amount, label)
+	 * @return array|null The first rule that fits
+	 */
+	public static function ruleFor($acc, $row)
+	{
+		$name = strtolower($acc->ref.' '.$acc->label);
+		$label = strtolower((string) $row->label);
+		foreach (self::rules() as $r) {
+			if ($r['account'] !== '' && strpos($name, $r['account']) === false) {
+				continue;
+			}
+			if ($r['sign'] && ($r['sign'] > 0) !== ((float) $row->amount > 0)) {
+				continue;
+			}
+			if (strpos($label, $r['words']) !== false) {
+				return $r;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Enter the account's still unmatched statement lines that a rule fits: as a
+	 * miscellaneous payment on the rule's accounting account, or as a transfer
+	 * with another of our accounts. Each is reconciled, and listed under "Entered
+	 * by rules" with an Undo.
+	 *
+	 * @param int $accountId Account
+	 * @param User $user Who
+	 * @return int Lines entered
+	 */
+	public function applyRules($accountId, $user)
+	{
+		if (!self::rules()) {
+			return 0;
+		}
+		$p = $this->db->prefix();
+		$accs = $this->accounts();
+		if (!isset($accs[$accountId])) {
+			return 0;
+		}
+		$acc = $accs[$accountId];
+		$rows = array();
+		$res = $this->db->query("SELECT * FROM ".$p."onboarding_stmt WHERE fk_account = ".((int) $accountId)." AND status = 'open' AND (note IS NULL OR note <> 'norule') ORDER BY dateo, rowid");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$rows[] = $o;
+		}
+		$n = 0;
+		foreach ($rows as $row) {
+			$r = self::ruleFor($acc, $row);
+			if (!$r) {
+				continue;
+			}
+			$line = $r['transfer'] !== '' ? $this->ruleTransfer($accountId, $row, $r['transfer'], $user) : $this->ruleEntry($accountId, $row, $r, $user);
+			if ($line > 0) {
+				$this->reconcileLine($line, substr((string) $row->dateo, 0, 10), $user);
+				$this->db->query("UPDATE ".$p."onboarding_stmt SET status = 'added', note = 'rule', fk_bank = ".((int) $line)." WHERE rowid = ".((int) $row->rowid));
+				$n++;
+			}
+		}
+		return $n;
+	}
+
+	/**
+	 * @return int The new entry, or 0
+	 */
+	private function ruleEntry($accountId, $row, $r, $user)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/paymentvarious.class.php';
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$acc = new Account($this->db);
+		if ($acc->fetch((int) $accountId) <= 0) {
+			return 0;
+		}
+		$t = strtotime(substr((string) $row->dateo, 0, 10).' 12:00:00');
+		$pv = new PaymentVarious($this->db);
+		$pv->fk_account = (int) $accountId;
+		$pv->datep = $t;
+		$pv->datev = $t;
+		$pv->sens = (float) $row->amount > 0 ? 1 : 0;
+		$pv->amount = abs((float) $row->amount);
+		$pv->type_payment = dol_getIdFromCode($this->db, $acc->type == Account::TYPE_CASH ? 'LIQ' : 'VIR', 'c_paiement', 'code', 'id', 1);
+		$pv->label = dol_trunc(trim((string) $row->label) !== '' ? (string) $row->label : $r['name'], 250, 'right', 'UTF-8', 1);
+		$pv->accountancy_code = $r['code'];
+		$pv->note = 'Entered by the reconciling rule "'.$r['text'].'"';
+		if ($pv->create($user) <= 0) {
+			dol_syslog('Onboarding: rule entry failed: '.$pv->error, LOG_WARNING);
+			return 0;
+		}
+		$pv->fetch($pv->id);
+		return (int) $pv->fk_bank;
+	}
+
+	/**
+	 * A transfer with another of our accounts: this side as the statement shows it,
+	 * the other side the opposite, linked as Dolibarr links them.
+	 *
+	 * @return int This side's entry, or 0
+	 */
+	private function ruleTransfer($accountId, $row, $target, $user)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		$other = 0;
+		foreach ($this->accounts() as $a) {
+			if ((int) $a->rowid !== (int) $accountId && (strcasecmp($a->ref, $target) === 0 || stripos($a->label, $target) !== false)) {
+				$other = (int) $a->rowid;
+				break;
+			}
+		}
+		$here = new Account($this->db);
+		$there = new Account($this->db);
+		if (!$other || $here->fetch((int) $accountId) <= 0 || $there->fetch($other) <= 0) {
+			return 0;
+		}
+		$t = strtotime(substr((string) $row->dateo, 0, 10).' 12:00:00');
+		$amount = (float) $row->amount;
+		$a = $here->addline($t, 'VIR', ($amount < 0 ? 'Transfer to ' : 'Transfer from ').$there->label, $amount, '', 0, $user);
+		$b = $there->addline($t, 'VIR', ($amount < 0 ? 'Transfer from ' : 'Transfer to ').$here->label, -$amount, '', 0, $user);
+		if ($a <= 0 || $b <= 0) {
+			return 0;
+		}
+		$here->add_url_line($a, $b, DOL_URL_ROOT.'/compta/bank/line.php?rowid=', '(banktransfert)', 'banktransfert');
+		$there->add_url_line($b, $a, DOL_URL_ROOT.'/compta/bank/line.php?rowid=', '(banktransfert)', 'banktransfert');
+		return (int) $a;
+	}
+
+	/**
+	 * @param int $accountId Account
+	 * @return object[] Lines entered by rules in the last 120 days, newest first
+	 */
+	public function byRules($accountId)
+	{
+		$out = array();
+		$res = $this->db->query("SELECT s.*, pv.accountancy_code FROM ".$this->db->prefix()."onboarding_stmt AS s LEFT JOIN ".$this->db->prefix()."payment_various AS pv ON pv.fk_bank = s.fk_bank WHERE s.fk_account = ".((int) $accountId)." AND s.status = 'added' AND s.note = 'rule' AND s.datec >= '".$this->db->idate(OnboardingService::now() - 120 * 86400)."' ORDER BY s.dateo DESC, s.rowid DESC LIMIT 300");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$out[] = $o;
+		}
+		return $out;
+	}
+
+	/**
+	 * Take back what a rule entered: the entry (and a transfer's other side) is
+	 * deleted, and the line waits for a person; no rule enters it again.
+	 *
+	 * @param int $id Statement line
+	 * @param User $user Who
+	 * @return string What happened
+	 */
+	public function undoRule($id, $user)
+	{
+		$row = $this->row($id);
+		if (!$row || $row->status != 'added' || $row->note != 'rule' || !$row->fk_bank) {
+			return 'Error: that line was not entered by a rule.';
+		}
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/paymentvarious.class.php';
+		$p = $this->db->prefix();
+		$drop = array((int) $row->fk_bank);
+		$pvId = 0;
+		$res = $this->db->query("SELECT url_id, type FROM ".$p."bank_url WHERE fk_bank = ".((int) $row->fk_bank));
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			if ($o->type == 'banktransfert') {
+				$drop[] = (int) $o->url_id;
+			} elseif ($o->type == 'payment_various') {
+				$pvId = (int) $o->url_id;
+			}
+		}
+		foreach ($drop as $l) {
+			$this->db->query("UPDATE ".$p."bank SET rappro = 0 WHERE rowid = ".((int) $l));
+			$al = new AccountLine($this->db);
+			if ($al->fetch($l) > 0) {
+				$al->delete($user);
+			}
+		}
+		if ($pvId) {
+			$pv = new PaymentVarious($this->db);
+			if ($pv->fetch($pvId) > 0) {
+				$pv->delete($user);
+			}
+		}
+		$this->db->query("UPDATE ".$p."onboarding_stmt SET status = 'open', note = 'norule', fk_bank = NULL WHERE rowid = ".((int) $id));
+		return 'Taken back: the line waits for a person, and no rule enters it again.';
 	}
 
 	/**
@@ -1107,22 +1380,33 @@ class OnboardingReconcile
 	}
 
 	/**
-	 * Forget an upload's lines that matched nothing (a wrong file, or the wrong account).
+	 * Undo an upload: entries it reconciled go back to unreconciled (unless another
+	 * statement matched them too), and its lines are forgotten. Entries made from
+	 * its lines (Add, or a rule) stay: they are real.
 	 *
 	 * @param int $fileId Upload
 	 * @return string What happened
 	 */
-	public function forget($fileId)
+	public function undo($fileId)
 	{
 		$p = $this->db->prefix();
-		$this->db->query("DELETE FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $fileId)." AND status IN ('open', 'ignored')");
-		$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $fileId));
-		$o = $res ? $this->db->fetch_object($res) : null;
-		if ($o && (int) $o->n === 0) {
-			$this->db->query("DELETE FROM ".$p."onboarding_stmt_file WHERE rowid = ".((int) $fileId)." AND source = 'upload'");
-			return 'The upload is forgotten.';
+		$lines = array();
+		$res = $this->db->query("SELECT DISTINCT fk_bank FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $fileId)." AND status = 'matched' AND fk_bank IS NOT NULL");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$lines[] = (int) $o->fk_bank;
 		}
-		return 'Its unmatched lines are forgotten; the entries it reconciled stay reconciled.';
+		$n = 0;
+		foreach ($lines as $l) {
+			$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$p."onboarding_stmt WHERE fk_bank = ".$l." AND fk_file <> ".((int) $fileId)." AND status IN ('matched', 'added')");
+			$o = $res ? $this->db->fetch_object($res) : null;
+			if ($o && (int) $o->n === 0) {
+				$this->db->query("UPDATE ".$p."bank SET rappro = 0, num_releve = NULL WHERE rowid = ".$l);
+				$n++;
+			}
+		}
+		$this->db->query("DELETE FROM ".$p."onboarding_stmt WHERE fk_file = ".((int) $fileId));
+		$this->db->query("DELETE FROM ".$p."onboarding_stmt_file WHERE rowid = ".((int) $fileId));
+		return 'Upload undone: '.$n.' entries are unreconciled again. Upload the file again to match it afresh.';
 	}
 
 	/**
@@ -1164,7 +1448,9 @@ class OnboardingReconcile
 			return 'Error: '.$read['error'];
 		}
 		$rows = $read['rows'];
-		$flipped = $this->signScore($accountId, $rows, -1) > $this->signScore($accountId, $rows, 1);
+		// Turned around only when that clearly fits better.
+		$minus = $this->signScore($accountId, $rows, -1);
+		$flipped = $minus >= 2 && $minus > 2 * $this->signScore($accountId, $rows, 1);
 		if ($flipped) {
 			foreach ($rows as &$r) {
 				$r['amount'] = -$r['amount'];
@@ -1203,8 +1489,16 @@ class OnboardingReconcile
 	 */
 	private function signScore($accountId, $rows, $sign)
 	{
+		// Every entry on the file's days, reconciled or not: a file read again must
+		// keep the sign it had, though its entries are reconciled by now.
+		$from = $to = '';
+		foreach ($rows as $r) {
+			$from = ($from === '' || $r['date'] < $from) ? $r['date'] : $from;
+			$to = ($to === '' || $r['date'] > $to) ? $r['date'] : $to;
+		}
+		$w = self::window();
 		$have = array();
-		$res = $this->db->query("SELECT amount FROM ".$this->db->prefix()."bank WHERE fk_account = ".((int) $accountId)." AND rappro = 0");
+		$res = $this->db->query("SELECT amount FROM ".$this->db->prefix()."bank WHERE fk_account = ".((int) $accountId)." AND dateo >= '".date('Y-m-d', strtotime($from.' 12:00:00') - $w * 86400)."' AND dateo <= '".date('Y-m-d', strtotime($to.' 12:00:00') + $w * 86400)." 23:59:59'");
 		while ($res && ($o = $this->db->fetch_object($res))) {
 			$k = number_format(round((float) $o->amount, 2), 2, '.', '');
 			$have[$k] = isset($have[$k]) ? $have[$k] + 1 : 1;

@@ -16,7 +16,7 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
- *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | compare FILE | aside ACCOUNT | why ROW | transfer FROM TO DAY AMOUNT | link LINE MEMBER | twin LINE | decide ID add|ignore|match [LINE] | force LINE
+ *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | compare FILE | aside ACCOUNT | why ROW | transfer FROM TO DAY AMOUNT | link LINE MEMBER | twin LINE | undo FILE | rules ACCOUNT | unrule ROW | decide ID add|ignore|match [LINE] | force LINE
  *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
  *   php tick.php purchase const NAME VALUE | roletags | tag EMAIL ROLE | untag EMAIL ROLE | member EMAIL CODE FIRST LAST | budget ZONE AMOUNT | bank LABEL | pay ID ACCOUNT | link ID EMAIL ACTION | show ID
  */
@@ -464,6 +464,12 @@ if ($job == 'daily') {
 		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
 		$a = new Account($db);
 		echo $a->add_url_line((int) $argv[3], (int) $argv[4], DOL_URL_ROOT.'/adherents/card.php?rowid=', 'member', 'member')."\n";
+	} elseif ($what == 'undo') {
+		echo $rec->undo((int) $argv[3])."\n";
+	} elseif ($what == 'rules') {
+		echo json_encode($rec->byRules((int) $argv[3]))."\n";
+	} elseif ($what == 'unrule') {
+		echo $rec->undoRule((int) $argv[3], $user)."\n";
 	} elseif ($what == 'twin') {
 		echo $rec->fixTwin((int) $argv[3], $user)."\n";
 	} elseif ($what == 'compare') {

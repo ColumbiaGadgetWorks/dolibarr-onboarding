@@ -518,6 +518,19 @@ is offered as a double entry: **Fix the double entry** keeps the copy linked to 
 payment and deletes the other. The PayPal sync uses a PayPal entry the treasurer already typed in
 (the same amount, three days either side, linked to nothing) instead of adding a second one.
 
+**Rules** (setup page, Reconciling) enter the lines nobody entered: a line that matches no
+entry and fits a rule becomes a miscellaneous payment on the rule's accounting account (so
+Transfer in accounting books it there), or a transfer between our accounts, and is reconciled.
+The built-in rules file processing fees (6300), bank service charges (6310), Secretary of State
+charges (6600), soda sales on Venmo (4900), Givebutter dues, class fees and donations (4000,
+4300, 4100), PayPal's transfers to the bank, and PayPal, Givebutter and Venmo deposits at
+Central Bank as transfers. Each account lists what the rules entered in the last 120 days, with
+**Undo** (the entry is deleted and the line waits for a person; no rule takes it again). A rule
+is one line, `[account] in: words => 6310 Bank fees` or `[account] out: words => transfer
+CENTRAL`; the account and in/out are optional, the first rule that fits wins. Card purchases,
+checks and deposits fit no built-in rule: they wait for a person, or a rule you add. Every upload
+can be undone: what it reconciled goes back to unreconciled.
+
 Some lines need nobody and are set aside, with a count shown: lines dated before the
 account's first entry in Dolibarr (an export reaching back years before the books started),
 the same transaction from a second upload (the CSV and the PDF of one month), and lines whose

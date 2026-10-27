@@ -131,6 +131,7 @@ $sections = array(
 	),
 	'Reconciling' => array(
 		'ONBOARDING_RECONCILE_DAYS' => array('Days apart a statement line and its entry may be', 'text', 'Default 5. Reconcile bank accounts matches a statement line to the Dolibarr entry with the same amount at most this many days away (banks post a day or two after PayPal or Givebutter send).'),
+		'ONBOARDING_RECONCILE_RULES' => array('Rules for lines nobody entered', 'area', 'A statement line that matches no entry and fits a rule is entered by itself (on the accounting account given, or as a transfer between our accounts), reconciled, and listed under "Entered by the rules" with an Undo. The comments at the top explain the format. Empty: the built-in rules.'),
 	),
 	'Reminders' => array(
 		'ONBOARDING_REMINDER_DAYS' => array('Send reminders after (days)', 'text', 'Comma separated days after a payment is cancelled or missed, for example 3,7,14.'),
@@ -409,6 +410,10 @@ foreach ($sections as $title => $fields) {
 			if ($name == 'ONBOARDING_AGREEMENT_TEXT' && $value === '') {
 				$shown = $docs['agreement']['text'];
 			}
+			if ($name == 'ONBOARDING_RECONCILE_RULES' && $value === '') {
+				dol_include_once('/onboarding/class/reconcile.class.php');
+				$shown = OnboardingReconcile::DEFAULT_RULES;
+			}
 			if ($name == 'ONBOARDING_FILING_YEARLY' && $value === '') {
 				dol_include_once('/onboarding/class/filing.class.php');
 				$shown = OnboardingFiling::DEFAULT_YEARLY;
@@ -417,7 +422,7 @@ foreach ($sections as $title => $fields) {
 				$shown = OnboardingHome::layoutText();
 				print '<a id="home-layout"></a>';
 			}
-			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : 6)).'" class="quatrevingtpercent"'.($name == 'ONBOARDING_HOME_YAML' ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown).'</textarea>';
+			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : ($name == 'ONBOARDING_RECONCILE_RULES' ? 20 : 6))).'" class="quatrevingtpercent"'.(in_array($name, array('ONBOARDING_HOME_YAML', 'ONBOARDING_RECONCILE_RULES'), true) ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown).'</textarea>';
 		} elseif ($def[1] == 'secret') {
 			print '<input type="password" name="'.$name.'" value="" class="minwidth400" autocomplete="new-password" placeholder="'.($value !== '' ? 'Saved. Type a new one to replace it.' : 'Not set').'">';
 		} else {
