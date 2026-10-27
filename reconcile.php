@@ -64,7 +64,7 @@ if ($canwrite && $action !== '') {
 
 llxHeader('', 'Reconcile bank accounts');
 print load_fiche_titre('Reconcile bank accounts', '', 'bank_account');
-print '<p class="opacitymedium">Reconciling means checking every entry in Dolibarr against the bank\'s own record, so the books are known to be right. Upload the account\'s transactions as downloaded from online banking (CSV, Excel, OFX or QFX; see the hints below): each statement line is matched to the Dolibarr entry with the same amount, up to '.OnboardingReconcile::window().' days apart, and those entries are marked reconciled with the month (YYYYMM) as statement number. PayPal is read from PayPal itself, every day and with the button. Anything that does not match is listed below for a person to look at.</p>';
+print '<p class="opacitymedium">Reconciling means checking every entry in Dolibarr against the bank\'s own record, so the books are known to be right. Upload the account\'s statement PDF, or its transactions as downloaded from online banking (CSV, Excel, OFX or QFX; see the hints below): each statement line is matched to the Dolibarr entry with the same amount, up to '.OnboardingReconcile::window().' days apart, and those entries are marked reconciled with the month (YYYYMM) as statement number. PayPal is read from PayPal itself, every day and with the button. Anything that does not match is listed below for a person to look at.</p>';
 
 $accounts = $rec->accounts();
 $ppAcc = $rec->paypalAccount();
@@ -97,9 +97,9 @@ if ($canwrite && $accounts) {
 	foreach ($accounts as $a) {
 		print '<option value="'.((int) $a->rowid).'">'.dol_escape_htmltag($a->label).'</option>';
 	}
-	print '</select> <input type="file" name="files[]" multiple accept=".csv,.txt,.xlsx,.xls,.ofx,.qfx,.qbo"> <button type="submit" class="button smallpaddingimp">Upload and reconcile</button>';
+	print '</select> <input type="file" name="files[]" multiple accept=".pdf,.csv,.txt,.xlsx,.xls,.ofx,.qfx,.qbo"> <button type="submit" class="button smallpaddingimp">Upload and reconcile</button>';
 	print ' <a class="butAction smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=again&token='.newToken().'">Match again</a>';
-	print '<br><span class="opacitymedium small">Where to get it: <strong>Central Bank</strong>, online banking, the checking account, Activity, set the dates, Export (CSV or Excel). <strong>US Bank card</strong>, Download transactions (CSV). <strong>Givebutter</strong>, Transactions, filter the dates, Export (and Payouts, Export). <strong>Venmo</strong>, Statements, the month, Download CSV. <strong>PayPal</strong> needs nothing, or its Activity download (CSV). The same file uploaded twice is read once; months can overlap.</span>';
+	print '<br><span class="opacitymedium small">Where to get it: <strong>Central Bank</strong>, the monthly statement PDF, or online banking, the checking account, Activity, set the dates, Export (CSV or Excel). <strong>US Bank card</strong>, Download transactions (CSV). <strong>Givebutter</strong>, Transactions, filter the dates, Export (and Payouts, Export). <strong>Venmo</strong>, Statements, the month, Download CSV. <strong>PayPal</strong> needs nothing, or its Activity download (CSV). Statement PDFs work when they are the bank\'s own (with text); a scanned paper statement does not. The same file uploaded twice is read once; months can overlap.</span>';
 	print '</td></tr></table></form><br>';
 }
 
