@@ -27,6 +27,23 @@ Needed for Plaid's production review (and good practice before bank feeds go liv
 - Code to support it, once adopted: delete statement lines and Plaid transactions older than 7
   years in the daily job, and show the policy's dates on the setup page.
 
+### Plaid security attestations, due 2027-04-28
+
+Plaid's production review asks us to attest to each of these by **28 April 2027**.
+
+| Attestation | How | Status |
+|---|---|---|
+| Documented access control policy | `PERMISSIONS.md` in cgwmanagement | Attest now |
+| Zero trust access architecture | Cloudflare Access (free to 50 users) in front of dolibarr.adman.casa: every request needs a login checked by Cloudflare | To do |
+| Centralized identity and access management | The same: everyone signs in to Cloudflare Access with their Google account | To do |
+| MFA where Plaid Link is deployed | The same, with Google 2-step verification required for those accounts | To do |
+| Information Security Policy | One document adopted by the board, a section per item below (Claude can draft it) | To do |
+| Data deletion and retention policy | The retention paragraph above, in the ISP | To do |
+| Patches vulnerabilities within a defined SLA | In the ISP: critical within 14 days, others within 60; Dolibarr image and the module's Update button monthly | To do |
+| Vulnerability scanning | GitHub Dependabot alerts on the repositories; a monthly container scan (e.g. Trivy) of Dolibarr on Skynet, results kept | To do |
+| Automated de-provisioning | Module: when an officer's role tag is removed or a member lapses, disable their Dolibarr login and email a checklist (Cloudflare Access, bank, PayPal, Givebutter, Venmo, Plaid, GitHub) | To build |
+| Periodic access reviews and audits | A yearly "Access review" deadline task to the Secretary each spring (Deadline reminders); attest after the first one | To do |
+
 ## Door access emails
 
 What happens today: when someone's first dues payment arrives, the membership team address
