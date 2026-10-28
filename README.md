@@ -594,7 +594,7 @@ in cgwmanagement) asks Dolibarr to do by itself:
   (`president`, `vice-president`, `secretary`, `treasurer`). The person and the security owner
   are emailed first; the login goes 3 days later unless it is put right (the membership
   renewed, the tag put back). The security owner then gets the list of other accounts to remove
-  them from. Logins not linked to a member card (the emergency administrator, script accounts)
+  them from. Logins not linked to a member card (script accounts, the first administrator)
   are left alone, and the last working administrator is never disabled. Link each officer's
   user to their member card, or this does not cover them.
 - **Old bank data goes.** Bank transactions read from the banks (statement lines, bank feeds)
@@ -652,9 +652,8 @@ the same page; give board members the right "See yearly tax filings".
 
 ### Updating to 0.16
 
-Update from GitHub. Then, on the setup page: Security, enter the security owner's email
-(or tag the Vice President's member card `vice-president`); Housekeeping, set "Delete ID
-photos after (days)" to 90. Open Access review and make sure each officer's login shows
+Update from GitHub. Then, on the setup page, Security, enter the security owner's email (or
+tag the Vice President's member card `vice-president`). Open Access review and make sure each officer's login shows
 their member card and officer tag: a login with none is left alone, and an administrator
 linked to a card without an officer tag is warned and disabled 3 days later.
 

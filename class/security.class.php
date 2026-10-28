@@ -16,7 +16,7 @@ require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
  * warned first, and the login goes a few days later if nothing changes, so a tag
  * taken off by mistake can be put back. The security owner then gets the list of
  * the other accounts to remove the person from. Logins not linked to a member
- * card (the emergency administrator, script accounts) are left alone, and the
+ * card (script accounts, the installation's first administrator) are left alone, and the
  * last working administrator is never disabled.
  *
  * Retention: bank transactions read from the banks (statement uploads and bank
@@ -340,10 +340,6 @@ class OnboardingSecurity
 		$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$p."adherent WHERE entity IN (".getEntity('adherent').") AND statut IN (0, -2) AND COALESCE(datefin, tms) < '".$this->db->escape($cut)."'");
 		$o = $res ? $this->db->fetch_object($res) : null;
 		$out['Former members whose membership ended more than 7 years ago'] = $o ? (int) $o->n : 0;
-		$days = (int) getDolGlobalString('ONBOARDING_ID_RETENTION_DAYS', '0');
-		$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$p."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND id_file IS NOT NULL AND id_file <> '' AND completed_at IS NOT NULL AND completed_at < '".$this->db->idate(OnboardingService::now() - 90 * 86400)."'");
-		$o = $res ? $this->db->fetch_object($res) : null;
-		$out['ID photos kept more than 90 days after signup'.($days <= 0 || $days > 90 ? ' (set "Delete ID photos after" to 90 on the setup page)' : '')] = $o ? (int) $o->n : 0;
 		$cut = self::bankCutoff();
 		if ($cut === null) {
 			$cut = date('Y-m-d', strtotime('-7 years', OnboardingService::now()));

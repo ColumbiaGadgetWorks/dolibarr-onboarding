@@ -17,11 +17,11 @@ deleted after 7 years, Access review page, monthly security scan.
 | Attestation | How | Status |
 |---|---|---|
 | Documented access control policy | `PERMISSIONS.md` and the policy, section 2 | Attest once the policy is merged |
-| Zero trust access architecture | Dolibarr only through Cloudflare (HTTPS) and VoidAuth sign-in; every page needs a session or a signed link. Cloudflare Access in front is not needed for now | Attest once VoidAuth requires a second step |
-| Centralized identity and access management | VoidAuth (OIDC) for Dolibarr; people's Dolibarr passwords random and unknown; one emergency admin | Same |
+| Zero trust access architecture | Dolibarr only through Cloudflare (HTTPS) and VoidAuth sign-in; every page needs a session or a signed link. Cloudflare Access in front is not needed for now | Attest now (VoidAuth requires a second step) |
+| Centralized identity and access management | Dolibarr signs in only through VoidAuth (OIDC); no Dolibarr passwords | Same |
 | MFA where Plaid Link is deployed | VoidAuth requires an authenticator app or passkey for every account | Same |
 | Information Security Policy | The policy | Attest once merged |
-| Data deletion and retention policy | The policy, section 8; the daily job deletes bank data after 7 years and ID photos after 90 days | Attest once merged and ID photo days set to 90 |
+| Data deletion and retention policy | The policy, section 8; the daily job deletes bank data after 7 years | Attest once merged |
 | Patches vulnerabilities within a defined SLA | The policy, section 4: critical and high within 14 days, others 60; the monthly security check issue | Attest after the first monthly check |
 | Vulnerability scanning | Monthly Trivy scan workflow (images in `.github/scan-images.txt`) and Dependabot alerts on the repositories | Attest after the first scan |
 | Automated de-provisioning | Module 0.16: logins of people whose membership or officer tag ended are disabled, with a checklist to the security owner | Attest once officers' logins are linked to member cards |

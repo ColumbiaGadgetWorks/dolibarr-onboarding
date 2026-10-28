@@ -43,7 +43,7 @@ foreach ($sec->logins() as $o) {
 	if ($o->reason !== '') {
 		print '<span class="error">To be disabled'.($o->disable_on ? ' on '.dol_print_date($o->disable_on, 'day') : ' (warned at the next daily run)').'</span>: '.dol_escape_htmltag($o->reason);
 	} elseif ((int) $o->fk_member <= 0) {
-		print '<span class="opacitymedium">Not linked to a member card: reviewed by hand'.((int) $o->admin ? ' (the emergency administrator, or link it to its officer\'s member card)' : '').'</span>';
+		print '<span class="opacitymedium">Not linked to a member card: reviewed by hand'.((int) $o->admin ? ' (link it to its officer\'s member card if it is one)' : '').'</span>';
 	} else {
 		print '<span class="ok">Stays</span>';
 	}
