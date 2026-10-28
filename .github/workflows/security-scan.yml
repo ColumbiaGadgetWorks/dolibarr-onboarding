@@ -26,7 +26,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Trivy
         run: |
           base=https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION

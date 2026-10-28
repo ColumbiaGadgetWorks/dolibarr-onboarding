@@ -11,7 +11,7 @@ jobs:
       matrix:
         php: ['7.4', '8.3']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
@@ -32,7 +32,7 @@ jobs:
       MOCK_WEBHOOK_URL: http://dolibarr/custom/onboarding/public/api.php?action=givebutter
       MOCK_DOLIBARR_KEY: sandbox-key-sandbox-key-sandbox-key
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -80,7 +80,7 @@ jobs:
       run:
         working-directory: sandbox
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
