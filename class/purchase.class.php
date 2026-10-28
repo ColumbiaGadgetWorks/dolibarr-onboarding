@@ -46,6 +46,8 @@ class OnboardingPurchase
 	const ROLE_TREASURER = 'treasurer';
 	const BOARD_ROLES = array('president', 'vice-president', 'secretary', 'treasurer', 'director');
 	const ROLES_PARENT = 'Roles';
+	/** Roles that are not board seats. */
+	const OTHER_ROLES = array('security');
 
 	/** @var DoliDB */
 	public $db;
@@ -198,7 +200,7 @@ class OnboardingPurchase
 		if (!$parent) {
 			return 'The Roles tag could not be created.';
 		}
-		$labels = self::BOARD_ROLES;
+		$labels = array_merge(self::BOARD_ROLES, self::OTHER_ROLES);
 		foreach ($this->training->zones() as $z) {
 			$labels[] = self::bossRole($z);
 		}
@@ -252,9 +254,10 @@ class OnboardingPurchase
 			'secretary' => 'Approves big requests as a director.',
 			'treasurer' => 'Files for any zone or the General fund. Approves big requests, and is told when one is ready to pay. Gets the yearly tax filing emails.',
 			'director' => 'Any other director who may approve big requests.',
+			'security' => 'The security owner: warned before a Dolibarr login is disabled, and sent the list of other accounts to remove the person from. Nobody tagged: the secretary.',
 		);
 		$roles = array();
-		foreach (self::BOARD_ROLES as $r) {
+		foreach (array_merge(self::BOARD_ROLES, self::OTHER_ROLES) as $r) {
 			$roles[$r] = $what[$r];
 		}
 		foreach ($this->training->zones() as $z) {

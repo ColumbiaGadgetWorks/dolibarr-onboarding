@@ -154,7 +154,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. `sandbox/e2e-security.mjs` disables the logins of an officer who loses the tag and a member whose membership ends (after a warning, and not when put right in time), and deletes bank data past 7 years. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -584,6 +584,33 @@ redirect URIs in the Plaid dashboard. Ask Plaid only for the Transactions produc
 In the sandbox environment the test bank logs in with `user_good` / `pass_good`. Feed a test
 Dolibarr account from it, never a real one, and disconnect when done.
 
+## Security and records
+
+What the information security and records policy (`governance/policies/information-security.md`
+in cgwmanagement) asks Dolibarr to do by itself:
+
+- **Logins end with the role.** A Dolibarr login linked to a member card is disabled when the
+  membership ends, and an administrator's when their member card no longer has an officer tag
+  (`president`, `vice-president`, `secretary`, `treasurer`). The person and the security owner
+  are emailed first; the login goes 3 days later unless it is put right (the membership
+  renewed, the tag put back). The security owner then gets the list of other accounts to remove
+  them from. Logins not linked to a member card (script accounts, the first administrator)
+  are left alone, and the last working administrator is never disabled. Link each officer's
+  user to their member card, or this does not cover them.
+- **Old bank data goes.** Bank transactions read from the banks (statement lines, bank feeds)
+  and uploaded statement files older than 7 years are deleted by the daily job. The Dolibarr
+  bank entries (the books) stay.
+- **Access review** (Members, Onboarding, Access review; administrators only): every login, its
+  member card and officer tags, its last login and what the policy says about it, and the
+  records past their retention time. Go through it each April for the yearly review.
+- **Monthly security check:** `.github/workflows/security-scan.yml` scans the images Skynet runs
+  (`.github/scan-images.txt`) and this repository with Trivy on the 2nd of each month, and files
+  an issue labelled `security` with the findings and the month's update checklist.
+
+Set on the setup page, Security: the security owner's email (empty: whoever holds the
+`security` tag, or with nobody tagged, the secretary), removing logins on or off, the other
+accounts to remove people from, and the years bank data is kept.
+
 ## Yearly filings
 
 CGW, **Yearly filings** runs the IRS return (Form 990-N while gross receipts stay under
@@ -622,6 +649,14 @@ due date. A year that ended before this existed shows as "not tracked": start it
 it as filed outside Dolibarr (dates and gross receipts) on Yearly filings. The statements
 are kept under `onboarding/filing/<year>/` in Dolibarr's documents. Members, Onboarding has
 the same page; give board members the right "See yearly tax filings".
+
+### Updating to 0.16
+
+Update from GitHub. Then tag the security owner's member card `security` (Brad for now; with
+nobody tagged, the secretary gets the security emails), or enter an email on the setup page,
+Security. Open Access review and make sure each officer's login shows
+their member card and officer tag: a login with none is left alone, and an administrator
+linked to a card without an officer tag is warned and disabled 3 days later.
 
 ### Updating to 0.15
 

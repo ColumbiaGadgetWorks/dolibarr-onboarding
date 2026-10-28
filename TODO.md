@@ -6,43 +6,26 @@ and management repositories: things the makerspace tracks by hand today.
 
 ## High priority: records, privacy and access policy
 
-Needed for Plaid's production review (and good practice before bank feeds go live).
-
-- **Records retention policy, adopted by the board.** One paragraph in the board minutes, for
-  example: financial records and bank data are kept 7 years, then deleted; member data is kept
-  while someone is a member, and its financial part 7 years after; unfinished signups are
-  deleted after 30 days; a disconnected Plaid account's access is removed the same day; the
-  Secretary reviews this policy each April at the annual meeting. Then answer Yes to Plaid's
-  "defined and enforced data deletion and retention policy, reviewed periodically".
-- **Privacy page.** Add to the website's `content/privacy.md`: "Our own bank records. Our
-  bookkeeping system reads Columbia Gadget Works' own bank, card and payment-service accounts
-  through Plaid, to keep the books. It does not connect to members' or donors' bank accounts.
-  Transactions are kept with our financial records for 7 years, then deleted."
-- **Dolibarr admins down to two** (Treasurer and technical admin), as `PERMISSIONS.md` in
-  cgwmanagement plans; the President and Secretary get their rights through groups. Do this
-  before Plaid connects real accounts.
-- **Yearly access review**, with item 11 below: each spring, list who can log in to Dolibarr,
-  the bank, PayPal, Givebutter, Venmo, Plaid, GitHub and Cloudflare, and remove anyone who no
-  longer needs it.
-- Code to support it, once adopted: delete statement lines and Plaid transactions older than 7
-  years in the daily job, and show the policy's dates on the setup page.
+Needed for Plaid's production review. The policy is
+`governance/policies/information-security.md` in cgwmanagement (adopted by merging its pull
+request); the privacy page says the same on the website. The four officers stay Dolibarr
+administrators (decided 2026-10-28). Built in 0.16: logins disabled when a role ends, bank data
+deleted after 7 years, Access review page, monthly security scan.
 
 ### Plaid security attestations, due 2027-04-28
 
-Plaid's production review asks us to attest to each of these by **28 April 2027**.
-
 | Attestation | How | Status |
 |---|---|---|
-| Documented access control policy | `PERMISSIONS.md` in cgwmanagement | Attest now |
-| Zero trust access architecture | Cloudflare Access (free to 50 users) in front of dolibarr.adman.casa: every request needs a login checked by Cloudflare | To do |
-| Centralized identity and access management | The same: everyone signs in to Cloudflare Access with their Google account | To do |
-| MFA where Plaid Link is deployed | The same, with Google 2-step verification required for those accounts | To do |
-| Information Security Policy | One document adopted by the board, a section per item below (Claude can draft it) | To do |
-| Data deletion and retention policy | The retention paragraph above, in the ISP | To do |
-| Patches vulnerabilities within a defined SLA | In the ISP: critical within 14 days, others within 60; Dolibarr image and the module's Update button monthly | To do |
-| Vulnerability scanning | GitHub Dependabot alerts on the repositories; a monthly container scan (e.g. Trivy) of Dolibarr on Skynet, results kept | To do |
-| Automated de-provisioning | Module: when an officer's role tag is removed or a member lapses, disable their Dolibarr login and email a checklist (Cloudflare Access, bank, PayPal, Givebutter, Venmo, Plaid, GitHub) | To build |
-| Periodic access reviews and audits | A yearly "Access review" deadline task to the Secretary each spring (Deadline reminders); attest after the first one | To do |
+| Documented access control policy | `PERMISSIONS.md` and the policy, section 2 | Attest once the policy is merged |
+| Zero trust access architecture | Dolibarr only through Cloudflare (HTTPS) and VoidAuth sign-in; every page needs a session or a signed link. Cloudflare Access in front is not needed for now | Attest now (VoidAuth requires a second step) |
+| Centralized identity and access management | Dolibarr signs in only through VoidAuth (OIDC); no Dolibarr passwords | Same |
+| MFA where Plaid Link is deployed | VoidAuth requires an authenticator app or passkey for every account | Same |
+| Information Security Policy | The policy | Attest once merged |
+| Data deletion and retention policy | The policy, section 8; the daily job deletes bank data after 7 years | Attest once merged |
+| Patches vulnerabilities within a defined SLA | The policy, section 4: critical and high within 14 days, others 60; the monthly security check issue | Attest after the first monthly check |
+| Vulnerability scanning | Monthly Trivy scan workflow (images in `.github/scan-images.txt`) and Dependabot alerts on the repositories | Attest after the first scan |
+| Automated de-provisioning | Module 0.16: logins of people whose membership or officer tag ended are disabled, with a checklist to the security owner | Attest once officers' logins are linked to member cards |
+| Periodic access reviews and audits | Access review page; a yearly "Access review" deadline task to the security owner and Secretary each April | Attest after the first review |
 
 ## Door access emails
 

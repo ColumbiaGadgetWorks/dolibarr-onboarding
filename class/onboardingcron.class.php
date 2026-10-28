@@ -96,6 +96,16 @@ class OnboardingCron
 			return 1;
 		}
 		$svc->alertClear('cron-reconcile', 'Reconciling bank accounts works again.');
+		dol_include_once('/onboarding/class/security.class.php');
+		try {
+			$sec = new OnboardingSecurity($this->db, $svc);
+			$this->output .= '; '.$sec->run().'; '.$sec->purge();
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			$svc->alert('cron-security', 'Removing logins and old bank data failed', 'The security step of "Onboarding: payment reminders, lapses and cleanup" stopped with: '.$e->getMessage()."\n\nLogins of people whose role ended are not being disabled until it runs cleanly.");
+			return 1;
+		}
+		$svc->alertClear('cron-security', 'Removing logins and old bank data works again.');
 		return 0;
 	}
 

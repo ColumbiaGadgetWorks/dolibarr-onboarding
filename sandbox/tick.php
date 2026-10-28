@@ -16,6 +16,7 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
+ *   php tick.php security user LOGIN MEMBERID admin|user | owners | run DAYS | logins | status LOGIN | resign MEMBERID | purge DAYS | line ACCOUNT DAY | count ACCOUNT | review
  *   php tick.php plaid connect PUBLIC_TOKEN NAME | items | map PLAIDACCOUNT BANK | sync | token [ITEM] | disconnect ITEM | stored
  *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | compare FILE | aside ACCOUNT | why ROW | transfer FROM TO DAY AMOUNT | link LINE MEMBER | twin LINE | undo FILE | rules ACCOUNT | unrule ROW | decide ID add|ignore|match [LINE] | force LINE
  *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
@@ -419,6 +420,54 @@ if ($job == 'daily') {
 			unset($row->token);
 		}
 		echo json_encode($row)."\n";
+	}
+} elseif ($job == 'security') {
+	// Removing logins when a role ends, and old bank data, without waiting for the daily job.
+	dol_include_once('/onboarding/class/security.class.php');
+	$sec = new OnboardingSecurity($db, $svc);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'user') {
+		// user LOGIN MEMBERID admin|user: a working login linked to a member card
+		$u = new User($db);
+		$u->login = $argv[3];
+		$u->lastname = $argv[3];
+		$u->email = $argv[3].'@example.org';
+		$u->admin = $argv[5] == 'admin' ? 1 : 0;
+		$u->entity = $conf->entity;
+		$id = $u->create($user);
+		if ($id <= 0) {
+			fwrite(STDERR, 'user create failed: '.$u->error."\n");
+			exit(1);
+		}
+		$db->query("UPDATE ".$db->prefix()."user SET fk_member = ".((int) $argv[4])." WHERE rowid = ".((int) $id));
+		echo $id."\n";
+	} elseif ($what == 'run') {
+		OnboardingService::$now = dol_now() + ((int) (isset($argv[3]) ? $argv[3] : 0)) * 86400;
+		echo $sec->run()."\n";
+	} elseif ($what == 'owners') {
+		echo json_encode($sec->owners())."\n";
+	} elseif ($what == 'logins') {
+		echo json_encode($sec->logins())."\n";
+	} elseif ($what == 'status') {
+		$res = $db->query("SELECT statut FROM ".$db->prefix()."user WHERE login = '".$db->escape($argv[3])."'");
+		$o = $db->fetch_object($res);
+		echo ($o ? (int) $o->statut : -1)."\n";
+	} elseif ($what == 'resign') {
+		$adh = new Adherent($db);
+		$adh->fetch((int) $argv[3]);
+		echo $adh->resiliate($user)."\n";
+	} elseif ($what == 'purge') {
+		OnboardingService::$now = dol_now() + ((int) (isset($argv[3]) ? $argv[3] : 0)) * 86400;
+		echo $sec->purge()."\n";
+	} elseif ($what == 'line') {
+		// line ACCOUNT DAY: a statement line on that day, as if read from the bank
+		$db->query("INSERT INTO ".$db->prefix()."onboarding_stmt (entity, fk_account, dateo, amount, label, status, hash, datec) VALUES (".((int) $conf->entity).", ".((int) $argv[3]).", '".$db->escape($argv[4])."', 1, 'retention test', 'open', '".sha1(mt_rand().$argv[4])."', '".$db->idate(dol_now())."')");
+		echo $db->last_insert_id($db->prefix()."onboarding_stmt")."\n";
+	} elseif ($what == 'count') {
+		$res = $db->query("SELECT COUNT(*) AS n FROM ".$db->prefix()."onboarding_stmt WHERE fk_account = ".((int) $argv[3]));
+		echo (int) $db->fetch_object($res)->n."\n";
+	} elseif ($what == 'review') {
+		echo json_encode($sec->pastRetention())."\n";
 	}
 } elseif ($job == 'plaid') {
 	// Bank feeds without the page: plaid connect PUBLIC_TOKEN NAME | items | map PLAIDACCOUNT BANKACCOUNT | sync
