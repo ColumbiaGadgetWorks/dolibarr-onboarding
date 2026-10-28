@@ -1,0 +1,5 @@
+# The container images Skynet runs, scanned each month by the security scan
+# workflow. One per line, exactly as the container's Repository field on Unraid
+# shows it (with its tag). Keep this list in step when an image changes.
+dolibarr/dolibarr:latest
+mariadb:11

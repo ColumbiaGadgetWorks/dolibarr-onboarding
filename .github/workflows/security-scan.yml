@@ -1,0 +1,84 @@
+# The monthly security check the information security and records policy asks
+# for: scan the images Skynet runs (listed in .github/scan-images.txt) and this
+# repository for known vulnerabilities and leaked secrets, and file the result
+# as an issue with the month's update checklist. The issues are the record.
+name: security scan
+
+on:
+  schedule:
+    - cron: '23 15 2 * *' # the 2nd of each month
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/security-scan.yml
+      - .github/scan-images.txt
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  TRIVY_VERSION: 0.58.1
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Trivy
+        run: |
+          base=https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION
+          curl -sSfL -o trivy.tgz "$base/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o sums.txt "$base/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz\$" sums.txt | sed 's/trivy_.*/trivy.tgz/' | sha256sum -c -
+          tar xzf trivy.tgz trivy
+          ./trivy --version
+      - name: Scan
+        run: |
+          set -u
+          : > report.md
+          total=0
+          scan() { # title, trivy arguments...
+            local title=$1; shift
+            ./trivy "$@" --severity HIGH,CRITICAL --ignore-unfixed --no-progress --format json --output r.json --quiet < /dev/null || { echo "### $title"$'\n\nThe scan failed; see the workflow log.\n' >> report.md; total=$((total+1)); return; }
+            local n
+            n=$(jq '[.Results[]? | (.Vulnerabilities // [])[], (.Secrets // [])[]] | length' r.json)
+            total=$((total+n))
+            echo "### $title: $n found" >> report.md
+            if [ "$n" -gt 0 ]; then
+              echo '' >> report.md
+              echo '| Severity | Package or file | Problem | Installed | Fixed in |' >> report.md
+              echo '|---|---|---|---|---|' >> report.md
+              jq -r '[.Results[]? | . as $r | ((.Vulnerabilities // [])[] | "| \(.Severity) | \(.PkgName) | [\(.VulnerabilityID)](\(.PrimaryURL // "")) \((.Title // "") | gsub("\\|"; "/") | .[0:80]) | \(.InstalledVersion) | \(.FixedVersion // "") |"), ((.Secrets // [])[] | "| \(.Severity) | \($r.Target) | secret: \(.Title) | | |")] | .[0:60][]' r.json >> report.md
+            fi
+            echo '' >> report.md
+          }
+          while read -r image; do
+            case "$image" in ''|'#'*) continue ;; esac
+            scan "Image \`$image\`" image --scanners vuln "$image"
+          done < .github/scan-images.txt
+          scan 'This repository' fs --scanners vuln,secret .
+          echo "TOTAL=$total" >> "$GITHUB_ENV"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: File the month's issue
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          month=$(date -u +%Y-%m)
+          {
+            echo "The monthly security check (information security and records policy, sections 4 and 5). Close this issue when the list is done."
+            echo
+            echo "- [ ] A new Dolibarr release or image? Update it on Skynet (critical and high within 14 days, the rest within 60)"
+            echo "- [ ] Press **Update module** in Dolibarr"
+            echo "- [ ] Update Unraid and the other containers on Skynet"
+            echo "- [ ] Look at the Dependabot alerts on the organization's repositories"
+            echo "- [ ] Fix or update for everything found below, or note why it does not apply"
+            echo
+            echo "## Found: $TOTAL (high and critical with a fix available; a scan that failed counts as one)"
+            echo
+            cat report.md
+            echo "[The workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } > body.md
+          gh label create security --color B60205 --description 'Security checks and findings' 2>/dev/null || true
+          gh issue create --title "Monthly security check $month" --label security --body-file body.md

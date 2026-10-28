@@ -33,6 +33,8 @@ class OnboardingAttention
 		'CRON_FILINGS' => 'The yearly filings job is failing',
 		'CRON_RECONCILE' => 'Reconciling bank accounts is failing',
 		'PLAID_SYNC' => 'A bank feed (Plaid) is failing or wants the login again',
+		'CRON_SECURITY' => 'Removing logins and old bank data is failing',
+		'DEPROVISION_LAST_ADMIN' => 'The last administrator should be disabled',
 	);
 
 	/**
@@ -126,6 +128,15 @@ class OnboardingAttention
 				$add('plaid', 'Bank feeds to reconnect', 'A bank connected through Plaid wants its login again, or cannot be read.', (new OnboardingPlaid($this->db))->needing(), $base.'plaid.php', true);
 			}
 			$add('reconcile', 'Bank lines to check', 'Statement lines with no Dolibarr entry, and entries no statement shows, from Reconcile bank accounts.', $rec->openCount() + count($rec->missing()), $base.'reconcile.php');
+		}
+
+		if (!empty($user->admin)) {
+			dol_include_once('/onboarding/class/security.class.php');
+			$going = 0;
+			foreach ((new OnboardingSecurity($this->db))->logins() as $o) {
+				$going += $o->reason !== '' ? 1 : 0;
+			}
+			$add('security', 'Logins to be disabled', 'People whose membership or officer role ended: their Dolibarr login goes a few days after a warning unless it is put right.', $going, $base.'security.php');
 		}
 
 		if ($user->hasRight('onboarding', 'filing', 'read')) {

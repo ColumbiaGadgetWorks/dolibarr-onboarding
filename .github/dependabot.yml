@@ -1,0 +1,9 @@
+# Keeps the GitHub Actions the workflows use up to date (the module itself has no
+# package dependencies). Dependabot security alerts are turned on separately, in
+# the repository's Settings, Code security.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
