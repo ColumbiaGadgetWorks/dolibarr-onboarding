@@ -18,7 +18,9 @@ permissions:
   issues: write
 
 env:
-  TRIVY_VERSION: 0.58.1
+  # Pinned to one release and its checksum, so a changed download stops the scan.
+  TRIVY_VERSION: 0.75.0
+  TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
 
 jobs:
   scan:
@@ -29,8 +31,7 @@ jobs:
         run: |
           base=https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION
           curl -sSfL -o trivy.tgz "$base/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          curl -sSfL -o sums.txt "$base/trivy_${TRIVY_VERSION}_checksums.txt"
-          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz\$" sums.txt | sed 's/trivy_.*/trivy.tgz/' | sha256sum -c -
+          echo "$TRIVY_SHA256  trivy.tgz" | sha256sum -c -
           tar xzf trivy.tgz trivy
           ./trivy --version
       - name: Scan
