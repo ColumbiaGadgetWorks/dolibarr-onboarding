@@ -33,7 +33,7 @@ jobs:
       MOCK_DOLIBARR_KEY: sandbox-key-sandbox-key-sandbox-key
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: docker compose up -d db dolibarr givebutter mail
@@ -81,7 +81,7 @@ jobs:
         working-directory: sandbox
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: docker compose up -d
