@@ -34,6 +34,21 @@ try {
   pu('const', 'ONBOARDING_DEPROVISION', 'on');
   pu('roletags');
 
+  step('the security owner: the address set, else whoever holds the security tag, else the secretary');
+  assert.deepEqual(JSON.parse(sec('owners')), [owner]);
+  pu('const', 'ONBOARDING_SECURITY_EMAIL', '');
+  const secEmail = `sec-tag-${stamp}@example.org`;
+  pu('member', secEmail, `SES${stamp % 100000}`, 'Sam', `Security${stamp}`);
+  pu('tag', secEmail, 'security');
+  assert.deepEqual(JSON.parse(sec('owners')), [secEmail]);
+  pu('untag', secEmail, 'security');
+  const clerkEmail = `clerk-${stamp}@example.org`;
+  pu('member', clerkEmail, `SEC${(stamp + 1) % 100000}`, 'Cleo', `Clerk${stamp}`);
+  pu('tag', clerkEmail, 'secretary');
+  assert.ok(JSON.parse(sec('owners')).includes(clerkEmail), 'nobody tagged security: the secretary');
+  pu('untag', clerkEmail, 'secretary');
+  pu('const', 'ONBOARDING_SECURITY_EMAIL', owner);
+
   step('officers and members keep their logins');
   const offEmail = `officer-${stamp}@example.org`;
   const officer = pu('member', offEmail, `SEC${stamp % 100000}`, 'Ofelia', `Officer${stamp}`);

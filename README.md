@@ -608,8 +608,8 @@ in cgwmanagement) asks Dolibarr to do by itself:
   an issue labelled `security` with the findings and the month's update checklist.
 
 Set on the setup page, Security: the security owner's email (empty: whoever holds the
-vice-president tag), removing logins on or off, the other accounts to remove people from, and
-the years bank data is kept.
+`security` tag, or with nobody tagged, the secretary), removing logins on or off, the other
+accounts to remove people from, and the years bank data is kept.
 
 ## Yearly filings
 
@@ -652,8 +652,9 @@ the same page; give board members the right "See yearly tax filings".
 
 ### Updating to 0.16
 
-Update from GitHub. Then, on the setup page, Security, enter the security owner's email (or
-tag the Vice President's member card `vice-president`). Open Access review and make sure each officer's login shows
+Update from GitHub. Then tag the security owner's member card `security` (Brad for now; with
+nobody tagged, the secretary gets the security emails), or enter an email on the setup page,
+Security. Open Access review and make sure each officer's login shows
 their member card and officer tag: a login with none is left alone, and an administrator
 linked to a card without an officer tag is warned and disabled 3 days later.
 

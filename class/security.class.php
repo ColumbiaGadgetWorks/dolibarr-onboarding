@@ -76,8 +76,14 @@ class OnboardingSecurity
 		}
 		if (!$set) {
 			dol_include_once('/onboarding/class/purchase.class.php');
-			foreach ((new OnboardingPurchase($this->db, $this->svc))->roleEmails(array('vice-president')) as $e) {
+			$pu = new OnboardingPurchase($this->db, $this->svc);
+			foreach ($pu->roleEmails(array('security')) as $e) {
 				$set[$e] = $e;
+			}
+			if (!$set) {
+				foreach ($pu->roleEmails(array('secretary')) as $e) {
+					$set[$e] = $e;
+				}
 			}
 		}
 		if (!$set && getDolGlobalString('ONBOARDING_STAFF_EMAIL') !== '') {
