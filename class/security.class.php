@@ -22,8 +22,11 @@ require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
  * Retention: bank transactions read from the banks (statement uploads and bank
  * feeds) are deleted, with the uploaded files, once older than the years set.
  *
- * The Access review page lists every login and what would happen to it, for the
- * yearly review.
+ * The Access review page lists every login and what would happen to it. The
+ * yearly access review is emailed to the security owner on the first of the
+ * review month (April), with the steps and what Dolibarr knows now, and again
+ * every week until they press "Access review done" (in the email, no login, or
+ * on the Access review page). Each year's result is kept.
  */
 class OnboardingSecurity
 {
@@ -41,6 +44,12 @@ class OnboardingSecurity
 
 	/** Where the warnings stand: {user id: when first seen}. */
 	const SEEN = 'ONBOARDING_DEPROVISION_SEEN';
+
+	/** Each year's review: {year: {sent, last, done, by}}. */
+	const REVIEWS = 'ONBOARDING_ACCESS_REVIEWS';
+
+	/** Days between reminders while the year's review is open. */
+	const REVIEW_EVERY = 7;
 
 	const CHECKLIST = "Google Workspace (the organization's email and Drive)\nVoidAuth (sign-in)\nCloudflare\nGitHub (the ColumbiaGadgetWorks organization)\nCentral Bank and US Bank online banking\nPayPal, Givebutter and Venmo\nPlaid dashboard\nDiscord (admin and officer roles)\nThe password manager: change every shared password they knew";
 
@@ -354,5 +363,201 @@ class OnboardingSecurity
 		$o = $res ? $this->db->fetch_object($res) : null;
 		$out['Bank transactions read from the banks older than 7 years'] = $o ? (int) $o->n : 0;
 		return $out;
+	}
+	// ---------------------------------------------------------------- yearly access review
+
+	/**
+	 * @return int The month the yearly review starts (1-12, default April)
+	 */
+	public static function reviewMonth()
+	{
+		$m = (int) getDolGlobalString('ONBOARDING_ACCESS_REVIEW_MONTH', '4');
+		return $m >= 1 && $m <= 12 ? $m : 4;
+	}
+
+	/**
+	 * @return array<string,array<string,mixed>> Each year's review
+	 */
+	public function reviews()
+	{
+		$v = json_decode(getDolGlobalString(self::REVIEWS), true);
+		return is_array($v) ? $v : array();
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $all Each year's review
+	 * @return void
+	 */
+	private function saveReviews($all)
+	{
+		global $conf;
+		krsort($all);
+		dolibarr_set_const($this->db, self::REVIEWS, json_encode($all, JSON_FORCE_OBJECT), 'chaine', 0, 'Yearly access reviews: sent, reminded, done', $conf->entity);
+	}
+
+	/**
+	 * @return int|null The review year still open (sent, not done), or null
+	 */
+	public function openReview()
+	{
+		foreach ($this->reviews() as $year => $r) {
+			if (!empty($r['sent']) && empty($r['done'])) {
+				return (int) $year;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The daily step: on or after the first of the review month, email the year's
+	 * review once, then remind every week until it is done.
+	 *
+	 * @param bool $now Start this year's review today, whatever the month
+	 * @return string Summary
+	 */
+	public function review($now = false)
+	{
+		$t = OnboardingService::now();
+		$year = (string) date('Y', $t);
+		$all = $this->reviews();
+		$r = isset($all[$year]) ? $all[$year] : array();
+		if (!empty($r['done'])) {
+			return 'access review: '.$year.' done';
+		}
+		if (empty($r['sent'])) {
+			if (!$now && (int) date('n', $t) != self::reviewMonth()) {
+				$open = $this->openReview();
+				if ($open === null) {
+					return 'access review: not due';
+				}
+				// Last year's is still open: keep reminding about that one.
+				$year = (string) $open;
+				$r = $all[$year];
+			} else {
+				$r = array('sent' => $t, 'last' => $t);
+				$all[$year] = $r;
+				$this->saveReviews($all);
+				$this->sendReview((int) $year, false);
+				return 'access review: '.$year.' sent';
+			}
+		}
+		if ($t - (int) $r['last'] < self::REVIEW_EVERY * 86400) {
+			return 'access review: '.$year.' open';
+		}
+		$all[$year]['last'] = $t;
+		$this->saveReviews($all);
+		$this->sendReview((int) $year, true);
+		return 'access review: '.$year.' reminded';
+	}
+
+	/**
+	 * Record a year's review as done.
+	 *
+	 * @param int $year Review year
+	 * @param string $who Who said so
+	 * @return string done, or already
+	 */
+	public function reviewDone($year, $who)
+	{
+		$all = $this->reviews();
+		$key = (string) ((int) $year);
+		if (!empty($all[$key]['done'])) {
+			return 'already';
+		}
+		$t = OnboardingService::now();
+		if (!isset($all[$key])) {
+			$all[$key] = array('sent' => $t, 'last' => $t);
+		}
+		$all[$key]['done'] = $t;
+		$all[$key]['by'] = dol_trunc((string) $who, 120, 'right', 'UTF-8', 1);
+		$this->saveReviews($all);
+		return 'done';
+	}
+
+	/**
+	 * @param int $year Review year
+	 * @param string $email Who the link is for
+	 * @return string Signature
+	 */
+	public function reviewKey($year, $email)
+	{
+		$secret = getDolGlobalString('ONBOARDING_REVIEW_SECRET');
+		if ($secret === '') {
+			global $conf;
+			$secret = bin2hex(random_bytes(24));
+			dolibarr_set_const($this->db, 'ONBOARDING_REVIEW_SECRET', $secret, 'chaine', 0, 'Signs the "access review done" links', $conf->entity);
+		}
+		return substr(hash_hmac('sha256', 'access-review:'.((int) $year).':'.OnboardingService::cleanEmail($email), $secret), 0, 32);
+	}
+
+	/**
+	 * @param int $year Review year
+	 * @param string $email Who the link is for
+	 * @param string $key Signature from the link
+	 * @return bool
+	 */
+	public function reviewVerify($year, $email, $key)
+	{
+		return $year > 2000 && strpos((string) $email, '@') !== false && getDolGlobalString('ONBOARDING_REVIEW_SECRET') !== '' && hash_equals($this->reviewKey($year, $email), (string) $key);
+	}
+
+	/**
+	 * @param int $year Review year
+	 * @param string $email Who the link is for
+	 * @return string The "access review done" link
+	 */
+	public function reviewLink($year, $email)
+	{
+		$email = OnboardingService::cleanEmail($email);
+		return dol_buildpath('/onboarding/public/review.php', 2).'?y='.((int) $year).'&e='.rawurlencode($email).'&k='.$this->reviewKey($year, $email);
+	}
+
+	/**
+	 * Email the security owner the year's review: the steps, what Dolibarr knows
+	 * now, and their own "Access review done" link.
+	 *
+	 * @param int $year Review year
+	 * @param bool $reminder A reminder, not the first email
+	 * @return void
+	 */
+	private function sendReview($year, $reminder)
+	{
+		$logins = $this->logins();
+		$lines = array();
+		$going = 0;
+		foreach ($logins as $o) {
+			$state = $o->reason !== '' ? 'TO BE DISABLED: '.$o->reason : ((int) $o->fk_member > 0 ? 'member card '.$o->member.($o->roles ? ' ('.implode(', ', $o->roles).')' : '') : 'not linked to a member card: check by hand');
+			$going += $o->reason !== '' ? 1 : 0;
+			$lines[] = '- '.$o->login.($o->name !== '' ? ' ('.$o->name.')' : '').((int) $o->admin ? ', administrator' : '').', last login '.($o->datelastlogin ? dol_print_date($this->db->jdate($o->datelastlogin), 'day') : 'never').': '.$state;
+		}
+		$past = array();
+		foreach ($this->pastRetention() as $what => $n) {
+			$past[] = '- '.$what.': '.$n;
+		}
+		$list = trim(getDolGlobalString('ONBOARDING_SECURITY_CHECKLIST'));
+		if ($list === '') {
+			$list = self::CHECKLIST;
+		}
+		$accounts = array();
+		foreach (preg_split('/\r?\n/', $list) as $l) {
+			if (trim($l) !== '' && stripos($l, 'password manager: change') === false) {
+				$accounts[] = '   [ ] '.trim($l);
+			}
+		}
+		$page = dol_buildpath('/onboarding/security.php', 2);
+		$body = ($reminder ? "A reminder: the yearly access review for ".$year." is not done yet.\n\n" : "It is time for the yearly access review for ".$year." (information security and records policy, section 7). Do it with the Secretary.\n\n")
+			."1. Dolibarr logins. Open the Access review page: ".$page."\n"
+			."   Disable anyone who no longer needs a login (the user card, Disable), and check each officer's login shows their member card and officer tag. Today there are ".count($logins)." working logins".($going ? ", ".$going." of them already due to be disabled" : '').":\n"
+			."   ".implode("\n   ", $lines)."\n\n"
+			."2. Every other account. For each one, list who can get in, remove anyone who no longer needs it, and check that at least two officers can:\n"
+			.implode("\n", $accounts)."\n\n"
+			."3. Records past their retention time (also on the Access review page). Delete former members whose membership ended more than 7 years ago:\n"
+			."   ".implode("\n   ", $past)."\n\n"
+			."4. Read the information security and records policy again, and change it (by pull request) if anything has changed.\n\n"
+			."5. Write the result in the board minutes, and in the Plaid dashboard attest \"Periodic access reviews and audits\".\n\n"
+			."When all of that is done, press the button behind your link (one per person, no login needed):\n\n";
+		foreach ($this->owners() as $e) {
+			$this->svc->mail($e, ($reminder ? 'Reminder: ' : '').'Yearly access review '.$year, $body.$this->reviewLink($year, $e)."\n\nYou will be reminded every ".self::REVIEW_EVERY." days until it is done.");
+		}
 	}
 }

@@ -25,7 +25,7 @@ deleted after 7 years, Access review page, monthly security scan.
 | Patches vulnerabilities within a defined SLA | The policy, section 4: critical and high within 14 days, others 60; the monthly security check issue | Attest after the first monthly check |
 | Vulnerability scanning | Monthly Trivy scan workflow (images in `.github/scan-images.txt`) and Dependabot alerts on the repositories | Attest after the first scan |
 | Automated de-provisioning | Module 0.16: logins of people whose membership or officer tag ended are disabled, with a checklist to the security owner | Attest once officers' logins are linked to member cards |
-| Periodic access reviews and audits | Access review page; a yearly "Access review" deadline task to the security owner and Secretary each April | Attest after the first review |
+| Periodic access reviews and audits | Module 0.17: the yearly access review emailed to the security owner each April, reminded weekly until done, each year recorded on the Access review page | Attest after the first review |
 
 ## Door access emails
 

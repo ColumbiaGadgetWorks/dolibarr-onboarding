@@ -112,8 +112,34 @@ try {
   assert.deepEqual(JSON.parse(last(tick('reconcile', 'files', acc))), []);
   pu('const', 'ONBOARDING_BANKDATA_YEARS', '0');
   assert.equal(sec('purge', '9999'), 'old bank data: kept');
+  step('the yearly access review: emailed in its month, reminded weekly, done from the link');
+  pu('const', 'ONBOARDING_ACCESS_REVIEWS', '{}');
+  const month = new Date().getMonth() + 1;
+  pu('const', 'ONBOARDING_ACCESS_REVIEW_MONTH', String((month % 12) + 1));
+  assert.equal(sec('yearly', '0'), 'access review: not due', 'not its month: nothing');
+  pu('const', 'ONBOARDING_ACCESS_REVIEW_MONTH', String(month));
+  const sent = sec('yearly', '0').match(/^access review: (\d{4}) sent$/);
+  assert.ok(sent, 'its month: sent');
+  const year = sent[1];
+  assert.ok(await heard(owner, `Yearly access review ${year}`), 'the security owner gets the steps');
+  assert.equal(sec('yearly', '1'), `access review: ${year} open`, 'once, not every day');
+  assert.equal(sec('yearly', '8'), `access review: ${year} reminded`);
+  assert.ok(await heard(owner, `Reminder: Yearly access review ${year}`));
+  const link = sec('reviewlink', year, owner);
+  assert.equal((await fetch(link.replace(/k=[0-9a-f]+/, 'k=0000'))).status, 403, 'a wrong link does nothing');
+  const page = await (await fetch(link)).text();
+  assert.match(page, /Access review done/, 'opening the link only shows the button');
+  assert.equal(JSON.parse(sec('reviews'))[year].done, undefined);
+  const u = new URL(link);
+  const done = await (await fetch(link.split('?')[0], { method: 'POST', body: new URLSearchParams({ y: u.searchParams.get('y'), e: u.searchParams.get('e'), k: u.searchParams.get('k') }) })).text();
+  assert.match(done, /recorded as done/);
+  assert.equal(JSON.parse(sec('reviews'))[year].by, owner);
+  assert.equal(sec('yearly', '15'), `access review: ${year} done`, 'no more reminders');
+
   console.log('\nAll security checks passed');
 } finally {
+  pu('const', 'ONBOARDING_ACCESS_REVIEW_MONTH', '4');
+  pu('const', 'ONBOARDING_ACCESS_REVIEWS', '{}');
   pu('const', 'ONBOARDING_BANKDATA_YEARS', '7');
   pu('const', 'ONBOARDING_DEPROVISION', 'on');
   pu('const', 'ONBOARDING_SECURITY_EMAIL', '');

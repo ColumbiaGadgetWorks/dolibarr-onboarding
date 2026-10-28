@@ -136,6 +136,8 @@ class OnboardingAttention
 			foreach ((new OnboardingSecurity($this->db))->logins() as $o) {
 				$going += $o->reason !== '' ? 1 : 0;
 			}
+			$open = (new OnboardingSecurity($this->db))->openReview();
+			$add('review', 'Yearly access review', 'The security owner has been emailed the year\'s access review; it is not recorded as done yet.', $open !== null ? 1 : 0, $base.'security.php');
 			$add('security', 'Logins to be disabled', 'People whose membership or officer role ended: their Dolibarr login goes a few days after a warning unless it is put right.', $going, $base.'security.php');
 		}
 
