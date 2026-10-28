@@ -154,7 +154,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. `sandbox/e2e-security.mjs` disables the logins of an officer who loses the tag and a member whose membership ends (after a warning, and not when put right in time), and deletes bank data past 7 years. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. `sandbox/e2e-security.mjs` disables the logins of an officer who loses the tag and a member whose membership ends (after a warning, and not when put right in time), deletes bank data past 7 years, and runs the yearly access review from its email to its done link. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -603,6 +603,12 @@ in cgwmanagement) asks Dolibarr to do by itself:
 - **Access review** (Members, Onboarding, Access review; administrators only): every login, its
   member card and officer tags, its last login and what the policy says about it, and the
   records past their retention time. Go through it each April for the yearly review.
+- **Yearly access review.** On 1 April (setup page, Security) the security owner is emailed
+  the review's steps with what Dolibarr knows now: every login and its state, the other
+  accounts to check, and records past their retention time. They are reminded every 7 days
+  until they press **Access review done**, behind their own link in the email (no login) or on
+  the Access review page, which also lists each year's review and who did it. Needs attention
+  shows it while it is open.
 - **Monthly security check:** `.github/workflows/security-scan.yml` scans the images Skynet runs
   (`.github/scan-images.txt`) and this repository with Trivy on the 2nd of each month, and files
   an issue labelled `security` with the findings and the month's update checklist.
@@ -649,6 +655,12 @@ due date. A year that ended before this existed shows as "not tracked": start it
 it as filed outside Dolibarr (dates and gross receipts) on Yearly filings. The statements
 are kept under `onboarding/filing/<year>/` in Dolibarr's documents. Members, Onboarding has
 the same page; give board members the right "See yearly tax filings".
+
+### Updating to 0.17
+
+Update from GitHub. The yearly access review now comes from the module on 1 April; delete
+any "Access review" task made for it in Projects. To send the first one now, use **Send this
+year's review now** on the Access review page.
 
 ### Updating to 0.16
 

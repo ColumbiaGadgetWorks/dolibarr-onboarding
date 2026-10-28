@@ -16,7 +16,7 @@
  *   php tick.php booking tool JSON | slot TOOL MEMBER WEEKDAY TIME [SEATS] | show REF | link REF trainer|trainee | answer REF trained|noshow|other MINUTES
  *                        | free JSON | class JSON | classfinish ID | close DAY | calendar JSON | lookup EMAIL | person EMAIL | sign EMAIL
  *   php tick.php docs            read the waiver and agreement from their addresses now
- *   php tick.php security user LOGIN MEMBERID admin|user | owners | run DAYS | logins | status LOGIN | resign MEMBERID | purge DAYS | line ACCOUNT DAY | count ACCOUNT | review
+ *   php tick.php security user LOGIN MEMBERID admin|user | owners | yearly DAYS [now] | reviews | reviewlink YEAR EMAIL | run DAYS | logins | status LOGIN | resign MEMBERID | purge DAYS | line ACCOUNT DAY | count ACCOUNT | review
  *   php tick.php plaid connect PUBLIC_TOKEN NAME | items | map PLAIDACCOUNT BANK | sync | token [ITEM] | disconnect ITEM | stored
  *   php tick.php reconcile upload ACCOUNT NAME < FILE | paypal | daily | open ACCOUNT | missing ACCOUNT | lines ACCOUNT | files ACCOUNT | compare FILE | aside ACCOUNT | why ROW | transfer FROM TO DAY AMOUNT | link LINE MEMBER | twin LINE | undo FILE | rules ACCOUNT | unrule ROW | decide ID add|ignore|match [LINE] | force LINE
  *   php tick.php filing run DAY | link FY EMAIL | show FY | line ACCOUNT DAY AMOUNT LABEL | reconcile ACCOUNT Y-M | reset
@@ -444,6 +444,13 @@ if ($job == 'daily') {
 	} elseif ($what == 'run') {
 		OnboardingService::$now = dol_now() + ((int) (isset($argv[3]) ? $argv[3] : 0)) * 86400;
 		echo $sec->run()."\n";
+	} elseif ($what == 'yearly') {
+		OnboardingService::$now = dol_now() + ((int) (isset($argv[3]) ? $argv[3] : 0)) * 86400;
+		echo $sec->review(isset($argv[4]) && $argv[4] == 'now')."\n";
+	} elseif ($what == 'reviews') {
+		echo json_encode((object) $sec->reviews())."\n";
+	} elseif ($what == 'reviewlink') {
+		echo $sec->reviewLink((int) $argv[3], $argv[4])."\n";
 	} elseif ($what == 'owners') {
 		echo json_encode($sec->owners())."\n";
 	} elseif ($what == 'logins') {

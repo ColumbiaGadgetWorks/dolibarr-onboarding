@@ -167,6 +167,7 @@ $sections = array(
 		'ONBOARDING_SECURITY_EMAIL' => array('Security owner email', 'text', 'Warned before a login is disabled, and sent the list of other accounts to remove the person from. Comma separated. Empty: whoever holds the security tag, or with nobody tagged, the secretary.'),
 		'ONBOARDING_DEPROVISION' => array('Disable logins when a role ends (on or off)', 'text', 'Default on: a login linked to a member card is disabled when the membership ends, and an administrator\'s when their member card loses its officer tag (president, vice-president, secretary, treasurer), '.OnboardingSecurity::GRACE_DAYS.' days after a warning. See Access review.'),
 		'ONBOARDING_SECURITY_CHECKLIST' => array('Other accounts to remove people from', 'area', 'One per line, sent to the security owner when a login is disabled. Empty: Google, VoidAuth, Cloudflare, GitHub, the banks, PayPal, Givebutter, Venmo, Plaid, Discord and the password manager.'),
+		'ONBOARDING_ACCESS_REVIEW_MONTH' => array('Yearly access review month (1-12)', 'text', 'Default 4 (April). On the first of that month the security owner is emailed the review\'s steps, and reminded every week until they press Access review done. See Access review.'),
 		'ONBOARDING_BANKDATA_YEARS' => array('Delete bank transactions read from the banks after (years)', 'text', 'Default 7. Statement lines and bank feed transactions, and uploaded statement files, older than this are deleted by the daily job. The Dolibarr bank entries (the books) stay. 0 keeps them.'),
 	),
 	'Housekeeping' => array(

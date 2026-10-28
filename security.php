@@ -23,10 +23,53 @@ if (!isModEnabled('onboarding') || empty($user->admin)) {
 	accessforbidden();
 }
 $sec = new OnboardingSecurity($db);
+$action = GETPOST('action', 'aZ09');
+if ($action == 'reviewstart' || $action == 'reviewdone') {
+	$year = (int) date('Y', OnboardingService::now());
+	if ($action == 'reviewstart') {
+		setEventMessages($sec->review(true) === 'access review: '.$year.' sent' ? 'The '.$year.' access review was emailed to the security owner.' : 'The '.$year.' access review was already sent.', null);
+	} else {
+		$open = $sec->openReview();
+		$sec->reviewDone($open !== null ? $open : $year, trim($user->getFullName($langs).' ('.$user->login.')'));
+		setEventMessages('The '.($open !== null ? $open : $year).' access review is recorded as done.', null);
+	}
+	header('Location: '.$_SERVER['PHP_SELF']);
+	exit;
+}
 
 llxHeader('', 'Access review');
 print load_fiche_titre('Access review', '', 'user');
 print '<p class="opacitymedium">Everyone who can log in to Dolibarr. Under the information security and records policy, a login linked to a member card is disabled by the daily job when the membership ends, and an administrator\'s when their member card loses its officer tag: the person and the security owner are warned first, and the login goes '.OnboardingSecurity::GRACE_DAYS.' days later unless it is put right. Logins not linked to a member card are reviewed by hand. Each April, go through this list with the Secretary and disable anyone who no longer needs access (the user card, Disable).</p>';
+
+// The yearly review: where this year's stands, and its history.
+$reviews = $sec->reviews();
+$thisYear = (string) date('Y', OnboardingService::now());
+$open = $sec->openReview();
+$months = array(1 => 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December');
+print '<div class="'.($open !== null ? 'warning' : 'info').'"><strong>Yearly access review.</strong> ';
+if ($open !== null) {
+	print 'The '.$open.' review was emailed to the security owner on '.dol_print_date((int) $reviews[(string) $open]['sent'], 'day').' and is not done yet; they are reminded every '.OnboardingSecurity::REVIEW_EVERY.' days.';
+} elseif (!empty($reviews[$thisYear]['done'])) {
+	print 'This year\'s review was done on '.dol_print_date((int) $reviews[$thisYear]['done'], 'day').(!empty($reviews[$thisYear]['by']) ? ' by '.dol_escape_htmltag($reviews[$thisYear]['by']) : '').'.';
+} else {
+	print 'The '.$thisYear.' review is emailed to the security owner on 1 '.$months[OnboardingSecurity::reviewMonth()].', with the steps and a button to press when it is done.';
+}
+$done = array();
+foreach ($reviews as $y => $r) {
+	if (!empty($r['done'])) {
+		$done[] = $y.': '.dol_print_date((int) $r['done'], 'day').(!empty($r['by']) ? ', '.dol_escape_htmltag($r['by']) : '');
+	}
+}
+if ($done) {
+	print '<br><span class="opacitymedium">Done: '.implode('; ', $done).'</span>';
+}
+print '<br>';
+if ($open !== null) {
+	print '<a class="butAction smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=reviewdone&token='.newToken().'" onclick="return confirm(\'Record the '.$open.' access review as done? Only once every step in the email is done.\')">Access review done</a>';
+} elseif (empty($reviews[$thisYear]['sent'])) {
+	print '<a class="butAction smallpaddingimp" href="'.$_SERVER['PHP_SELF'].'?action=reviewstart&token='.newToken().'">Send this year\'s review now</a>';
+}
+print '</div>';
 
 if (!OnboardingSecurity::enabled()) {
 	print '<div class="warning">Removing logins automatically is off (setup page, Security). Logins are listed but nothing is disabled.</div>';
