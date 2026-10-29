@@ -61,7 +61,7 @@ if ($canwrite && $action !== '') {
 		$f = $filing->start($fy, $who);
 		$msg = $f && $filing->ask($f, false) ? 'FY'.$fy.' opened, and the treasurer was emailed.' : 'FY'.$fy.' opened, but no email went out: nobody with an email holds the treasurer or president tag.';
 	} elseif ($action == 'record' && $fy > 0) {
-		$amount = trim(GETPOST('receipts', 'alphanohtml'));
+		$amount = GETPOST('under', 'int') == 1 ? '' : trim(GETPOST('receipts', 'alphanohtml'));
 		$msg = $filing->recordFiled($fy, $who, GETPOST('irs', 'alphanohtml'), GETPOST('state', 'alphanohtml'), $amount !== '' ? (float) price2num(str_replace(array('$', ','), '', $amount)) : null, GETPOST('note', 'alphanohtml'));
 	} elseif ($f && $f->status != 'done') {
 		if ($action == 'ask') {
@@ -70,8 +70,9 @@ if ($canwrite && $action !== '') {
 			$r = $filing->docsDone($f, $who, GETPOST('note', 'nohtml'));
 			$msg = $r == 'note' ? 'Some items are still missing: say why in the note.' : 'Statements marked complete; the treasurer was sent the filing email.';
 		} elseif ($action == 'irs') {
-			$amount = trim(GETPOST('receipts', 'alphanohtml'));
-			$filing->irsFiled($f, $who, GETPOST('day', 'alphanohtml'), $amount !== '' ? (float) price2num(str_replace(array('$', ','), '', $amount)) : null, GETPOST('form', 'alphanohtml'));
+			$under = GETPOST('under', 'int') == 1;
+			$amount = $under ? '' : trim(GETPOST('receipts', 'alphanohtml'));
+			$filing->irsFiled($f, $who, GETPOST('day', 'alphanohtml'), $amount !== '' ? (float) price2num(str_replace(array('$', ','), '', $amount)) : null, $under ? 'under' : GETPOST('form', 'alphanohtml'));
 			$msg = 'IRS return marked filed.';
 		} elseif ($action == 'state') {
 			$filing->stateFiled($f, $who, GETPOST('day', 'alphanohtml'));
@@ -105,7 +106,7 @@ if (!$filing->fetchFy($latest)) {
 	if ($canwrite) {
 		print '<br><br><form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="start"><input type="hidden" name="fy" value="'.$latest.'"><button type="submit" class="butAction">Start FY'.$latest.' now (emails the treasurer)</button></form>';
 		print '<br><form method="POST" action="'.$_SERVER['PHP_SELF'].'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="record"><input type="hidden" name="fy" value="'.$latest.'">';
-		print 'Or, already filed outside Dolibarr: IRS on <input type="date" name="irs"> state on <input type="date" name="state"> gross receipts <input type="text" name="receipts" size="10" placeholder="$"> note <input type="text" name="note" class="minwidth200"> <button type="submit" class="button smallpaddingimp">Record as filed</button></form>';
+		print 'Or, already filed outside Dolibarr: IRS on <input type="date" name="irs"> state on <input type="date" name="state"> <label><input type="checkbox" name="under" value="1" checked onchange="document.getElementById(\'rec-amt\').hidden=this.checked"> gross receipts $50,000 or less (990-N)</label> <span id="rec-amt" hidden>gross receipts <input type="text" name="receipts" size="10" placeholder="$"></span> note <input type="text" name="note" class="minwidth200"> <button type="submit" class="button smallpaddingimp">Record as filed</button></form>';
 	}
 	print '</div><br>';
 }
@@ -133,8 +134,8 @@ if ($show) {
 	if ($f->docs_done_at) {
 		print '<tr class="oddeven"><td>Statements complete</td><td>'.dol_print_date($db->jdate($f->docs_done_at), 'dayhour').' by '.dol_escape_htmltag($f->docs_done_by).($f->docs_note ? '<br><span class="opacitymedium">'.dol_escape_htmltag($f->docs_note).'</span>' : '').'</td></tr>';
 	}
-	if ($f->receipts !== null) {
-		print '<tr class="oddeven"><td>Gross receipts reported</td><td>'.price($f->receipts).'</td></tr>';
+	if (OnboardingFiling::receiptsText($f) !== '') {
+		print '<tr class="oddeven"><td>Gross receipts reported</td><td>'.dol_escape_htmltag(OnboardingFiling::receiptsText($f)).'</td></tr>';
 	}
 	print '</table>';
 
@@ -152,11 +153,12 @@ if ($show) {
 			if (!$f->irs_filed_at) {
 				$form = $filing->form($f);
 				print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="irs"><input type="hidden" name="fy" value="'.$y.'">';
-				print 'IRS return filed on <input type="date" name="day" value="'.$today.'"> form <select name="form">';
+				$under = $form['form'] == '990-N';
+				print 'IRS return filed on <input type="date" name="day" value="'.$today.'"> <label><input type="checkbox" name="under" value="1"'.($under ? ' checked' : '').' onchange="document.getElementById(\'irs-more\').hidden=this.checked"> gross receipts $50,000 or less (990-N)</label> <span id="irs-more"'.($under ? ' hidden' : '').'>form <select name="form">';
 				foreach (array('990-N', '990-EZ', '990') as $x) {
 					print '<option'.($x == $form['form'] ? ' selected' : '').'>'.$x.'</option>';
 				}
-				print '</select> gross receipts <input type="text" name="receipts" size="10" value="'.dol_escape_htmltag(number_format($form['this']['total'], 2, '.', '')).'"> <button type="submit" class="button smallpaddingimp">Mark IRS return filed</button></form>';
+				print '</select> gross receipts <input type="text" name="receipts" size="10" value="'.dol_escape_htmltag(number_format($form['this']['total'], 2, '.', '')).'"></span> <button type="submit" class="button smallpaddingimp">Mark IRS return filed</button></form>';
 			}
 			if (!$f->state_filed_at) {
 				print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="state"><input type="hidden" name="fy" value="'.$y.'">';
@@ -229,7 +231,7 @@ foreach ($all as $f) {
 	print '<tr class="oddeven"><td><a href="'.$_SERVER['PHP_SELF'].'?fy='.((int) $f->fy).'">FY'.((int) $f->fy).'</a></td><td>'.dol_escape_htmltag(OnboardingFiling::showPeriod((int) $f->fy)).'</td><td>'.dol_escape_htmltag(OnboardingFiling::STATUSES[$f->status]).'</td>';
 	print '<td>'.($f->irs_filed_at ? dol_escape_htmltag(($f->irs_form ?: '').' '.OnboardingFiling::show($f->irs_filed_at)) : '<span class="opacitymedium">due '.dol_escape_htmltag(OnboardingFiling::show(OnboardingFiling::irsDue((int) $f->fy))).'</span>').'</td>';
 	print '<td>'.($f->state_filed_at ? dol_escape_htmltag(OnboardingFiling::show($f->state_filed_at)) : '<span class="opacitymedium">due '.dol_escape_htmltag(OnboardingFiling::show(OnboardingFiling::stateDue((int) $f->fy))).'</span>').'</td>';
-	print '<td class="right">'.($f->receipts !== null ? price($f->receipts) : '').'</td></tr>';
+	print '<td class="right">'.dol_escape_htmltag(OnboardingFiling::receiptsText($f)).'</td></tr>';
 }
 if (!$all) {
 	print '<tr><td colspan="6" class="opacitymedium">No years yet.</td></tr>';

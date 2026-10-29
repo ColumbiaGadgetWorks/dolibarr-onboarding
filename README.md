@@ -665,8 +665,11 @@ override each.
    out transfers between our own accounts and payouts of money already counted, or the books'
    income accounts once Accounting is used. It gives the three-year average that decides
    990-N or 990-EZ, and the officers for the Missouri report with its link. Buttons on the
-   page: **IRS return filed** (with the gross receipts used, kept for next year's average,
-   and the confirmation if you like) and **State report filed**. Reminded every 7 days until
+   page: **IRS return filed** and **State report filed**. For a 990-N year, "Gross receipts
+   were $50,000 or less" is ticked, and no amount is asked; untick it to give the form and
+   the amount reported (kept for next year's three-year average). Upload the IRS's
+   confirmation (its acceptance email as a PDF, or a screenshot of the submitted page) to keep
+   it with the year's records. Reminded every 7 days until
    both are pressed.
 3. **The board.** 30 and 7 days before the IRS due date (15 October), and on it, the rest of
    the board (president, vice president, secretary, directors) is emailed where it stands,

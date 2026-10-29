@@ -1006,6 +1006,11 @@ class OnboardingFiling
 			$row = $fy == (int) $f->fy ? $f : $this->fetchFy($fy);
 			$reported = $row && $row->receipts !== null && $row->receipts !== '';
 			$amt = $reported ? (float) $row->receipts : ($fy == (int) $f->fy ? $this1['total'] : $this->receipts($fy)['total']);
+			// Filed as "$50,000 or less" without a figure: at most the limit.
+			if (!$reported && self::under($row)) {
+				$amt = min($amt, self::LIMIT_N);
+				$reported = true;
+			}
 			// A year before Dolibarr had any of its money is not a year of nothing.
 			$data = $reported || $amt > 0 || $fy == (int) $f->fy;
 			$years[] = array('fy' => $fy, 'amount' => $amt, 'reported' => $reported, 'data' => $data);
@@ -1047,6 +1052,27 @@ class OnboardingFiling
 	}
 
 	/**
+	 * @param object|null $f Filing
+	 * @return bool The IRS return was filed as a 990-N with no figure: gross receipts $50,000 or less
+	 */
+	public static function under($f)
+	{
+		return $f && $f->irs_filed_at && ($f->receipts === null || $f->receipts === '') && in_array((string) $f->irs_form, array('', '990-N'), true);
+	}
+
+	/**
+	 * @param object $f Filing
+	 * @return string Gross receipts as reported: the amount, "$50,000 or less", or ''
+	 */
+	public static function receiptsText($f)
+	{
+		if ($f->receipts !== null && $f->receipts !== '') {
+			return self::money($f->receipts);
+		}
+		return self::under($f) ? '$50,000 or less' : '';
+	}
+
+	/**
 	 * @param object $f Filing
 	 * @param string $who Who
 	 * @param string $day Y-m-d
@@ -1056,13 +1082,17 @@ class OnboardingFiling
 	 */
 	public function irsFiled($f, $who, $day, $receipts, $form)
 	{
+		// "$50,000 or less" ticked: a 990-N, no figure needed.
+		if ($receipts === null && $form === 'under') {
+			$form = '990-N';
+		}
 		if ($f->irs_filed_at) {
 			return 'already';
 		}
 		$day = self::isDay($day) && $day <= self::today() ? $day : self::today();
 		$form = in_array($form, array('990-N', '990-EZ', '990'), true) ? $form : '990-N';
 		$this->save($f->rowid, array('irs_filed_at' => $day, 'irs_filed_by' => $who, 'irs_form' => $form, 'receipts' => $receipts !== null ? (float) $receipts : null, 'status' => $f->status == 'docs' ? 'file' : $f->status));
-		$this->log($f->rowid, 'irs_filed', $who, 'Form '.$form.' filed '.$day.($receipts !== null ? ', gross receipts '.self::money($receipts) : ''));
+		$this->log($f->rowid, 'irs_filed', $who, 'Form '.$form.' filed '.$day.($receipts !== null ? ', gross receipts '.self::money($receipts) : ($form == '990-N' ? ', gross receipts $50,000 or less' : '')));
 		$this->finishIfDone($this->fetch($f->rowid));
 		return 'done';
 	}
@@ -1101,7 +1131,7 @@ class OnboardingFiling
 		$facts = $this->facts();
 		$org = $facts['name'] !== '' ? $facts['name'] : 'the organization';
 		$body = $org."'s filings for ".self::showPeriod((int) $f->fy)." (IRS tax year ".self::taxYear((int) $f->fy).") are done:\n\n";
-		$body .= "- IRS Form ".($f->irs_form ? $f->irs_form : '990-N').": filed ".self::show($f->irs_filed_at)." by ".$f->irs_filed_by.($f->receipts !== null ? ", gross receipts ".self::money($f->receipts) : '')."\n";
+		$body .= "- IRS Form ".($f->irs_form ? $f->irs_form : '990-N').": filed ".self::show($f->irs_filed_at)." by ".$f->irs_filed_by.(self::receiptsText($f) !== '' ? ", gross receipts ".self::receiptsText($f) : '')."\n";
 		$body .= "- ".$facts['state']." annual registration report: filed ".self::show($f->state_filed_at)." by ".$f->state_filed_by."\n\n";
 		$body .= "The statements and confirmations are kept in Dolibarr (CGW, Yearly filings): ".self::staffUrl()."\n\n";
 		$body .= "In a few weeks the return should show on the IRS Tax Exempt Organization Search (".self::IRS_CHECK_URL.") under EIN ".$facts['ein'].".\n\nThank you.\n".$org;
