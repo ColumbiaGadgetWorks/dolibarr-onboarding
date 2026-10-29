@@ -153,6 +153,7 @@ try {
   assert.match(ready.text, /charter number N000706594/);
   assert.match(ready.text, /Treasurer: Tara Filer/);
   assert.match(r.page, /IRS return filed/);
+  assert.match(r.page, /name="under" value="1" checked/, 'a 990-N year: "$50,000 or less" is ticked, no amount needed');
 
   step('the board hears 30 days before the IRS due date, once');
   tick('filing', 'run', addDays(IRS_DUE, -30));
@@ -171,10 +172,11 @@ try {
 
   step('IRS filed, then the state report: the year is done and everyone hears');
   // The page runs on the real clock, so the days are real ones.
-  r = await post(page, { do: 'irs', day: addDays(TODAY, -2), form: '990-N', receipts: '$2,034.00' }, [['proof', 'accepted.pdf', pdf('irs ok'), 'application/pdf']]);
+  r = await post(page, { do: 'irs', day: addDays(TODAY, -2), under: '1', form: '990-EZ', receipts: '$99,999' }, [['proof', 'accepted.pdf', pdf('irs ok'), 'application/pdf']]);
   let f = show(FY);
   assert.equal(f.irs_filed_at, addDays(TODAY, -2));
-  assert.equal(Number(f.receipts), 2034);
+  assert.equal(f.receipts, null, '"$50,000 or less" ticked: no amount kept, whatever was typed');
+  assert.equal(f.irs_form, '990-N');
   assert.equal(f.status, 'file');
   r = await post(page, { do: 'irs', day: TODAY });
   assert.match(decodeURIComponent(r.location), /already marked filed/);
@@ -184,7 +186,7 @@ try {
   assert.match(r.page, /This year is done/);
   assert.match(r.page, /accepted\.pdf/);
   const done = await mail(PRESIDENT, `FY${FY} tax filings are done`);
-  assert.match(done.text, /gross receipts \$2,034\.00/);
+  assert.match(done.text, /gross receipts \$50,000 or less/);
   assert.match(done.text, /by Tara Filer/);
   await mail(TREASURER, `FY${FY} tax filings are done`);
 

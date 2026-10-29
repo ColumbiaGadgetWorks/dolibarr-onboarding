@@ -180,9 +180,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			}
 		}
 		if ($do == 'irs') {
-			$amount = trim(GETPOST('receipts', 'alphanohtml'));
+			$under = GETPOST('under', 'int') == 1;
+			$amount = $under ? '' : trim(GETPOST('receipts', 'alphanohtml'));
 			$amount = $amount !== '' ? (float) price2num(str_replace(array('$', ','), '', $amount)) : null;
-			$r = $filing->irsFiled($f, $who, GETPOST('day', 'alphanohtml'), $amount, GETPOST('form', 'alphanohtml'));
+			$r = $filing->irsFiled($f, $who, GETPOST('day', 'alphanohtml'), $amount, $under ? 'under' : GETPOST('form', 'alphanohtml'));
 		} else {
 			$r = $filing->stateFiled($f, $who, GETPOST('day', 'alphanohtml'));
 		}
@@ -301,13 +302,15 @@ if ($f->status == 'docs') {
 			$h .= '<pre>'.preg_replace('#https?://[^\s<]+#', '<a href="$0">$0</a>', dol_escape_htmltag($filing->irsText($f, $form, $facts), 0, 1)).'</pre>';
 			$h .= '<form method="post" enctype="multipart/form-data" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">'.$hidden.'<input type="hidden" name="do" value="irs">';
 			$h .= '<label>Filed on <input type="date" name="day" value="'.OnboardingFiling::today().'"></label>';
-			$h .= '<label>Form <select name="form">';
+			$under = $form['form'] == '990-N';
+			$h .= '<label><input type="checkbox" name="under" value="1"'.($under ? ' checked' : '').' onchange="document.getElementById(\'irs-more\').hidden=this.checked"> Gross receipts were $50,000 or less: filed the 990-N (no amount needed)</label>';
+			$h .= '<div id="irs-more"'.($under ? ' hidden' : '').'><label>Form <select name="form">';
 			foreach (array('990-N', '990-EZ', '990') as $x) {
 				$h .= '<option'.($x == $form['form'] ? ' selected' : '').'>'.$x.'</option>';
 			}
 			$h .= '</select></label>';
-			$h .= '<label>Gross receipts you reported for the year <input type="text" name="receipts" value="'.dol_escape_htmltag(number_format($form['this']['total'], 2, '.', '')).'"></label>';
-			$h .= '<label class="small">Confirmation (optional: the IRS acceptance email as a PDF, or a screenshot) <input type="file" name="proof"></label>';
+			$h .= '<label>Gross receipts you reported for the year <input type="text" name="receipts" value="'.dol_escape_htmltag(number_format($form['this']['total'], 2, '.', '')).'"></label></div>';
+			$h .= '<label class="small">The IRS confirmation (recommended, kept with the year\'s records): the acceptance email from the IRS as a PDF, or a screenshot of the e-Postcard\'s "submitted" page <input type="file" name="proof"></label>';
 			$h .= '<button type="submit">IRS return filed</button></form>';
 		}
 		if (!$f->state_filed_at) {
@@ -326,7 +329,7 @@ if ($f->status == 'docs') {
 	if ($f->irs_filed_at || $f->state_filed_at) {
 		$h .= '<h2>Filed</h2><ul>';
 		if ($f->irs_filed_at) {
-			$h .= '<li class="ok">IRS Form '.dol_escape_htmltag($f->irs_form).': '.dol_escape_htmltag(OnboardingFiling::show($f->irs_filed_at)).', by '.dol_escape_htmltag($f->irs_filed_by).($f->receipts !== null ? ', gross receipts '.dol_escape_htmltag(OnboardingFiling::money($f->receipts)) : '').'</li>';
+			$h .= '<li class="ok">IRS Form '.dol_escape_htmltag($f->irs_form).': '.dol_escape_htmltag(OnboardingFiling::show($f->irs_filed_at)).', by '.dol_escape_htmltag($f->irs_filed_by).(OnboardingFiling::receiptsText($f) !== '' ? ', gross receipts '.dol_escape_htmltag(OnboardingFiling::receiptsText($f)) : '').'</li>';
 		}
 		if ($f->state_filed_at) {
 			$h .= '<li class="ok">'.dol_escape_htmltag($facts['state']).' report: '.dol_escape_htmltag(OnboardingFiling::show($f->state_filed_at)).', by '.dol_escape_htmltag($f->state_filed_by).'</li>';
