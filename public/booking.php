@@ -10,6 +10,7 @@
  *
  *   GET  .../custom/onboarding/public/booking.php?b=BOOKING&w=trainer|trainee&k=SIGNATURE[&a=ACTION]
  *   GET  .../custom/onboarding/public/booking.php?c=CLASS&k=SIGNATURE
+ *   GET  .../custom/onboarding/public/booking.php?t=TRAINER&x=UNTIL&k=SIGNATURE (on the spot)
  *   POST the same, with do=ACTION and the action's fields
  *
  * Emails link to the website's /training/link/ with the same query, which passes
@@ -124,6 +125,42 @@ $do = GETPOST('do', 'aZ09');
 $post = $_SERVER['REQUEST_METHOD'] === 'POST';
 $now = OnboardingService::now();
 
+// ---------------------------------------------------------------- a trainer starts a training on the spot
+$trainerId = (int) GETPOST('t', 'int');
+if ($trainerId > 0) {
+	$until = (int) GETPOST('x', 'int');
+	if (!$bk->spotLinkValid($trainerId, $until, $key)) {
+		onboarding_booking_page('Link not valid', '<p>This link is not valid or has run out (it works for '.((int) (OnboardingBooking::SPOT_LINK_MINUTES / 60)).' hours). Ask for a new one on the training booking page: <a href="'.dol_escape_htmltag($bk->bookUrl()).'">'.dol_escape_htmltag($bk->bookUrl()).'</a></p>', 403);
+	}
+	$res = $db->query("SELECT email FROM ".$db->prefix()."adherent WHERE rowid = ".$trainerId);
+	$o = $res ? $db->fetch_object($res) : null;
+	$tools = $o ? $bk->spotTools($bk->memberRow((string) $o->email)) : array();
+	$hidden = array('t' => (string) $trainerId, 'x' => (string) $until, 'k' => $key);
+	$expires = OnboardingBooking::fmt($now + OnboardingBooking::SPOT_HOURS * 3600, 'g:i A');
+	if (!$tools) {
+		onboarding_booking_page('Not a trainer now', '<p>This member card has no tool to train on right now: a trainer needs a training time on the tool, a current membership, and to be trained on the tool themselves. Ask the secretary.</p>', 403);
+	}
+	$done = '';
+	if ($post && $do == 'spot') {
+		$r = $bk->spotRequest($trainerId, (int) GETPOST('tool', 'int'), GETPOST('email', 'alphanohtml'));
+		if (!empty($r['ok'])) {
+			$done = '<p class="ok">Sent. The trainee has an email asking whether they asked for this training ('.dol_escape_htmltag($r['ref']).'). If they say yes, they sign the waiver and pay online; you get an email once they have paid. The request expires at '.dol_escape_htmltag(OnboardingBooking::fmt($r['expires'], 'g:i A')).' if they have not paid by then.</p><h2>Train someone else</h2>';
+		} else {
+			$done = '<p class="err">'.dol_escape_htmltag($r['error']).'</p>';
+		}
+	}
+	$opts = '';
+	foreach ($tools as $t) {
+		$opts .= '<option value="'.((int) $t->rowid).'">'.dol_escape_htmltag($t->label.' ($'.number_format(OnboardingBooking::memberPrice($t), 2).' members, $'.number_format((float) $t->fee, 2).' others)').'</option>';
+	}
+	$fields = '<label>Tool<br><select name="tool" required>'.$opts.'</select></label>';
+	$fields .= '<label>Trainee\'s email<br><input type="email" name="email" required maxlength="200" style="width:100%;font:inherit;padding:.4rem;box-sizing:border-box"></label>';
+	$html = $done.'<p>Type the email address of the person you are about to train. They get an email asking whether they asked for this training. If they say yes, they sign the waiver (and, for members, the membership agreement) and pay online, at the member price if they are a member. Once they have paid you get an email to record the training.</p>';
+	$html .= '<p class="meta">The request expires in '.((int) OnboardingBooking::SPOT_HOURS).' hours (at '.dol_escape_htmltag($expires).' if sent now) if they have not paid by then. Someone already trained on the tool cannot be sent a request.</p>';
+	$html .= onboarding_booking_form($hidden, 'spot', 'Send the request to the trainee', $fields);
+	onboarding_booking_page('Train someone now', $html);
+}
+
 // ---------------------------------------------------------------- group class list
 $classId = (int) GETPOST('c', 'int');
 if ($classId > 0) {
@@ -185,6 +222,33 @@ $message = function ($r, $okText) use ($facts) {
 	}
 	onboarding_booking_page('Not done', $facts.'<p class="err">'.dol_escape_htmltag(isset($r['error']) ? $r['error'] : 'That did not work.').'</p>', 409);
 };
+
+if ($b->source == 'spot' && in_array($b->status, array('requested', 'held', 'expired'), true)) {
+	$open = $b->status != 'expired' && $db->jdate($b->hold_until) >= $now;
+	if ($who == 'trainer') {
+		onboarding_booking_page('Waiting for the trainee', $facts.'<p>'.($open ? 'The trainee has not paid yet. The request expires at '.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($b->hold_until), 'g:i A')).'.' : 'This request has expired.').'</p>');
+	}
+	if ($post && ($do == 'spot_yes' || $do == 'spot_no')) {
+		$r = $bk->spotAnswer($b, $do == 'spot_yes');
+		if (empty($r['ok'])) {
+			$message($r, '');
+		}
+		if ($do == 'spot_no') {
+			onboarding_booking_page('Thank you', $facts.'<p class="ok">The request is cancelled and nothing was charged. We have told the secretary, who will look into it.</p>');
+		}
+		onboarding_booking_page('Sign and pay', $facts.'<p class="ok">Thank you. Next: sign the waiver if it is not on file yet, then pay, before '.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($b->hold_until), 'g:i A')).'.</p><p><a href="'.dol_escape_htmltag($r['url']).'" style="display:inline-block;padding:.6rem 1.2rem;border-radius:6px;background:#2d6a4f;color:#fff;text-decoration:none">Continue to sign and pay</a></p>');
+	}
+	if (!$open) {
+		onboarding_booking_page('Request expired', $facts.'<p>This request was not paid within '.((int) OnboardingBooking::SPOT_HOURS).' hours, so it has expired and nothing was charged. Ask your trainer to send a new one.</p>');
+	}
+	$html = $facts.'<p><strong>'.dol_escape_htmltag(trim($b->trainer_first.' '.$b->trainer_last)).'</strong> says you are with them and would like to train you on the '.dol_escape_htmltag($b->tool).' now. Did you ask for this training?</p>';
+	$html .= onboarding_booking_form($hidden, 'spot_yes', $b->status == 'held' ? 'Yes: continue to sign and pay' : 'Yes, that\'s me: sign and pay');
+	if ($b->status == 'requested') {
+		$html .= onboarding_booking_form($hidden, 'spot_no', 'No, I didn\'t ask for this', '', 'warn');
+	}
+	$html .= '<p class="meta">This request expires at '.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($b->hold_until), 'g:i A')).', '.((int) OnboardingBooking::SPOT_HOURS).' hours after it was sent.</p>';
+	onboarding_booking_page('Did you ask for this training?', $html);
+}
 
 if ($who == 'trainer') {
 	$before = $now < $start;

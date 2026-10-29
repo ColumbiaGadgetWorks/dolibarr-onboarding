@@ -51,5 +51,13 @@ if (cat.status === 404) {
   assert.equal(slots.ok, true, JSON.stringify(slots));
   const look = await post(`${SITE}/api/training/lookup`, { email: 'nobody@example.test' });
   assert.equal(look.found, false);
+  // On-the-spot trainings, when the website branch has them.
+  const tr = await fetch(`${SITE}/api/training/trainer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'nobody@example.test' }) });
+  if (tr.status === 404) {
+    console.log('(this website branch has no on-the-spot trainings yet; skipped)');
+  } else {
+    assert.equal((await tr.json()).ok, true, 'the same answer for anyone');
+    assert.equal((await post(`${SITE}/api/training/spot`, { ref: 'TR-0000', key: 'f'.repeat(48) })).status, 404);
+  }
 }
 console.log('STACK OK');
