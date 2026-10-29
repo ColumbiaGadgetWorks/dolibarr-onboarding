@@ -51,6 +51,8 @@ jobs:
         run: node e2e-purchase.mjs
       - name: Training bookings
         run: node e2e-training.mjs
+      - name: On-the-spot trainings
+        run: node e2e-spot.mjs
       - name: Member votes
         run: node e2e-vote.mjs
       - name: Email approval

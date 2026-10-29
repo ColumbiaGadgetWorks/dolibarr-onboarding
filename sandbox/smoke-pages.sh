@@ -70,6 +70,7 @@ check 'training-tools.php' 'Closed days'
 TOOL=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT fk_tool FROM llx_onboarding_trainer_slot ORDER BY rowid DESC LIMIT 1")
 check "training-tools.php?action=edit&id=$TOOL" 'Trainers and their times'
 check 'trainings.php' 'Upcoming'
+check 'trainings.php' 'On the spot'
 check 'trainings.php' 'Mark trained (no fee)'
 check 'trainings.php' 'Bookings that need someone'
 BK=$(docker compose exec -T db mariadb -N -udolidbuser -pdolidbpass dolidb -e "SELECT rowid FROM llx_onboarding_booking ORDER BY rowid DESC LIMIT 1")

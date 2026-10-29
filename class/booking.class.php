@@ -36,6 +36,7 @@ class OnboardingBooking
 	const MOVABLE = array('paid', 'confirmed', 'needs_new_date');
 
 	const STATUS_LABELS = array(
+		'requested' => 'On the spot: waiting for the trainee',
 		'held' => 'Paying now',
 		'paid' => 'Paid, trainer to confirm',
 		'confirmed' => 'Confirmed',
@@ -48,6 +49,15 @@ class OnboardingBooking
 		'cancelled' => 'Cancelled',
 		'expired' => 'Not paid',
 	);
+
+	/**
+	 * Hours an on-the-spot request stays open for the trainee to say yes, sign
+	 * and pay; minutes the trainer's own link works; requests a trainer may have
+	 * waiting at once.
+	 */
+	const SPOT_HOURS = 4;
+	const SPOT_LINK_MINUTES = 120;
+	const SPOT_MAX_OPEN = 3;
 
 	const WEEKDAYS = array(1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 7 => 'Sunday');
 
@@ -1156,7 +1166,7 @@ class OnboardingBooking
 		$p = $this->db->prefix();
 		$sql = "SELECT b.*, t.ref AS tool_ref, t.label AS tool, t.zone, t.wiki_url, t.trainer_share, a.firstname AS trainer_first, a.lastname AS trainer_last, a.email AS trainer_email";
 		$sql .= " FROM ".$p."onboarding_booking AS b LEFT JOIN ".$p."onboarding_tool AS t ON t.rowid = b.fk_tool LEFT JOIN ".$p."adherent AS a ON a.rowid = b.fk_trainer";
-		$sql .= " WHERE b.entity = ".((int) $conf->entity)." AND (".preg_replace('/\b(status|session_start|fk_class|fk_trainer|fk_tool|email|rowid|answer|hold_until|paid_at|ref|fk_adherent|gb_transaction_id|datec)\b/', 'b.$1', $where).") ORDER BY ".$order;
+		$sql .= " WHERE b.entity = ".((int) $conf->entity)." AND (".preg_replace('/\b(status|session_start|fk_class|fk_trainer|fk_tool|email|rowid|answer|hold_until|paid_at|ref|fk_adherent|gb_transaction_id|datec|source)\b/', 'b.$1', $where).") ORDER BY ".$order;
 		$res = $this->db->query($sql);
 		$out = array();
 		while ($res && ($o = $this->db->fetch_object($res))) {
@@ -1376,6 +1386,10 @@ class OnboardingBooking
 			return '';
 		}
 		$b = $this->booking((int) $b->rowid);
+		if ($b->source == 'spot') {
+			$this->onPaid($b);
+			return 'booking '.$b->ref.' paid (on the spot)';
+		}
 		// Let go of while paying, and the seat has gone since: keep the money, ask for a new date.
 		$seats = $this->seatsFor($b);
 		$t2 = $this->seatsTaken((int) $b->fk_trainer, $this->db->jdate($b->session_start), (int) $b->fk_tool);
@@ -1409,6 +1423,10 @@ class OnboardingBooking
 	public function onPaid($b, $moved = false)
 	{
 		$b = $this->booking((int) $b->rowid);
+		if ($b->source == 'spot' && !$moved) {
+			$this->spotPaid($b);
+			return;
+		}
 		$start = $this->db->jdate($b->session_start);
 		$this->mailTpl($moved ? 'moved' : 'booked', $b->email, $this->vars($b), '', '', (string) $b->rowid);
 		$already = $this->bookingsWhere("fk_trainer = ".((int) $b->fk_trainer)." AND session_start = '".$this->db->idate($start)."' AND status = 'confirmed' AND rowid <> ".((int) $b->rowid));
@@ -1420,6 +1438,334 @@ class OnboardingBooking
 		if ($this->markSent($b, 'trainer_sent', 'request')) {
 			$this->mailTpl('trainer_request', $b->trainer_email, $this->vars($b, 'trainer'));
 		}
+	}
+
+	// ---------------------------------------------------------------- on the spot
+
+	/**
+	 * The tools a member may train someone on right now: a current member with a
+	 * time on the tool (the "Trainer: <tool>" tag) who is trained on it themselves.
+	 *
+	 * @param object|null $m Member row (memberRow())
+	 * @return object[] Tools
+	 */
+	public function spotTools($m)
+	{
+		if (!$this->isPaying($m)) {
+			return array();
+		}
+		$out = array();
+		foreach ($this->slots(0, true) as $s) {
+			if ((int) $s->fk_adherent != (int) $m->rowid || isset($out[(int) $s->fk_tool])) {
+				continue;
+			}
+			$tool = $this->tool((int) $s->fk_tool);
+			if ($tool && $tool->active && $this->isTrainedOn((int) $m->rowid, $tool)) {
+				$out[(int) $tool->rowid] = $tool;
+			}
+		}
+		return array_values($out);
+	}
+
+	/**
+	 * @param int $memberId Trainer
+	 * @param int $until When the link stops working
+	 * @return string The trainer's link to start an on-the-spot training
+	 */
+	public function spotLink($memberId, $until)
+	{
+		return $this->linkBase().'?t='.((int) $memberId).'&x='.((int) $until).'&k='.$this->sign('spot:'.((int) $memberId).':'.((int) $until));
+	}
+
+	/**
+	 * @param int $memberId Trainer, from the link
+	 * @param int $until Expiry, from the link
+	 * @param string $key Signature, from the link
+	 * @return bool
+	 */
+	public function spotLinkValid($memberId, $until, $key)
+	{
+		return $memberId > 0 && $until >= OnboardingService::now() && hash_equals($this->sign('spot:'.((int) $memberId).':'.((int) $until)), (string) $key);
+	}
+
+	/**
+	 * "I'm a trainer: train someone now" on the website: email the trainer their
+	 * link, if the address belongs to someone who may train on at least one tool.
+	 * The answer is the same either way, so the page tells nobody who is a trainer.
+	 *
+	 * @param string $email What was typed
+	 * @return array<string,mixed>
+	 */
+	public function spotStart($email)
+	{
+		global $conf;
+		$email = OnboardingService::cleanEmail($email);
+		if (!isValidEmail($email)) {
+			return array('ok' => false, 'error' => 'invalid', 'http' => 400);
+		}
+		$m = $this->memberRow($email);
+		$tools = $this->spotTools($m);
+		if ($tools) {
+			// At most one link a minute per trainer, whatever the website lets through.
+			$last = 'ONBOARDING_SPOT_LINK_'.((int) $m->rowid);
+			$now = OnboardingService::now();
+			if ($now - getDolGlobalInt($last) >= 60) {
+				require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+				dolibarr_set_const($this->db, $last, $now, 'chaine', 0, 'Last on-the-spot training link sent', $conf->entity);
+				$until = $now + self::SPOT_LINK_MINUTES * 60;
+				$this->mailTpl('spot_link', $email, array(
+					'trainer' => (string) $m->firstname,
+					'tools' => implode(', ', array_map(function ($t) {
+						return $t->label;
+					}, $tools)),
+					'link' => $this->spotLink((int) $m->rowid, $until),
+					'until' => self::fmt($until, 'g:i A'),
+					'hours' => (string) self::SPOT_HOURS,
+				));
+			}
+		}
+		return array('ok' => true);
+	}
+
+	/**
+	 * The trainer pressed "Send the request": check it, make the booking, and
+	 * email the trainee to say yes or no.
+	 *
+	 * @param int $memberId Trainer (from their signed link)
+	 * @param int $toolId Tool
+	 * @param string $email Trainee's email
+	 * @return array{ok:bool,error?:string,ref?:string,expires?:int}
+	 */
+	public function spotRequest($memberId, $toolId, $email)
+	{
+		global $conf;
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT email FROM ".$p."adherent WHERE rowid = ".((int) $memberId));
+		$o = $res ? $this->db->fetch_object($res) : null;
+		$m = $o ? $this->memberRow((string) $o->email) : null;
+		if ($m && (int) $m->rowid != (int) $memberId) {
+			$m = null;
+		}
+		$tool = null;
+		foreach ($this->spotTools($m) as $t) {
+			if ((int) $t->rowid == (int) $toolId) {
+				$tool = $t;
+			}
+		}
+		if (!$tool) {
+			return array('ok' => false, 'error' => 'You can only start a training on a tool you are a trainer for, and are trained on yourself.');
+		}
+		$email = OnboardingService::cleanEmail($email);
+		if (!isValidEmail($email)) {
+			return array('ok' => false, 'error' => 'Check the trainee\'s email address.');
+		}
+		if ($email === OnboardingService::cleanEmail((string) $m->email)) {
+			return array('ok' => false, 'error' => 'You cannot train yourself. Type the trainee\'s own email address.');
+		}
+		$person = $this->person($email);
+		if ($this->trainedEmail($email, $tool) || ($person['member'] && $this->isTrainedOn((int) $person['member']->rowid, $tool))) {
+			return array('ok' => false, 'error' => 'That person is already marked as trained on the '.$tool->label.'. Nothing was sent.');
+		}
+		$now = OnboardingService::now();
+		$nowSql = $this->db->idate($now);
+		if ($this->bookingsWhere("email = '".$this->db->escape($email)."' AND fk_tool = ".((int) $tool->rowid)." AND (status IN ('paid', 'confirmed', 'needs_new_date', 'other') OR (status IN ('held', 'requested') AND hold_until > '".$nowSql."'))")) {
+			return array('ok' => false, 'error' => 'That person already has a booking or a request open for the '.$tool->label.'. Nothing was sent.');
+		}
+		$open = $this->bookingsWhere("source = 'spot' AND fk_trainer = ".((int) $m->rowid)." AND status IN ('requested', 'held') AND hold_until > '".$nowSql."'");
+		if (count($open) >= self::SPOT_MAX_OPEN) {
+			return array('ok' => false, 'error' => 'You already have '.count($open).' requests waiting for the trainee. Wait for one to be paid or to expire, then try again.');
+		}
+		$member = $person['kind'] == 'member';
+		$price = $member ? self::memberPrice($tool) : round((float) $tool->fee, 2);
+		$until = $now + self::SPOT_HOURS * 3600;
+		$token = bin2hex(random_bytes(24));
+		$table = $p.'onboarding_booking';
+		$sql = "INSERT INTO ".$table." (entity, token, fk_tool, fk_trainer, fk_adherent, fk_socpeople, fk_applicant, email, firstname, lastname, session_start, minutes, price, price_type, status, hold_until, source, datec) VALUES (";
+		$sql .= ((int) $conf->entity).", '".$token."', ".((int) $tool->rowid).", ".((int) $m->rowid).", ";
+		$sql .= ($person['member'] ? (int) $person['member']->rowid : 'NULL').", ".($person['contact'] ? (int) $person['contact'] : 'NULL').", ".($person['applicant'] ? (int) $person['applicant']->rowid : 'NULL').", ";
+		$sql .= "'".$this->db->escape($email)."', '".$this->db->escape(dol_trunc($person['firstname'], 100, 'right', 'UTF-8', 1))."', '".$this->db->escape(dol_trunc($person['lastname'], 100, 'right', 'UTF-8', 1))."', ";
+		$sql .= "'".$nowSql."', ".((int) $tool->minutes).", ".price2num($price).", '".($member ? 'member' : 'nonmember')."', 'requested', '".$this->db->idate($until)."', 'spot', '".$nowSql."')";
+		if (!$this->db->query($sql)) {
+			return array('ok' => false, 'error' => 'The request could not be saved. Try again in a minute.');
+		}
+		$id = (int) $this->db->last_insert_id($table);
+		$ref = 'TR-'.sprintf('%04d', $id);
+		$this->saveBooking($id, array('ref' => $ref));
+		$b = $this->booking($id);
+		$this->mailTpl('spot_request', $email, $this->vars($b));
+		return array('ok' => true, 'ref' => $ref, 'expires' => $until);
+	}
+
+	/**
+	 * The trainee answers the request: "No" cancels it and tells the secretary
+	 * and the trainer; "Yes" prices it (member or not) and opens it for signing
+	 * and paying on the website.
+	 *
+	 * @param object $b Booking
+	 * @param bool $yes Their answer
+	 * @return array{ok:bool,error?:string,url?:string}
+	 */
+	public function spotAnswer($b, $yes)
+	{
+		$now = OnboardingService::now();
+		if ($b->status == 'held' && $yes) {
+			return array('ok' => true, 'url' => $this->spotPayUrl($b));
+		}
+		if ($b->status != 'requested' || $this->db->jdate($b->hold_until) < $now) {
+			return array('ok' => false, 'error' => 'This request is no longer open ('.self::STATUS_LABELS[$b->status == 'requested' ? 'expired' : $b->status].'). Ask your trainer to send a new one.');
+		}
+		if (!$yes) {
+			if (!$this->saveBooking((int) $b->rowid, array('status' => 'cancelled', 'answer' => 'declined', 'answered_at' => $this->db->idate($now)), "status = 'requested'")) {
+				return array('ok' => false, 'error' => 'Already answered.');
+			}
+			$this->mailTpl('staff_spot_declined', $this->staffEmails(), $this->vars($b, 'staff'));
+			$this->mailTpl('spot_declined', $b->trainer_email, $this->vars($b, 'trainer'));
+			return array('ok' => true);
+		}
+		if (!$this->saveBooking((int) $b->rowid, array('status' => 'held'), "status = 'requested'")) {
+			return array('ok' => false, 'error' => 'Already answered.');
+		}
+		$this->spotPrice($this->booking((int) $b->rowid));
+		return array('ok' => true, 'url' => $this->spotPayUrl($b));
+	}
+
+	/**
+	 * @param object $b Booking
+	 * @return string The website's booking page, opened on this request's signing and paying
+	 */
+	public function spotPayUrl($b)
+	{
+		return $this->bookUrl().'#spot='.rawurlencode((string) $b->ref).'.'.$b->token;
+	}
+
+	/**
+	 * Bring an on-the-spot booking up to date with who the trainee is now: their
+	 * name, member card and price (they may have just signed up or signed).
+	 *
+	 * @param object $b Booking
+	 * @return array Person, from person()
+	 */
+	private function spotPrice($b)
+	{
+		$person = $this->person((string) $b->email);
+		$tool = $this->tool((int) $b->fk_tool);
+		$member = $person['kind'] == 'member';
+		$this->saveBooking((int) $b->rowid, array(
+			'price' => $member ? self::memberPrice($tool) : round((float) $tool->fee, 2),
+			'price_type' => $member ? 'member' : 'nonmember',
+			'fk_adherent' => $person['member'] ? (int) $person['member']->rowid : null,
+			'fk_socpeople' => $person['contact'] ? (int) $person['contact'] : null,
+			'fk_applicant' => $person['applicant'] ? (int) $person['applicant']->rowid : null,
+			'firstname' => dol_trunc($person['firstname'], 100, 'right', 'UTF-8', 1),
+			'lastname' => dol_trunc($person['lastname'], 100, 'right', 'UTF-8', 1),
+		), "status = 'held' AND gb_transaction_id IS NULL");
+		return $person;
+	}
+
+	/**
+	 * @param string $ref Booking ref, from the page address
+	 * @param string $key Its token, from the page address
+	 * @return object|null The on-the-spot booking
+	 */
+	private function spotByKey($ref, $key)
+	{
+		$rows = $this->bookingsWhere("ref = '".$this->db->escape((string) $ref)."' AND source = 'spot'");
+		return $rows && hash_equals((string) $rows[0]->token, (string) $key) ? $rows[0] : null;
+	}
+
+	/**
+	 * For the website's booking page, opened from "Yes, that's me": what is
+	 * left before paying (a name for someone new, signing) and what to pay.
+	 *
+	 * @param string $ref Booking ref
+	 * @param string $key Its token
+	 * @return array<string,mixed>
+	 */
+	public function spotInfo($ref, $key)
+	{
+		$b = $this->spotByKey($ref, $key);
+		if (!$b) {
+			return array('ok' => false, 'error' => 'invalid', 'http' => 404);
+		}
+		if (in_array($b->status, array('paid', 'confirmed', 'trained'), true)) {
+			return array('ok' => true, 'status' => 'paid', 'tool' => (string) $b->tool, 'trainer' => (string) $b->trainer_first, 'ref' => (string) $b->ref);
+		}
+		$until = $this->db->jdate($b->hold_until);
+		if ($b->status != 'held' || $until < OnboardingService::now()) {
+			return array('ok' => false, 'error' => $b->status == 'requested' ? 'answer' : 'expired', 'http' => 410);
+		}
+		$person = $this->spotPrice($b);
+		$b = $this->booking((int) $b->rowid);
+		$out = array(
+			'ok' => true, 'status' => 'held', 'ref' => (string) $b->ref, 'key' => (string) $b->token, 'email' => (string) $b->email,
+			'kind' => $person['kind'], 'needs' => $person['needs'], 'firstname' => $person['firstname'], 'lastname' => $person['lastname'],
+			'amount' => round((float) $b->price, 2), 'price_type' => (string) $b->price_type, 'tool' => (string) $b->tool, 'zone' => (string) $b->zone,
+			'trainer' => (string) $b->trainer_first, 'when' => 'now', 'wiki' => (string) $b->wiki_url,
+			'expires' => gmdate('Y-m-d\TH:i:s\Z', $until), 'expires_label' => self::fmt($until, 'g:i A'),
+		);
+		if ($person['kind'] != 'new' && $person['needs']) {
+			$app = $this->applicantFor($person);
+			$out['sign'] = $app ? $this->svc->issueToken($app, false) : '';
+		}
+		if ($person['kind'] != 'new' && !$person['needs'] && (float) $b->price <= 0 && $this->saveBooking((int) $b->rowid, array('status' => 'paid', 'paid_at' => $this->db->idate(OnboardingService::now())), "status = 'held'")) {
+			$this->onPaid($this->booking((int) $b->rowid));
+			$out['status'] = 'paid';
+		}
+		return $out;
+	}
+
+	/**
+	 * Someone new, from the booking page: their name, then the same as spotInfo().
+	 *
+	 * @param array<string,mixed> $in ref, key, firstname, lastname, discord, notify_events, notify_news, ip
+	 * @return array<string,mixed>
+	 */
+	public function spotNew($in)
+	{
+		$b = $this->spotByKey(isset($in['ref']) ? (string) $in['ref'] : '', isset($in['key']) ? (string) $in['key'] : '');
+		if (!$b || $b->status != 'held') {
+			return array('ok' => false, 'error' => 'invalid', 'http' => 404);
+		}
+		$r = $this->newTrainee(array('email' => (string) $b->email) + $in, 'Created by an on-the-spot training ('.$b->ref.').');
+		if (empty($r['ok'])) {
+			return $r;
+		}
+		return $this->spotInfo((string) $b->ref, (string) $b->token);
+	}
+
+	/**
+	 * Paid: the trainee hears so, and the trainer gets the buttons to say it was done.
+	 *
+	 * @param object $b Booking
+	 * @return void
+	 */
+	private function spotPaid($b)
+	{
+		$now = $this->db->idate(OnboardingService::now());
+		if (!$this->saveBooking((int) $b->rowid, array('status' => 'confirmed', 'confirmed_at' => $now, 'session_start' => $now, 'trainer_sent' => 'after'), "status = 'paid'")) {
+			return;
+		}
+		$b = $this->booking((int) $b->rowid);
+		$this->mailTpl('spot_paid', $b->email, $this->vars($b));
+		$this->mailTpl('spot_trainer_paid', $b->trainer_email, $this->vars($b, 'trainer'));
+	}
+
+	/**
+	 * Requests nobody paid for in time: closed, and the trainer told.
+	 *
+	 * @param int $now Now
+	 * @return int Requests closed
+	 */
+	private function expireSpot($now)
+	{
+		$n = 0;
+		foreach ($this->bookingsWhere("source = 'spot' AND status IN ('requested', 'held') AND hold_until < '".$this->db->idate($now)."'") as $b) {
+			if ($this->saveBooking((int) $b->rowid, array('status' => 'expired'), "status IN ('requested', 'held')")) {
+				$this->mailTpl('spot_expired', $b->trainer_email, $this->vars($b, 'trainer'));
+				$n++;
+			}
+		}
+		return $n;
 	}
 
 	// ---------------------------------------------------------------- what happens to a booking
@@ -1494,6 +1840,7 @@ class OnboardingBooking
 			'noanswer' => '{trainer} did not confirm the session in time.',
 			'closed' => 'The shop is closed that day.',
 			'full' => 'The session filled up while your payment was on its way.',
+			'spot' => '{trainer} says the training did not happen.',
 		);
 		$v = $this->vars($b);
 		$v['reason'] = trim(strtr(isset($reasons[$why]) ? $reasons[$why] : '', array('{trainer}' => $v['trainer'])).' '.$detail);
@@ -1624,6 +1971,13 @@ class OnboardingBooking
 			}
 			$tid = $this->record($this->booking((int) $b->rowid), $userId);
 			return array('ok' => true, 'result' => 'Recorded as trained'.($tid ? '' : ' (the training record could not be written; tell the secretary)').'.');
+		}
+		if ($answer == 'noshow' && $b->source == 'spot') {
+			if (!$this->saveBooking((int) $b->rowid, array('answer' => 'not_done', 'answered_at' => $now), $from)) {
+				return array('ok' => false, 'error' => 'Already answered.');
+			}
+			$this->loseDate($this->booking((int) $b->rowid), 'spot', '');
+			return array('ok' => true, 'result' => 'Not marked as trained. They were asked to pick a date for the training, ask for a refund, or tell the secretary.');
 		}
 		if ($answer == 'noshow') {
 			$shows = (int) $b->no_shows + 1;
@@ -1809,8 +2163,9 @@ class OnboardingBooking
 		if ($this->bookingsWhere("gb_transaction_id IS NULL AND (status = 'held' OR (status = 'expired' AND hold_until >= '".$this->db->idate($now - 86400)."'))")) {
 			$this->svc->quickSync();
 		}
+		$n['expired'] = $this->expireSpot($now);
 		$res = $this->db->query("UPDATE ".$this->db->prefix()."onboarding_booking SET status = 'expired' WHERE status = 'held' AND hold_until < '".$this->db->idate($now)."'");
-		$n['expired'] = $res ? $this->db->affected_rows($res) : 0;
+		$n['expired'] += $res ? $this->db->affected_rows($res) : 0;
 
 		$confirmBy = (int) round(self::num('TRAINING_CONFIRM_HOURS', 24) * 3600);
 		$remindAfter = (int) round(self::num('TRAINING_CONFIRM_REMIND_HOURS', 24) * 3600);
@@ -2613,7 +2968,14 @@ class OnboardingBooking
 			'comment' => (string) $b->comment,
 			'roster' => '',
 			'again' => '',
+			'email' => (string) $b->email,
+			'expires' => $b->hold_until ? self::fmt($this->db->jdate($b->hold_until), 'g:i A') : '',
+			'hours' => (string) self::SPOT_HOURS,
 		);
+		$tool = $b->source == 'spot' ? $this->tool((int) $b->fk_tool) : null;
+		if ($tool) {
+			$v['prices'] = '$'.number_format(self::memberPrice($tool), 2).' for members, $'.number_format((float) $tool->fee, 2).' for everyone else';
+		}
 		if ($who == 'trainee') {
 			$v['link'] = $this->link($b, 'trainee');
 			$v['link_cancel'] = $this->link($b, 'trainee', 'cancel');
@@ -2621,6 +2983,8 @@ class OnboardingBooking
 			$v['link_refund'] = $this->link($b, 'trainee', 'refund');
 			$v['link_other'] = $this->link($b, 'trainee', 'other');
 			$v['link_no_trainer'] = $this->link($b, 'trainee', 'no_trainer');
+			$v['link_yes'] = $this->link($b, 'trainee', 'spot_yes');
+			$v['link_no'] = $this->link($b, 'trainee', 'spot_no');
 		}
 		if ($who == 'trainer') {
 			$v['link_confirm'] = $this->link($b, 'trainer', 'confirm');
@@ -2710,6 +3074,13 @@ class OnboardingBooking
 			'staff_unmatched' => array('Training payment without a booking', "{who} paid {paid} on the training campaign (Givebutter {tx}), but no booking waiting for payment has that email and price. Usually they typed another email at Givebutter, or paid after their seat was let go.\n\nLink it to their booking under Members, Onboarding, Trainings, or refund it in Givebutter:\n{card}"),
 			'wrong_amount' => array('Your training payment did not match your booking ({ref})', "Hi {firstname},\n\nWe received {paid_now} from you on Givebutter, but your {tool} training on {when} costs {price}, so the payment could not be matched to your booking and your seat is not confirmed yet.\n\nThe secretary has been told and will refund it or sort out the difference with you. You do not need to pay again."),
 			'staff_wrong_amount' => array('Training paid with the wrong amount: {ref}', "{trainee_full} paid {paid_now} on Givebutter (transaction {tx}) for booking {ref}, {tool} on {when}, which costs {price}. The booking is not marked paid.\n\nEither refund the payment in Givebutter and ask them to book again, or, if you accept the amount, link the payment to the booking under Members, Onboarding, Trainings (Paid without a booking):\n{card}"),
+			'spot_link' => array('Train someone now: your link', "Hi {trainer},\n\nHere is your link to start an on-the-spot training ({tools}). It works until {until}:\n\n{link}\n\nPick the tool and type the trainee's email address. They get an email asking whether they asked for the training; if they say yes, they sign the waiver and pay online, and you get an email to record the training once it is done. A request they have not paid within {hours} hours expires.\n\nIf you did not ask for this link, ignore it."),
+			'spot_request' => array('{trainer_full} wants to train you on the {tool} now ({ref})', "Hi {firstname},\n\n{trainer_full} says you are with them at {org} and would like to train you on the {tool} now.\n\nDid you ask for this training?\n\nYes, that's me (sign the waiver if needed, then pay: {prices}):\n{link_yes}\n\nNo, I didn't ask for this:\n{link_no}\n\nThis request expires at {expires}, {hours} hours after it was sent. After that, ask your trainer to send a new one."),
+			'spot_declined' => array('Training request declined: {tool} ({ref})', "Hi {trainer},\n\nThe person at {email} answered that they did not ask for a {tool} training, so the request is cancelled and nothing was charged. The secretary has been told.\n\nIf the email was mistyped, send a new request with the right address."),
+			'staff_spot_declined' => array('On-the-spot training declined: {tool} ({ref})', "{trainer_full} started an on-the-spot {tool} training for {email}, and that person answered that they did not ask for it. The request is cancelled; nothing was charged.\n\nCheck with the trainer what happened:\n{card}"),
+			'spot_expired' => array('Training request expired: {tool} ({ref})', "Hi {trainer},\n\nYour on-the-spot {tool} training request for {email} was not paid within {hours} hours, so it has expired. Nothing was charged.\n\nIf they still want the training, send a new request."),
+			'spot_paid' => array('Paid: {tool} training with {trainer} ({ref})', "Hi {firstname},\n\nThank you: your payment of {paid} for the {tool} training with {trainer_full} arrived. Once the training is done, {trainer} records it and you get an email saying you are trained.\n\nThe guide for the {tool}: {wiki}\n\nIf something is wrong, tell us here:\n{link_other}"),
+			'spot_trainer_paid' => array('Paid: {tool} training for {trainee} ({ref})', "Hi {trainer},\n\n{trainee} ({kind}) has paid {paid} for the {tool} training.{minor_note}\n\nWhen you have finished, choose one:\n\n{trainee} was trained:\n{link_trained}\n\nThe training did not happen, do not mark them as trained (they can pick a date or ask for a refund):\n{link_noshow}\n\nOther (leave a comment for the secretary):\n{link_other}"),
 			'pick_date' => array('Pick a new date for your {tool} training ({ref})', "Hi {firstname},\n\nPick a new date for your {tool} training here:\n\n{link_move}"),
 		);
 	}

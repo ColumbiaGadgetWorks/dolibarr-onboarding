@@ -154,7 +154,7 @@ throws the sandbox away.
 every push: signup, drawn signatures, payment, duplicate webhooks, a missed webhook caught by
 the sync, cancellation, reminders, lapse, rejoining, cleanup of abandoned signups, the
 Connect Givebutter button, the legacy import, and the deadline reminders (weekly reminders,
-escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. `sandbox/e2e-security.mjs` disables the logins of an officer who loses the tag and a member whose membership ends (after a warning, and not when put right in time), deletes bank data past 7 years, and runs the yearly access review from its email to its done link. It also checks that the staff pages render
+escalation, the mark-complete link, next year's copy). `sandbox/e2e-training.mjs` walks training bookings: a tool and trainer, new, non-member, member and under-18 trainees, signing, holds, payments matched after Givebutter's fee, the trainer's and trainee's email buttons, refunds, no-shows, unconfirmed sessions, closed days, free trainings, a group class, the masked lookup and a new waiver version. `sandbox/e2e-vote.mjs` runs a member vote from the officers' email links: notice, running for seats, floor nominations, opening at the meeting, the 30-day and full-member rules, the secret ballot, resending a ballot, counting with quorum, two-thirds and a tiebreak, GitHub tagging and posting (on a fake GitHub), a practice vote and the reminder schedule. `sandbox/e2e-filing.mjs` runs a yearly filing from the treasurer's email links: the start day, weekly reminders, uploads sorted by month, a reconciled month, marking a report none, All uploaded, the 990-N values and gross receipts, the board's escalation, the questions box, and both filings done. `sandbox/e2e-reconcile.mjs` reconciles a bank export with junk above the columns, a card export with the signs reversed, PayPal-style payments with fees, OFX, refused files, a person's decisions, and the PayPal account from the fake PayPal. `sandbox/e2e-spot.mjs` runs on-the-spot trainings: the trainer's link (only for a trainer trained on the tool), the refusals, a trainee saying no, three at most, someone new signing and paying, a member at the member price, the trainer recording it or saying it did not happen, and a request expiring. `sandbox/e2e-plaid.mjs` connects a bank on a fake Plaid, feeds its accounts, reads transactions into reconciling (matched, pending, taken back), handles the bank wanting the login again, and disconnects. `sandbox/e2e-security.mjs` disables the logins of an officer who loses the tag and a member whose membership ends (after a warning, and not when put right in time), deletes bank data past 7 years, and runs the yearly access review from its email to its done link. It also checks that the staff pages render
 and runs a signup through the real website.
 
 ## Training
@@ -238,6 +238,30 @@ Members, Onboarding, **Trainings** lists bookings that need someone (comments, r
 make, people still to pick a date, sessions the trainer has not answered), upcoming
 sessions, payments that matched no booking (link them to the booking), and every training
 recorded with how (paid, no fee, imported, group class).
+
+### On the spot
+
+A trainer with someone in front of them, ready to train now:
+
+1. On the website's booking page the trainer presses **I'm a trainer: train someone now** and
+   types their own email. If they are a current member with a training time on a tool and
+   trained on it themselves, Dolibarr emails them a link that works for 2 hours (the page
+   says the same whoever typed what).
+2. On that page they pick the tool and type the trainee's email, and press **Send the request
+   to the trainee**. Refused: their own email, someone already trained on the tool, someone
+   with a booking or request already open for it, or a fourth request while three are waiting.
+3. The trainee gets **Did you ask for this training?** with **Yes** and **No**. No cancels it,
+   and the secretary and the trainer are told. Yes takes them to the booking page: a name if
+   they are new (they become a non-member), the waiver (and the membership agreement for a
+   member), then Givebutter at the member or non-member price.
+4. A request not paid within 4 hours of being sent expires, and the trainer is told. The
+   form, the email and the payment page all say when.
+5. Once paid, the trainee hears so and the trainer gets **was trained** / **did not happen**
+   (the trainee picks a date or asks for a refund) / **Other**, reminded an hour and a day
+   later. Trained is recorded like any booking: the record, the **Trained** tag, and the split.
+
+Members, Onboarding, Trainings lists them under **On the spot** (the last 30 days, and any
+still open), marked "on the spot" wherever they appear.
 
 ### Free trainings and group classes
 
@@ -655,6 +679,11 @@ due date. A year that ended before this existed shows as "not tracked": start it
 it as filed outside Dolibarr (dates and gross receipts) on Yearly filings. The statements
 are kept under `onboarding/filing/<year>/` in Dolibarr's documents. Members, Onboarding has
 the same page; give board members the right "See yearly tax filings".
+
+### Updating to 0.18
+
+Update from GitHub. On-the-spot trainings need the website's booking page with the trainer
+button (ColumbiaGadgetWorks/website); without it, nothing changes.
 
 ### Updating to 0.17
 

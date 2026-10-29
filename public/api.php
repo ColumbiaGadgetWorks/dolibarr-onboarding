@@ -113,7 +113,7 @@ if ($action == 'trainings') {
 	onboarding_reply(array('ok' => true, 'trainings' => $training->trainedOn(isset($in['email']) ? (string) $in['email'] : '')));
 }
 
-if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signlink', 'book', 'bookingstatus', 'lookup', 'closeddays', 'notifyback', 'websitereport', 'classinfo', 'classjoin'), true)) {
+if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signlink', 'book', 'bookingstatus', 'lookup', 'closeddays', 'notifyback', 'websitereport', 'classinfo', 'classjoin', 'spotstart', 'spotinfo', 'spotnew'), true)) {
 	// Training bookings (class/booking.class.php). Turnstile and per-IP limits are
 	// the Worker's. Answers about a person say only what the booking page needs:
 	// member or not, what is left to sign, a masked name for the lookup.
@@ -168,6 +168,16 @@ if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signli
 	}
 	if ($action == 'websitereport') {
 		onboarding_reply($booking->websiteReport($in));
+	}
+	if ($action == 'spotstart') {
+		// "I'm a trainer: train someone now". The same answer whoever typed what.
+		onboarding_reply($booking->spotStart(isset($in['email']) ? (string) $in['email'] : ''));
+	}
+	if ($action == 'spotinfo') {
+		onboarding_reply($booking->spotInfo(isset($in['ref']) ? (string) $in['ref'] : '', isset($in['key']) ? (string) $in['key'] : ''));
+	}
+	if ($action == 'spotnew') {
+		onboarding_reply($booking->spotNew($in));
 	}
 	if ($action == 'classinfo') {
 		onboarding_reply($booking->classInfo(isset($in['code']) ? (string) $in['code'] : ''));

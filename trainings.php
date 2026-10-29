@@ -120,7 +120,7 @@ $bookingRow = function ($b, $actions) use ($db, $btn, $canwrite) {
 	$start = $db->jdate($b->session_start);
 	$h = '<tr class="oddeven" id="b'.((int) $b->rowid).'"><td>'.dol_escape_htmltag($b->ref).'</td><td>'.($start ? dol_escape_htmltag(OnboardingBooking::fmt($start, 'D j M, g:i A')) : '').'</td>';
 	$h .= '<td>'.dol_escape_htmltag(trim($b->firstname.' '.$b->lastname)).'<br><span class="opacitymedium small">'.dol_escape_htmltag($b->email).'</span></td>';
-	$h .= '<td>'.dol_escape_htmltag($b->tool).($b->fk_class ? ' <span class="opacitymedium small">class</span>' : '').'</td><td>'.dol_escape_htmltag(trim($b->trainer_first.' '.$b->trainer_last)).'</td>';
+	$h .= '<td>'.dol_escape_htmltag($b->tool).($b->fk_class ? ' <span class="opacitymedium small">class</span>' : '').($b->source == 'spot' ? ' <span class="badge badge-status1">on the spot</span>' : '').'</td><td>'.dol_escape_htmltag(trim($b->trainer_first.' '.$b->trainer_last)).'</td>';
 	$h .= '<td class="right">'.price($b->amount_paid ?: $b->price).' <span class="opacitymedium small">'.dol_escape_htmltag($b->price_type).'</span></td>';
 	$h .= '<td>'.dol_escape_htmltag(OnboardingBooking::STATUS_LABELS[$b->status]).($b->no_shows ? ' <span class="opacitymedium small">'.((int) $b->no_shows).' no-show</span>' : '').($b->comment !== null && $b->comment !== '' ? '<br><span class="small">&ldquo;'.dol_escape_htmltag(dol_trunc($b->comment, 200)).'&rdquo;</span>' : '').'</td><td class="right nowraponall">';
 	if ($canwrite) {
@@ -150,6 +150,17 @@ if ($attention) {
 	print '<div class="div-table-responsive"><table class="noborder centpercent">'.$bookingHead;
 	foreach ($attention as $b) {
 		print $bookingRow($b, $b->status == 'refund_requested' ? array(array('bk_refunded', 'Mark refunded', 'After refunding it in Givebutter')) : $settle);
+	}
+	print '</table></div><br>';
+}
+
+$spot = $bk->bookingsWhere("source = 'spot' AND (status IN ('requested', 'held') OR datec > '".$db->idate(OnboardingService::now() - 30 * 86400)."')", 'b.rowid DESC');
+if ($spot) {
+	print '<h3>On the spot</h3>';
+	print '<p class="opacitymedium">Trainings a trainer started right away from the website, newest first, the last 30 days and any still open. The trainee says yes, signs and pays within '.((int) OnboardingBooking::SPOT_HOURS).' hours; a "no" goes to the secretary.</p>';
+	print '<div class="div-table-responsive"><table class="noborder centpercent">'.$bookingHead;
+	foreach ($spot as $b) {
+		print $bookingRow($b, in_array($b->status, array('confirmed', 'paid', 'needs_new_date', 'other'), true) ? $settle : array());
 	}
 	print '</table></div><br>';
 }
