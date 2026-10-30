@@ -325,13 +325,14 @@ entered it.
 
 ### Purchase requests
 
-Zone leads, the president and the treasurer ask to spend from a zone's budget, or from the
-**General fund**, on the website's **/budget** page. The form makes them pick the zone. The
-president and treasurer (whoever holds those role tags, see below) can file for any zone or
-the General fund; a zone boss
-can file only for their own zone and is told which one it is if they try another; every
-other member is turned away. The General fund has no budget to check, so a request for it
-always needs the treasurer and one other director, and paying it spends no zone's budget.
+Zone bosses and the board ask to spend from a zone's budget, or from the **General fund**,
+on the website's **/budget** page. The form makes them pick the zone the money is for, and
+that zone's budget pays. Anyone on the board (whoever holds a board role tag, see below) can
+file for any zone or the General fund; a zone boss can file for any zone but not the General
+fund; every other member is turned away. A reimbursement goes to whoever filed it, so a
+Metalworking boss who bought clamps for Woodworking files for Woodworking and is paid back
+from Woodworking's budget. The General fund has no budget to check, and paying from it spends
+no zone's budget.
 Two kinds of request, and only two:
 
 - **Reimburse me**: already bought. At least one receipt (PDF, JPG, PNG, WEBP or HEIC, up
@@ -350,10 +351,15 @@ no `member_code` cannot use the form.
 Who decides, from a signed link in their email (no Dolibarr login; opening the link only
 shows the request, a button decides):
 
-- The **zone lead**, for requests up to **$100** while the zone still has the money.
-- Anything bigger, over the zone's budget, from a zone with no lead, or from the lead
-  themselves: the **treasurer and one other director** (if the treasurer is the one asking,
-  any two other directors). Nobody ever approves their own request.
+- The **treasurer**, always, so it can be ordered or paid back.
+- The **president** too, for anything over **$100** (setting) or over the zone's budget.
+- The **zone's boss** too, when someone who is not its boss filed it (another zone's boss, or
+  someone on the board). A zone with no boss skips this.
+- Nobody ever approves their own request: when the treasurer or the president files, another
+  director takes their place, and the same when nobody holds the tag. The treasurer and the
+  president must be different people; the zone boss may also be one of them.
+
+A rejection asks the approver why, and the member gets the reason in their email.
 
 **Roles are tags on member cards**, so nobody is hard-coded. Open a member, go to the
 Tags/Categories tab and tick the role: `president`, `vice-president`, `secretary`, `treasurer`
@@ -364,9 +370,11 @@ move the tag and everything follows: the new person gets the approval emails and
 old one stops. Several people may hold a role. The setup page lists every role tag with who
 holds it right now, flags a holder with no member code, and has a **Create the role tags**
 button (enabling the module also creates them). Only validated members count. A zone with no
-boss sends its requests to the board; if nobody holds `treasurer`, any two directors approve.
-The board is everyone tagged with a board role. Approved requests wait under Members, Onboarding, **Purchase requests**,
-where the treasurer presses **Mark paid** and chooses the account it was paid from. That puts
+boss needs no boss's approval. The board is everyone tagged with a board role. When a request
+is approved the treasurer is emailed links to its receipts (or the item's link). Approved
+requests wait under Members, Onboarding, **Purchase requests**, where the treasurer checks the
+receipts and presses **Mark reimbursed** after paying the member back, or orders the item and
+presses **Mark ordered**, choosing the account it was paid from. That puts
 the money out of that Dolibarr bank account (a bank line linked to the member) and out of the
 zone's budget, both naming the request. Until then an approved or waiting request counts as
 **committed**, so the page shows `available = added - spent - committed`.

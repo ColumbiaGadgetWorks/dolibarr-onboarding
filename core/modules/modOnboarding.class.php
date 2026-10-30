@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.19.0';
+		$this->version = '0.20.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -59,7 +59,7 @@ class modOnboarding extends DolibarrModules
 			array('ONBOARDING_TRAINING_ZONES', 'chaine', 'Digital Fab,Electronics,Woodworking,Machining,Metalworking,Crafting', 'Zones with a budget, comma separated, as on the training form', 0, 'current', 0),
 			array('ONBOARDING_WEBSITE_URL', 'chaine', 'https://columbiagadgetworks.org', 'The website, which gets the training catalog and the lookup copy from Dolibarr', 0, 'current', 0),
 			array('ONBOARDING_TRAINING_TZ', 'chaine', 'America/Chicago', 'Time zone of the shop', 0, 'current', 0),
-			array('ONBOARDING_PURCHASE_LEAD_LIMIT', 'chaine', '100', 'Largest purchase request a zone lead may approve alone; bigger ones need the treasurer and another director', 0, 'current', 0),
+			array('ONBOARDING_PURCHASE_LEAD_LIMIT', 'chaine', '100', 'Purchase requests over this many dollars need the president as well as the treasurer', 0, 'current', 0),
 			array('ONBOARDING_PURCHASE_RECEIPT_DAYS', 'chaine', '60', 'Days after buying that a reimbursement receipt is still accepted', 0, 'current', 0),
 		);
 
