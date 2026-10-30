@@ -338,7 +338,10 @@ Two kinds of request, and only two:
 - **Reimburse me**: already bought. At least one receipt (PDF, JPG, PNG, WEBP or HEIC, up
   to 5 files of 5 MB) is required, the purchase must be within 60 days (setting), and the
   member says how to be paid (Venmo or check).
-- **Request for purchase**: the treasurer buys it. It needs a web link and the total price.
+- **Request for purchase**: the treasurer buys it. It lists up to 10 items, each a web link
+  and its price; the request's amount is their total. The prices are an **estimate**: tax,
+  shipping and other fees may be added, and the final amount from the order receipt is what
+  the zone's budget pays.
 
 The member proves who they are with the email on their member card and the two digits of
 their `member_code`. `CGW-05`, `05` and `140405` all mean 05. Only validated members who are
@@ -371,15 +374,18 @@ old one stops. Several people may hold a role. The setup page lists every role t
 holds it right now, flags a holder with no member code, and has a **Create the role tags**
 button (enabling the module also creates them). Only validated members count. A zone with no
 boss needs no boss's approval. The board is everyone tagged with a board role. When a request
-is approved the treasurer is emailed links to its receipts (or the item's link). Approved
-requests wait under Members, Onboarding, **Purchase requests**, where the treasurer checks the
-receipts and presses **Mark reimbursed** after paying the member back, or orders the item and
-presses **Mark ordered**, choosing the account it was paid from. That puts
-the money out of that Dolibarr bank account (a bank line linked to the member) and out of the
-zone's budget, both naming the request. Until then an approved or waiting request counts as
+is approved the treasurer is emailed links to its receipts (or its items). Approved requests
+wait under Members, Onboarding, **Purchase requests**, where the treasurer checks the receipts
+and presses **Mark reimbursed** after paying the member back, or orders the items, attaches the
+order receipt, types the **final amount** (tax, shipping and fees included) and presses **Mark
+ordered**, choosing the account it was paid from. That puts the money (for an order, the final
+amount, not the estimate) out of that Dolibarr bank account (a bank line linked to the member)
+and out of the zone's budget, both naming the request; the order receipt is kept with the
+request. Until then an approved or waiting request counts as
 **committed**, so the page shows `available = added - spent - committed`.
 
-The website asks for `budget` (totals per zone: no names, no transactions), then files a
+The website asks for `budget` (totals per zone: no names, no transactions; `training` is the
+part of what was put in that came from training fees, voided trainings left out), then files a
 request in three calls so receipts travel one at a time: `purchase` (checks the member,
 returns a draft), `purchasefile` for each receipt, `purchasefinish`. Turnstile and a per-IP
 limit are the website's. Unfinished drafts are removed after two days.

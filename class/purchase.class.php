@@ -34,6 +34,7 @@ class OnboardingPurchase
 	const MAX_FILES = 5;
 	const MAX_FILE_BYTES = 5242880;
 	const MAX_AMOUNT = 5000;
+	const MAX_ITEMS = 10;
 	const BAD_EMAIL_LIMIT = 5;
 	const BAD_IP_LIMIT = 20;
 	const BAD_ALL_LIMIT = 100;
@@ -590,10 +591,11 @@ class OnboardingPurchase
 
 	/**
 	 * What /budget shows: totals per zone, never names or transactions.
-	 * allocated = everything put in (budget added, training shares), spent = everything
-	 * taken out, committed = requests not yet paid, available = what is left to ask for.
+	 * allocated = everything put in (budget added, training shares), training = the part
+	 * of it raised by training fees (voided trainings left out), spent = everything taken
+	 * out, committed = requests not yet paid, available = what is left to ask for.
 	 *
-	 * @return array<int,array{zone:string,allocated:float,spent:float,committed:float,available:float}>
+	 * @return array<int,array{zone:string,allocated:float,training:float,spent:float,committed:float,available:float}>
 	 */
 	public function budget()
 	{
@@ -605,12 +607,18 @@ class OnboardingPurchase
 			$in[(string) $o->account_key] = (float) $o->pos;
 			$out[(string) $o->account_key] = (float) $o->neg;
 		}
+		$fees = array();
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT l.account_key, SUM(l.amount) AS t FROM ".$p."onboarding_ledger AS l LEFT JOIN ".$p."onboarding_training AS t ON t.rowid = l.fk_training WHERE l.entity = ".((int) $conf->entity)." AND l.account_type = 'zone' AND l.kind = 'training' AND (t.rowid IS NULL OR t.status <> 'ignored') GROUP BY l.account_key");
+		while ($res && ($o = $this->db->fetch_object($res))) {
+			$fees[(string) $o->account_key] = (float) $o->t;
+		}
 		$rows = array();
 		foreach ($this->training->zones() as $z) {
 			$a = isset($in[$z]) ? $in[$z] : 0.0;
 			$s = isset($out[$z]) ? $out[$z] : 0.0;
 			$c = $this->committed($z);
-			$rows[] = array('zone' => $z, 'allocated' => round($a, 2), 'spent' => round($s, 2), 'committed' => $c, 'available' => round($a - $s - $c, 2));
+			$rows[] = array('zone' => $z, 'allocated' => round($a, 2), 'training' => round(isset($fees[$z]) ? $fees[$z] : 0.0, 2), 'spent' => round($s, 2), 'committed' => $c, 'available' => round($a - $s - $c, 2));
 		}
 		return $rows;
 	}
@@ -676,6 +684,7 @@ class OnboardingPurchase
 		$vendor = $get('vendor', 200);
 		$description = $get('description', 600);
 		$link = $get('link', 500);
+		$items = array();
 		$method = $get('pay_method', 20);
 		$handle = $get('pay_handle', 200);
 		$date = $get('purchase_date', 10);
@@ -687,6 +696,27 @@ class OnboardingPurchase
 		if (!in_array($zone, $this->zoneNames(), true)) {
 			return $bad('zone');
 		}
+		if ($kind == 'purchase') {
+			// Line items, each a link and its price; one link and an amount still work.
+			$list = isset($in['items']) && is_array($in['items']) ? array_values($in['items']) : array(array('link' => $link, 'price' => $get('amount', 20)));
+			if (!$list || count($list) > self::MAX_ITEMS) {
+				return $bad('link');
+			}
+			foreach ($list as $it) {
+				$l = is_array($it) && isset($it['link']) && is_scalar($it['link']) ? trim(dol_trunc((string) $it['link'], 500, 'right', 'UTF-8', 1)) : '';
+				$p = is_array($it) && isset($it['price']) && is_scalar($it['price']) ? round((float) price2num((string) $it['price']), 2) : 0;
+				$parts = parse_url($l);
+				if ($l === '' || !filter_var($l, FILTER_VALIDATE_URL) || !$parts || !in_array(strtolower(isset($parts['scheme']) ? $parts['scheme'] : ''), array('http', 'https'), true)) {
+					return $bad('link');
+				}
+				if ($p <= 0) {
+					return $bad('amount');
+				}
+				$items[] = array('link' => $l, 'price' => $p);
+			}
+			$link = $items[0]['link'];
+			$amount = round(array_sum(array_column($items, 'price')), 2);
+		}
 		if ($amount <= 0 || $amount > self::MAX_AMOUNT) {
 			return $bad('amount');
 		}
@@ -694,10 +724,6 @@ class OnboardingPurchase
 			return $bad('description');
 		}
 		if ($kind == 'purchase') {
-			$parts = parse_url($link);
-			if ($link === '' || !filter_var($link, FILTER_VALIDATE_URL) || !$parts || !in_array(strtolower(isset($parts['scheme']) ? $parts['scheme'] : ''), array('http', 'https'), true)) {
-				return $bad('link');
-			}
 			$date = $today;
 			$method = '';
 			$handle = '';
@@ -745,8 +771,8 @@ class OnboardingPurchase
 		}
 
 		$token = bin2hex(random_bytes(24));
-		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_purchase (entity, token, fk_adherent, zone, kind, amount, vendor, purchase_date, link, description, pay_method, pay_handle, status, need_board, ip, files, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$token."', ".((int) $m->rowid).", '".$this->db->escape($zone)."', '".$this->db->escape($kind)."', ".price2num($amount).", '".$this->db->escape($vendor)."', '".$this->db->escape($date)."', '".$this->db->escape($link)."', '".$this->db->escape($description)."', '".$this->db->escape($method)."', '".$this->db->escape($handle)."', 'draft', 0, '".$this->db->escape($ip)."', '[]', '".$this->db->idate(OnboardingService::now())."')";
+		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_purchase (entity, token, fk_adherent, zone, kind, amount, items, vendor, purchase_date, link, description, pay_method, pay_handle, status, need_board, ip, files, datec) VALUES (";
+		$sql .= ((int) $conf->entity).", '".$token."', ".((int) $m->rowid).", '".$this->db->escape($zone)."', '".$this->db->escape($kind)."', ".price2num($amount).", ".($items ? "'".$this->db->escape(json_encode($items))."'" : 'NULL').", '".$this->db->escape($vendor)."', '".$this->db->escape($date)."', '".$this->db->escape($link)."', '".$this->db->escape($description)."', '".$this->db->escape($method)."', '".$this->db->escape($handle)."', 'draft', 0, '".$this->db->escape($ip)."', '[]', '".$this->db->idate(OnboardingService::now())."')";
 		if (!$this->db->query($sql)) {
 			return array('ok' => false, 'error' => 'server', 'http' => 500);
 		}
@@ -786,6 +812,23 @@ class OnboardingPurchase
 		if (count($files) >= self::MAX_FILES) {
 			return array('ok' => false, 'error' => 'files', 'http' => 400);
 		}
+		$stored = $this->storeFile($row, $bytes);
+		if (!$stored['ok']) {
+			return $stored;
+		}
+		return array('ok' => true, 'files' => $stored['files']);
+	}
+
+	/**
+	 * Keep one receipt with a request. The type is decided by the bytes, never by the name.
+	 *
+	 * @param object $row Request
+	 * @param string $bytes File contents
+	 * @return array<string,mixed> ok, files (how many now); or ok false, error
+	 */
+	private function storeFile($row, $bytes)
+	{
+		$files = $this->files($row);
 		if (strlen($bytes) < 100 || strlen($bytes) > self::MAX_FILE_BYTES) {
 			return array('ok' => false, 'error' => 'size', 'http' => 400);
 		}
@@ -813,6 +856,32 @@ class OnboardingPurchase
 		$files[] = $name;
 		$this->save($row->rowid, array('files' => json_encode($files)));
 		return array('ok' => true, 'files' => count($files));
+	}
+
+	/**
+	 * @param object $row Request
+	 * @return array<int,array{link:string,price:float}> What a request for purchase asks for
+	 */
+	public function items($row)
+	{
+		$items = json_decode((string) (isset($row->items) ? $row->items : ''), true);
+		if (is_array($items) && $items) {
+			return $items;
+		}
+		return $row->kind == 'purchase' ? array(array('link' => (string) $row->link, 'price' => (float) $row->amount)) : array();
+	}
+
+	/**
+	 * @param object $row Request
+	 * @return string One line per item, for emails
+	 */
+	public function itemsText($row)
+	{
+		$t = '';
+		foreach ($this->items($row) as $i => $it) {
+			$t .= ($i + 1).'. '.self::money($it['price']).'  '.$it['link']."\n";
+		}
+		return $t;
 	}
 
 	/**
@@ -898,7 +967,7 @@ class OnboardingPurchase
 	private function approverBody($row, $a, $who)
 	{
 		$b = "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from the ".$row->zone." budget.\n";
-		$b .= $row->kind == 'purchase' ? "They want the treasurer to buy it: ".$row->link."\n" : "Already bought at ".$row->vendor." on ".$row->purchase_date.". Receipts are attached to the request.\n";
+		$b .= $row->kind == 'purchase' ? "They want the treasurer to buy it (prices are estimates; tax, shipping and fees may be added):\n".$this->itemsText($row) : "Already bought at ".$row->vendor." on ".$row->purchase_date.". Receipts are attached to the request.\n";
 		$b .= "What and why: ".$row->description."\n\n";
 		$b .= "It needs ".$this->needsText($row)." to approve; you are asked as ".$a['role'].".\n\n";
 		$b .= "Look at it, then approve or reject (nothing changes until you press the button on that page):\n".$this->link($row->rowid, $a['email'], 'approve')."\n\n";
@@ -1004,7 +1073,7 @@ class OnboardingPurchase
 			foreach ($this->treasurers() as $tmail) {
 				$body = "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from the ".$row->zone." budget is approved.\nWhat and why: ".$row->description."\n\n";
 				if ($row->kind == 'purchase') {
-					$body .= "Order it: ".$row->link."\nThen press Mark ordered on the Purchase requests page in Dolibarr.";
+					$body .= "Order it:\n".$this->itemsText($row)."\nThen, on the Purchase requests page in Dolibarr, attach the order receipt, type the final amount (tax, shipping and fees included) and press Mark ordered. The final amount is what comes out of the budget.";
 				} else {
 					$body .= "Check the receipts:\n";
 					foreach ($this->files($row) as $i => $f) {
@@ -1029,11 +1098,22 @@ class OnboardingPurchase
 	 * @param User $user The treasurer
 	 * @return string Message for the screen, starting with "Error" on failure
 	 */
-	public function markPaid($id, $accountId, $user)
+	public function markPaid($id, $accountId, $user, $final = 0.0, $receipt = '')
 	{
 		$row = $this->fetch($id);
 		if (!$row || $row->status != 'approved') {
 			return 'Error: only an approved request can be marked reimbursed or ordered.';
+		}
+		$amount = (float) $row->amount;
+		if ($row->kind == 'purchase') {
+			// The prices were an estimate: the order receipt says what it really cost.
+			$final = round((float) $final, 2);
+			if ($final <= 0 || $final > self::MAX_AMOUNT * 2) {
+				return 'Error: type the final amount from the order receipt, with tax, shipping and fees.';
+			}
+			if ($receipt === '') {
+				return 'Error: attach the order receipt.';
+			}
 		}
 		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
 		$acc = new Account($this->db);
@@ -1044,7 +1124,15 @@ class OnboardingPurchase
 		$who = $member ? trim($member->firstname.' '.$member->lastname) : '';
 		$type = $row->pay_method == 'check' ? 'CHQ' : ($row->kind == 'purchase' ? 'CB' : 'VIR');
 		$label = dol_trunc($row->ref.' '.$row->zone.': '.($row->vendor !== '' ? $row->vendor : 'purchase').($who !== '' ? ' ('.$who.')' : ''), 100, 'right', 'UTF-8', 1);
-		$line = $acc->addline(OnboardingService::now(), $type, $label, -abs((float) $row->amount), '', 0, $user);
+		if ($row->kind == 'purchase') {
+			$stored = $this->storeFile($row, $receipt);
+			if (!$stored['ok']) {
+				return 'Error: '.($stored['error'] == 'type' ? 'the receipt must be a PDF or a picture.' : ($stored['error'] == 'size' ? 'the receipt is too big (5 MB).' : 'the receipt could not be kept.'));
+			}
+			$amount = $final;
+			$this->save($row->rowid, array('amount_final' => $final));
+		}
+		$line = $acc->addline(OnboardingService::now(), $type, $label, -abs($amount), '', 0, $user);
 		if ($line <= 0) {
 			return 'Error: the bank line could not be created: '.$acc->error;
 		}
@@ -1052,12 +1140,12 @@ class OnboardingPurchase
 			$acc->add_url_line($line, (int) $member->rowid, DOL_URL_ROOT.'/adherents/card.php?rowid=', $who, 'member');
 		}
 		if ($row->zone !== self::GENERAL) {
-			$this->training->post('zone', $row->zone, -abs((float) $row->amount), 'spend', 0, $row->ref.' '.($row->vendor !== '' ? $row->vendor : 'purchase').($who !== '' ? ' ('.$who.')' : ''), 0, (int) $user->id);
+			$this->training->post('zone', $row->zone, -abs($amount), 'spend', 0, $row->ref.' '.($row->vendor !== '' ? $row->vendor : 'purchase').($who !== '' ? ' ('.$who.')' : ''), 0, (int) $user->id);
 		}
 		$this->save($row->rowid, array('status' => 'paid', 'fk_bank_line' => (int) $line, 'paid_from' => $acc->label, 'paid_at' => $this->db->idate(OnboardingService::now()), 'fk_user_paid' => (int) $user->id));
 		if ($row->kind == 'purchase') {
-			$this->svc->mail($member ? $member->email : '', $row->ref.': ordered', "Your request ".$row->ref." for ".self::money($row->amount)." has been ordered by the treasurer. Thank you.");
-			return $row->ref.' marked ordered: '.self::money($row->amount).' out of '.$acc->label.' and the '.$row->zone.' budget.';
+			$this->svc->mail($member ? $member->email : '', $row->ref.': ordered', "Your request ".$row->ref." has been ordered by the treasurer. It came to ".self::money($amount)." with tax, shipping and fees (estimated ".self::money($row->amount)."), which is what comes out of the ".$row->zone." budget. Thank you.");
+			return $row->ref.' marked ordered: '.self::money($amount).' (estimated '.self::money($row->amount).') out of '.$acc->label.' and the '.$row->zone.' budget.';
 		}
 		$this->svc->mail($member ? $member->email : '', $row->ref.': reimbursed', "Your request ".$row->ref." for ".self::money($row->amount)." was paid back to you from ".$acc->label.". Thank you.");
 		return $row->ref.' marked reimbursed: '.self::money($row->amount).' out of '.$acc->label.' and the '.$row->zone.' budget.';

@@ -49,7 +49,11 @@ $action = GETPOST('action', 'aZ09');
 $id = (int) GETPOST('id', 'int');
 if ($canpay && in_array($action, array('paid', 'cancel'), true)) {
 	if ($action == 'paid') {
-		$msg = $purchase->markPaid($id, (int) GETPOST('account', 'int'), $user);
+		$receipt = '';
+		if (!empty($_FILES['receipt']['tmp_name']) && is_uploaded_file($_FILES['receipt']['tmp_name'])) {
+			$receipt = (string) file_get_contents($_FILES['receipt']['tmp_name']);
+		}
+		$msg = $purchase->markPaid($id, (int) GETPOST('account', 'int'), $user, (float) price2num(GETPOST('final', 'alpha')), $receipt);
 	} else {
 		$msg = $purchase->cancel($id, $user);
 	}
@@ -60,7 +64,7 @@ if ($canpay && in_array($action, array('paid', 'cancel'), true)) {
 
 llxHeader('', 'Purchase requests');
 print load_fiche_titre('Purchase requests', '', 'members');
-print '<p class="opacitymedium">Filed on the website by zone bosses and the board. Every request needs the treasurer; over '.dol_escape_htmltag(OnboardingPurchase::money(OnboardingPurchase::leadLimit())).' or over the zone\'s budget, the president too; filed for a zone by someone who is not its boss, that zone\'s boss too. Nobody approves their own: another director stands in. Approvers decide from the link in their email. Once approved, check the receipts and press Mark reimbursed after paying the member back, or order the item and press Mark ordered. Either takes the money out of the account you choose and out of the zone\'s budget.</p>';
+print '<p class="opacitymedium">Filed on the website by zone bosses and the board. Every request needs the treasurer; over '.dol_escape_htmltag(OnboardingPurchase::money(OnboardingPurchase::leadLimit())).' or over the zone\'s budget, the president too; filed for a zone by someone who is not its boss, that zone\'s boss too. Nobody approves their own: another director stands in. Approvers decide from the link in their email. Once approved, check the receipts and press Mark reimbursed after paying the member back, or order the items, attach the order receipt, type the final amount (tax, shipping and fees included) and press Mark ordered. Either takes the money out of the account you choose and out of the zone\'s budget; for an order, the final amount, not the estimate.</p>';
 
 $accounts = array();
 if (isModEnabled('banque')) {
@@ -82,7 +86,11 @@ foreach ($purchase->all() as $r) {
 	print '<td>'.dol_escape_htmltag($r->zone).'</td><td>';
 	print '<span class="opacitymedium small">'.dol_escape_htmltag(OnboardingPurchase::KINDS[$r->kind]).'</span><br>';
 	if ($r->kind == 'purchase') {
-		print '<a href="'.dol_escape_htmltag($r->link).'" target="_blank" rel="noopener noreferrer">'.dol_escape_htmltag(dol_trunc($r->link, 50)).'</a>';
+		$lines = array();
+		foreach ($purchase->items($r) as $it) {
+			$lines[] = price($it['price']).' <a href="'.dol_escape_htmltag($it['link']).'" target="_blank" rel="noopener noreferrer">'.dol_escape_htmltag(dol_trunc($it['link'], 50)).'</a>';
+		}
+		print implode('<br>', $lines);
 	} else {
 		print dol_escape_htmltag($r->vendor).' on '.dol_escape_htmltag($r->purchase_date).'<br><span class="opacitymedium small">Pay by '.dol_escape_htmltag(isset(OnboardingPurchase::PAY_METHODS[$r->pay_method]) ? OnboardingPurchase::PAY_METHODS[$r->pay_method] : $r->pay_method).' '.dol_escape_htmltag($r->pay_handle).'</span>';
 	}
@@ -108,9 +116,19 @@ foreach ($purchase->all() as $r) {
 	} elseif ($r->decided_note) {
 		print '<br><span class="opacitymedium small">'.dol_escape_htmltag($r->decided_note).'</span>';
 	}
-	print '</td><td class="right">'.price($r->amount).'</td><td class="right nowraponall">';
+	print '</td><td class="right">';
+	if ($r->kind == 'purchase' && $r->amount_final !== null && $r->amount_final !== '') {
+		print price($r->amount_final).'<br><span class="opacitymedium small">estimated '.price($r->amount).'</span>';
+	} else {
+		print price($r->amount).($r->kind == 'purchase' ? '<br><span class="opacitymedium small">estimate</span>' : '');
+	}
+	print '</td><td class="right nowraponall">';
 	if ($canpay && $r->status == 'approved') {
-		print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="paid"><input type="hidden" name="id" value="'.((int) $r->rowid).'">';
+		print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block" enctype="multipart/form-data"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="paid"><input type="hidden" name="id" value="'.((int) $r->rowid).'">';
+		if ($r->kind == 'purchase') {
+			print '<label class="small">Order receipt <input type="file" name="receipt" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,application/pdf,image/*" required></label><br>';
+			print '<label class="small">Final amount, with tax, shipping and fees <input type="text" name="final" size="7" inputmode="decimal" required></label><br>';
+		}
 		print '<select name="account"><option value="0">'.($r->kind == 'purchase' ? 'Bought with...' : 'Paid back from...').'</option>';
 		foreach ($accounts as $aid => $label) {
 			print '<option value="'.$aid.'">'.dol_escape_htmltag($label).'</option>';
