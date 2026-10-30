@@ -326,7 +326,7 @@ assert.ok(look6.includes('/p/glue') && /estimate/.test(look6), 'the approver see
 await press(r6.id, leadEmail, 'approve');
 await press(r6.id, treasurer, 'approve');
 assert.ok(await heard(treasurer, `${r6.ref} is approved, ready to order`));
-assert.match(await bodyOf(treasurer, `${r6.ref} is approved`), /p\/glue[\s\S]*final amount/, 'the treasurer gets every link and is told to record the final amount');
+assert.match(await bodyOf(treasurer, `${r6.ref} is approved`), /p\/glue[\s\S]*final\s+amount/, 'the treasurer gets every link and is told to record the final amount');
 
 step('ordered: the treasurer attaches the receipt and the final amount, which is what the budget pays');
 const w6 = await zone('Woodworking');
@@ -340,7 +340,7 @@ assert.equal(JSON.parse(paid6.files).length, 1, 'the order receipt is kept with 
 const w7 = await zone('Woodworking');
 assert.equal(Math.round((w7.spent - w6.spent) * 100), 2391, 'tax and shipping included');
 assert.equal(Math.round((w6.committed - w7.committed) * 100), 2000, 'the estimate is no longer held back');
-assert.match(await bodyOf(pres, `${r6.ref}: ordered`), /\$23\.91 with tax, shipping and fees/);
+assert.match(await bodyOf(pres, `${r6.ref}: ordered`), /\$23\.91\s+with\s+tax,\s+shipping\s+and\s+fees/);
 
 step('the General fund: up to $100 the treasurer alone, and it spends no zone');
 const r7 = await ask({ zone: 'General fund', amount: 25, vendor: 'Staples', description: 'Printer paper' });
