@@ -682,8 +682,20 @@ if ($job == 'daily') {
 	if ($app) {
 		unset($out['applicant']->token_hash);
 		$out['files'] = array_map('basename', glob(DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid).'/*') ?: array());
+		$mdir = $app->fk_adherent > 0 ? $svc->memberDir((int) $app->fk_adherent) : '';
+		$out['member_files'] = $mdir !== '' ? array_map('basename', glob($mdir.'/*') ?: array()) : array();
 	}
 	echo json_encode($out)."\n";
+} elseif ($job == 'memberfiles') {
+	// Copies on the member card. memberfiles EMAIL drop NAME | forget | copy
+	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');
+	$what = isset($argv[3]) ? $argv[3] : 'copy';
+	if ($what == 'drop') {
+		@unlink($svc->memberDir((int) $app->fk_adherent).'/'.basename($argv[4]));
+	} elseif ($what == 'forget') {
+		@unlink(DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid).'/member-copies.json');
+	}
+	echo $svc->copyAllToMembers()."\n";
 } elseif ($job == 'vote') {
 	// Member votes. vote create DAYS LABEL [test] | run MINUTES | meeting ID DAYS |
 	// joined EMAIL DAYS | link ID EMAIL WHO | show ID | tables

@@ -16,7 +16,13 @@ and the page at `/membership/join/`).
    uploads a photo of their ID. Each signed document is stored as a PDF with the drawn
    signature, the date, the IP address and the exact version of the text shown. Ticks appear
    on the contact card. When all three are done the contact also becomes a **non-member**:
-   a draft member in Dolibarr, waiting to pay.
+   a draft member in Dolibarr, waiting to pay. From then on the signed waiver and agreement and the ID
+   photo are also copied onto the member card, under **Attached files and documents**
+   (`onboarding-signed-waiver.pdf`, `onboarding-signed-agreement.pdf`,
+   `onboarding-id-photo.jpg`). Anyone who can read member cards can open them there. A copy
+   is made again only when the file changes, so one deleted from the member card stays
+   deleted; the originals stay in the module's own folder. The daily job copies them for
+   members linked later and for everyone who signed up before this was added.
 3. **Dues.** The applicant pays through Givebutter. When Givebutter reports the payment the
    non-member is validated into a **member** and a subscription is recorded for the period
    paid. Standard or Supporter is decided by the amount.

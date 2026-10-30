@@ -120,6 +120,17 @@ assert.ok(d.files.includes('waiver-signature.png'), `drawn signature missing: ${
 assert.equal(d.member.status, -1, 'ready to pay: a non-member (draft member), not yet a member');
 assert.equal(d.member.subscriptions, 0);
 
+step('the signed papers and the ID photo are on the member card');
+assert.deepEqual(d.member_files.map((f) => f.replace(/\.\w+$/, '')).sort(), ['onboarding-id-photo', 'onboarding-signed-agreement', 'onboarding-signed-waiver'], `member files: ${d.member_files}`);
+const agreementCopy = d.member_files.find((f) => f.startsWith('onboarding-signed-agreement'));
+tick('memberfiles', email); // anyone left over from an earlier run
+assert.equal(tick('memberfiles', email), '0 files copied to member cards', 'copied once, not every day');
+tick('memberfiles', email, 'drop', agreementCopy);
+assert.ok(!dump().member_files.includes(agreementCopy), 'deleted from the member card stays deleted');
+assert.ok(dump().files.some((f) => f.startsWith('agreement.')), 'the original stays');
+assert.equal(tick('memberfiles', email, 'forget'), '3 files copied to member cards', 'members from before: copied by the daily job');
+assert.equal(dump().member_files.length, 3);
+
 step('a payment from an unknown email stays unmatched');
 const strangerEmail = `stranger-${Date.now()}@example.test`;
 const stranger = await mock('/control/pay', { email: strangerEmail, amount: 50 });
