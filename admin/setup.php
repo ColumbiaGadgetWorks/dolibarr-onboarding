@@ -172,7 +172,7 @@ $sections = array(
 	),
 	'Housekeeping' => array(
 		'ONBOARDING_DRAFT_DAYS' => array('Delete abandoned signups after (days)', 'text', '0 keeps them forever.'),
-		'ONBOARDING_ID_RETENTION_DAYS' => array('Delete ID photos after (days)', 'text', 'Counted from the day signup completes. 0 keeps them. The "ID photo uploaded" tick stays either way.'),
+		'ONBOARDING_ID_RETENTION_DAYS' => array('Delete ID photos after (days)', 'text', 'Counted from the day signup completes, and deletes the copy on the member card too. 0 keeps them. The "ID photo uploaded" tick stays either way.'),
 	),
 );
 

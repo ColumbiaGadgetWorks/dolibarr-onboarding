@@ -250,6 +250,8 @@ class OnboardingService
 	}
 
 	/** The two documents people sign, with the title used when the source has none. */
+	/** Names of the copies on the member card, without the extension. */
+	const MEMBER_FILES = array('waiver' => 'onboarding-signed-waiver', 'agreement' => 'onboarding-signed-agreement', 'id' => 'onboarding-id-photo');
 	const DOCS = array('waiver' => 'Liability waiver', 'agreement' => 'Membership agreement');
 
 	/**
@@ -532,7 +534,112 @@ class OnboardingService
 			$app = $this->fetch($id);
 		}
 		$this->syncExtraFields($app);
+		$this->copyToMember($app);
 		return $app;
+	}
+
+	/**
+	 * The member card's folder for attached files (Members, the member, Attached
+	 * files and documents).
+	 *
+	 * @param int $adhId Member id
+	 * @return string Folder, '' when the member is gone
+	 */
+	public function memberDir($adhId)
+	{
+		global $conf;
+		$adh = new Adherent($this->db);
+		if ($adhId <= 0 || $adh->fetch((int) $adhId) <= 0) {
+			return '';
+		}
+		return $conf->adherent->dir_output.'/'.get_exdir(0, 0, 0, 1, $adh, 'member');
+	}
+
+	/**
+	 * Copy the signed waiver and agreement and the ID photo onto the member card, so
+	 * they show under its Attached files and documents. A file is copied again only
+	 * when it changes (signed again, a new photo), so one deleted from the member card
+	 * stays deleted. The originals stay in the onboarding folder either way.
+	 *
+	 * @param object $app Applicant row
+	 * @return int Files copied
+	 */
+	public function copyToMember($app)
+	{
+		if (!$app || !($app->fk_adherent > 0)) {
+			return 0;
+		}
+		$src = DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid);
+		$files = array();
+		foreach (array('waiver', 'agreement') as $doc) {
+			foreach (array('pdf', 'txt') as $ext) {
+				if (!isset($files[$doc]) && is_readable($src.'/'.$doc.'.'.$ext)) {
+					$files[$doc] = $doc.'.'.$ext;
+				}
+			}
+		}
+		if (!empty($app->id_file) && is_readable($src.'/'.basename($app->id_file))) {
+			$files['id'] = basename($app->id_file);
+		}
+		if (!$files) {
+			return 0;
+		}
+		// What was copied where, so a file is not copied twice.
+		$marker = $src.'/member-copies.json';
+		$done = is_readable($marker) ? json_decode((string) file_get_contents($marker), true) : array();
+		$done = is_array($done) ? $done : array();
+		$dest = '';
+		$copied = 0;
+		foreach ($files as $what => $file) {
+			$sum = md5_file($src.'/'.$file);
+			if (isset($done[$what]) && $done[$what]['member'] == $app->fk_adherent && $done[$what]['md5'] === $sum) {
+				continue;
+			}
+			if ($dest === '') {
+				$dest = $this->memberDir((int) $app->fk_adherent);
+				if ($dest === '' || dol_mkdir($dest) < 0) {
+					return $copied;
+				}
+			}
+			$name = self::MEMBER_FILES[$what].'.'.pathinfo($file, PATHINFO_EXTENSION);
+			$isNew = !file_exists($dest.'/'.$name);
+			if (!@copy($src.'/'.$file, $dest.'/'.$name)) {
+				dol_syslog('Onboarding: could not copy '.$file.' to member '.$app->fk_adherent, LOG_WARNING);
+				continue;
+			}
+			if ($isNew && function_exists('addFileIntoDatabaseIndex')) {
+				$adh = new Adherent($this->db);
+				$adh->fetch((int) $app->fk_adherent);
+				addFileIntoDatabaseIndex($dest, $name, '', 'uploaded', 0, $adh);
+			}
+			$done[$what] = array('member' => (int) $app->fk_adherent, 'md5' => $sum, 'name' => $name);
+			$copied++;
+		}
+		if ($copied) {
+			file_put_contents($marker, json_encode($done));
+		}
+		return $copied;
+	}
+
+	/**
+	 * Daily: copy anything not yet on its member card (members linked by hand, and
+	 * everyone who signed up before files were copied).
+	 *
+	 * @return string Summary
+	 */
+	public function copyAllToMembers()
+	{
+		global $conf;
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND fk_adherent > 0");
+		$ids = array();
+		while ($res && ($obj = $this->db->fetch_object($res))) {
+			$ids[] = (int) $obj->rowid;
+		}
+		$n = 0;
+		foreach ($ids as $id) {
+			$n += $this->copyToMember($this->fetch($id));
+		}
+		return $n.' files copied to member cards';
 	}
 
 	/**
@@ -2525,7 +2632,13 @@ You get at most one email an hour about this, and one more when it is fixed.");
 				$rows[] = $obj;
 			}
 			foreach ($rows as $obj) {
-				@unlink(DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $obj->rowid).'/'.basename($obj->id_file));
+				$src = DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $obj->rowid);
+				@unlink($src.'/'.basename($obj->id_file));
+				// And its copy on the member card.
+				$done = is_readable($src.'/member-copies.json') ? json_decode((string) file_get_contents($src.'/member-copies.json'), true) : null;
+				if (!empty($done['id']['name']) && ($dest = $this->memberDir((int) $done['id']['member'])) !== '') {
+					@unlink($dest.'/'.basename($done['id']['name']));
+				}
 				// The "ID photo uploaded" tick stays: it records that the check was done.
 				$this->save($obj->rowid, array('id_file' => null));
 				$photos++;
