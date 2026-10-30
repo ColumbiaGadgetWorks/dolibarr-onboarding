@@ -123,14 +123,21 @@ foreach ($purchase->files($row) as $i => $name) {
 	$links[] = '<a href="'.dol_escape_htmltag($purchase->link($row->rowid, $email, 'view', $i + 1)).'">receipt '.($i + 1).'</a>';
 }
 $facts .= '<dt>Receipts</dt><dd>'.($links ? implode(', ', $links) : 'none').'</dd>';
-$facts .= '<dt>Needs</dt><dd>'.($row->need_board ? 'the treasurer and one other director' : 'the zone lead').'</dd>';
+$facts .= '<dt>Needs</dt><dd>'.dol_escape_htmltag($purchase->needsText($row)).'</dd>';
+$have = array();
+foreach ($purchase->approvalsOf($row) as $a) {
+	$have[] = dol_escape_htmltag($a['name'].' ('.$a['role'].')');
+}
+if ($have) {
+	$facts .= '<dt>Approved by</dt><dd>'.implode(', ', $have).'</dd>';
+}
 $facts .= '</dl>';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-	$result = $purchase->decide($id, $email, $act);
+	$result = $purchase->decide($id, $email, $act, $act == 'reject' ? (string) GETPOST('reason', 'restricthtml') : '');
 	$map = array(
-		'approved' => array('Approved', '<p class="ok">Thank you. '.dol_escape_htmltag($row->ref).' is fully approved. The treasurer has been told to pay it.</p>'),
-		'done' => array('Approval recorded', '<p class="ok">Thank you. Your approval is recorded. It still needs one more person before it can be paid.</p>'),
+		'approved' => array('Approved', '<p class="ok">Thank you. '.dol_escape_htmltag($row->ref).' is fully approved. The treasurer has been told to '.($row->kind == 'purchase' ? 'order it' : 'pay the member back').'.</p>'),
+		'done' => array('Approval recorded', '<p class="ok">Thank you. Your approval is recorded. It needs '.dol_escape_htmltag($purchase->needsText($row)).', so it is waiting for the others.</p>'),
 		'rejected' => array('Rejected', '<p>'.dol_escape_htmltag($row->ref).' was rejected and the member was told.</p>'),
 		'already' => array('Already recorded', '<p>You already approved this one. Nothing changed.</p>'),
 		'closed' => array('Already decided', '<p>This request is no longer waiting for a decision. Nothing changed.</p>'),
@@ -146,5 +153,8 @@ if ($row->status != 'pending') {
 $yes = $act == 'approve';
 $form = '<form method="post" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 $form .= '<input type="hidden" name="p" value="'.((int) $id).'"><input type="hidden" name="e" value="'.dol_escape_htmltag($email).'"><input type="hidden" name="a" value="'.dol_escape_htmltag($act).'"><input type="hidden" name="k" value="'.dol_escape_htmltag($key).'">';
+if (!$yes) {
+	$form .= '<p><label for="reason">Why not? The member sees this in their email.</label><br><textarea id="reason" name="reason" rows="4" maxlength="1000" style="width:100%;font:inherit"></textarea></p>';
+}
 $form .= '<button type="submit" class="'.($yes ? 'go' : 'no').'">'.($yes ? 'Approve' : 'Reject').' '.dol_escape_htmltag($row->ref).'</button></form>';
 onboarding_purchase_page(($yes ? 'Approve' : 'Reject').' this request?', $facts.$form);

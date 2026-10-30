@@ -111,7 +111,7 @@ $sections = array(
 		'ONBOARDING_GITHUB_API' => array('GitHub API address', 'text', 'Only change this to point at the sandbox.'),
 	),
 	'Purchase requests' => array(
-		'ONBOARDING_PURCHASE_LEAD_LIMIT' => array('Zone lead limit', 'text', 'Largest request a zone lead may approve alone, in dollars.'),
+		'ONBOARDING_PURCHASE_LEAD_LIMIT' => array('President approval over', 'text', 'Requests over this many dollars (or over the zone\'s budget) need the president as well as the treasurer.'),
 		'ONBOARDING_PURCHASE_RECEIPT_DAYS' => array('Receipt within (days)', 'text', 'A reimbursement must be filed within this many days of buying. Keeps reimbursements tax free for the member under the IRS accountable plan rules.'),
 	),
 	'Yearly filings' => array(

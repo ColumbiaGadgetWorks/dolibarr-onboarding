@@ -2,7 +2,9 @@
 --   kind:   reimburse (already bought, receipt attached) or purchase (treasurer buys it)
 --   status: draft (receipts still uploading) -> pending -> approved -> paid,
 --           or pending -> rejected, or pending/approved -> cancelled
---   need_board: 0 = the zone lead decides, 1 = treasurer plus another director
+--   needs: JSON list of the approvals it needs, each a different person except the
+--          zone boss: treasurer, president, director (any other) or boss (of the zone)
+--   need_board: 1 when it needs more than the treasurer and a zone boss (kept for the website)
 --   approvals: JSON list of {email, name, role, at}
 --   files: JSON list of stored receipt file names under onboarding/purchase/<rowid>/
 CREATE TABLE llx_onboarding_purchase(
@@ -22,6 +24,7 @@ CREATE TABLE llx_onboarding_purchase(
 	pay_handle varchar(200),
 	status varchar(12) DEFAULT 'draft' NOT NULL,
 	need_board integer DEFAULT 0 NOT NULL,
+	needs varchar(100),
 	approvals text,
 	decided_note varchar(255),
 	fk_bank_line integer,

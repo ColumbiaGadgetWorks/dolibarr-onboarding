@@ -18,12 +18,14 @@ dol_include_once('/onboarding/class/training.class.php');
  * and a locked email stays locked for a day. Nothing is paid without a person
  * approving it and the treasurer pressing Mark paid.
  *
- * Who may file: the president and treasurer for any zone or the General fund, a zone
- * lead for their own zone, nobody else (see allowedZones).
+ * Who may file: anyone on the board for any zone or the General fund, a zone boss for
+ * any zone, nobody else (see allowedZones). The money comes out of the zone named on
+ * the request, and a reimbursement goes to whoever filed it.
  *
- * Who approves: the zone lead, up to the lead limit and while the zone has the
- * money. Anything bigger, over budget, from a zone with no lead, or from the lead
- * themselves needs the treasurer and one other director. Nobody approves their own.
+ * Who approves (see needs): the treasurer, so it can be bought or paid back. Over the
+ * limit ($100) or over the zone's budget, the president too. Filed for a zone by
+ * someone who is not its boss, that zone's boss too. Nobody approves their own: when
+ * the treasurer or the president asks, another director takes their place.
  */
 class OnboardingPurchase
 {
@@ -249,11 +251,11 @@ class OnboardingPurchase
 	public function roleTable()
 	{
 		$what = array(
-			'president' => 'Files for any zone or the General fund. Approves big requests as a director. Principal officer on the IRS 990-N; gets questions from the tax filing page.',
-			'vice-president' => 'Approves big requests as a director.',
-			'secretary' => 'Approves big requests as a director.',
-			'treasurer' => 'Files for any zone or the General fund. Approves big requests, and is told when one is ready to pay. Gets the yearly tax filing emails.',
-			'director' => 'Any other director who may approve big requests.',
+			'president' => 'Files for any zone or the General fund. Approves requests over the limit or over a zone\'s budget. Principal officer on the IRS 990-N; gets questions from the tax filing page.',
+			'vice-president' => 'Files for any zone or the General fund. Approves in place of the treasurer or the president when they file.',
+			'secretary' => 'Files for any zone or the General fund. Approves in place of the treasurer or the president when they file.',
+			'treasurer' => 'Files for any zone or the General fund. Approves every request, then orders it or pays the member back. Gets the yearly tax filing emails.',
+			'director' => 'Files for any zone or the General fund. Approves in place of the treasurer or the president when they file.',
 			'security' => 'The security owner: warned before a Dolibarr login is disabled, and sent the list of other accounts to remove the person from. Nobody tagged: the secretary.',
 		);
 		$roles = array();
@@ -261,7 +263,7 @@ class OnboardingPurchase
 			$roles[$r] = $what[$r];
 		}
 		foreach ($this->training->zones() as $z) {
-			$roles[self::bossRole($z)] = 'Files for '.$z.' only, and decides its small requests.';
+			$roles[self::bossRole($z)] = 'Files for '.$z.' (or another zone, which that zone\'s boss then approves), and approves requests others file for '.$z.'.';
 		}
 		$held = array();
 		foreach ($this->roleMembers(array_keys($roles)) as $m) {
@@ -431,21 +433,41 @@ class OnboardingPurchase
 	}
 
 	/**
-	 * @return int[] Members who may file for any zone or the General fund: whoever holds
-	 *               the president or treasurer tag
+	 * @return int[] Members who may file for any zone or the General fund: the board
 	 */
 	public function anyZoneMembers()
 	{
 		$ids = array();
-		foreach ($this->roleMembers(array(self::ROLE_PRESIDENT, self::ROLE_TREASURER)) as $m) {
+		foreach ($this->roleMembers(self::BOARD_ROLES) as $m) {
 			$ids[] = (int) $m->rowid;
 		}
 		return $ids;
 	}
 
 	/**
-	 * What this member may file for: the president and treasurer, any zone and the
-	 * General fund; a zone lead, only their own zone; everyone else, nothing.
+	 * @param object|null $m Member row
+	 * @return string[] Role tags this member holds now
+	 */
+	public function rolesOf($m)
+	{
+		if (!$m) {
+			return array();
+		}
+		$roles = array_merge(self::BOARD_ROLES, self::OTHER_ROLES);
+		foreach ($this->training->zones() as $z) {
+			$roles[] = self::bossRole($z);
+		}
+		foreach ($this->roleMembers($roles) as $r) {
+			if ((int) $r->rowid === (int) $m->rowid) {
+				return $r->roles;
+			}
+		}
+		return array();
+	}
+
+	/**
+	 * What this member may file for: the board, any zone and the General fund; a zone
+	 * boss, any zone (another zone's boss then approves it too); everyone else, nothing.
 	 *
 	 * @param object $m Member row
 	 * @return string[] Zone names
@@ -455,15 +477,103 @@ class OnboardingPurchase
 		if (in_array((int) $m->rowid, $this->anyZoneMembers(), true)) {
 			return $this->zoneNames();
 		}
-		$own = array();
-		foreach ($this->training->zones() as $zone) {
-			foreach ($this->leadsOf($zone) as $lead) {
-				if ((int) $lead->rowid === (int) $m->rowid) {
-					$own[] = $zone;
-				}
+		foreach ($this->rolesOf($m) as $r) {
+			if (substr($r, -5) === '-boss') {
+				return $this->training->zones();
 			}
 		}
-		return $own;
+		return array();
+	}
+
+	/**
+	 * Who has to approve a request: each entry is one person's approval. treasurer,
+	 * president, director (anyone else on the board) or boss (of the request's zone).
+	 * Worked out when it is filed and kept with it.
+	 *
+	 * @param object $row Request
+	 * @param object|null $member Who filed it
+	 * @return string[]
+	 */
+	public function needs($row, $member = null)
+	{
+		$kept = json_decode((string) (isset($row->needs) ? $row->needs : ''), true);
+		if (is_array($kept) && $kept) {
+			return $kept;
+		}
+		if ($row->status != 'draft') {
+			// Filed before the rules changed.
+			return $row->need_board ? array('treasurer', 'director') : array('boss');
+		}
+		$roles = $this->rolesOf($member ? $member : $this->memberById((int) $row->fk_adherent));
+		$big = (float) $row->amount > self::leadLimit() || ($row->zone !== self::GENERAL && (float) $row->amount > $this->available($row->zone));
+		// Nobody holds the tag, or they are the one asking: another director instead.
+		$out = array(in_array(self::ROLE_TREASURER, $roles, true) || !$this->treasurers() ? 'director' : 'treasurer');
+		if ($big) {
+			$out[] = in_array(self::ROLE_PRESIDENT, $roles, true) || !$this->roleEmails(array(self::ROLE_PRESIDENT)) ? 'director' : 'president';
+		}
+		if ($row->zone !== self::GENERAL && !in_array(self::bossRole($row->zone), $roles, true) && $this->leadsOf($row->zone)) {
+			$out[] = 'boss';
+		}
+		return $out;
+	}
+
+	/**
+	 * @param object $row Request
+	 * @param string[]|null $needs Defaults to the request's own
+	 * @return string "the treasurer, the president and the Woodworking boss"
+	 */
+	public function needsText($row, $needs = null)
+	{
+		$names = array('treasurer' => 'the treasurer', 'president' => 'the president', 'director' => 'another director', 'boss' => 'the '.$row->zone.' boss');
+		$out = array();
+		foreach ($needs === null ? $this->needs($row) : $needs as $n) {
+			$out[] = isset($names[$n]) ? $names[$n] : $n;
+		}
+		$last = array_pop($out);
+		return $out ? implode(', ', $out).' and '.$last : (string) $last;
+	}
+
+	/**
+	 * Are the approvals enough? Each board approval (treasurer, president, director)
+	 * must be a different person; the zone boss may also be one of them.
+	 *
+	 * @param string[] $needs From needs()
+	 * @param array<int,array{email:string,seats?:string[]}> $approvals So far
+	 * @return bool
+	 */
+	public static function enough($needs, $approvals)
+	{
+		foreach ($approvals as $i => $a) {
+			if (!isset($a['seats'])) {
+				// Approved before the rules changed.
+				$r = isset($a['role']) ? $a['role'] : '';
+				$approvals[$i]['seats'] = $r == 'lead' ? array('boss') : ($r == 'treasurer' ? array('treasurer', 'director') : array('director'));
+			}
+		}
+		$board = array_values(array_diff($needs, array('boss')));
+		if (in_array('boss', $needs, true)) {
+			$boss = false;
+			foreach ($approvals as $a) {
+				$boss = $boss || in_array('boss', isset($a['seats']) ? $a['seats'] : array(), true);
+			}
+			if (!$boss) {
+				return false;
+			}
+		}
+		$fill = function ($i, $used) use (&$fill, $board, $approvals) {
+			if ($i >= count($board)) {
+				return true;
+			}
+			foreach ($approvals as $a) {
+				if (!in_array($a['email'], $used, true) && in_array($board[$i], isset($a['seats']) ? $a['seats'] : array(), true)) {
+					if ($fill($i + 1, array_merge($used, array($a['email'])))) {
+						return true;
+					}
+				}
+			}
+			return false;
+		};
+		return $fill(0, array());
 	}
 
 	/**
@@ -723,24 +833,16 @@ class OnboardingPurchase
 			return array('ok' => false, 'error' => 'receipt', 'http' => 400);
 		}
 		$member = $this->memberById((int) $row->fk_adherent);
-		$leads = $this->leadsOf($row->zone);
-		$asking = false;
-		foreach ($leads as $lead) {
-			if ($member && (int) $lead->rowid === (int) $member->rowid) {
-				$asking = true;
-			}
-		}
-		$board = (float) $row->amount > self::leadLimit()
-			|| (float) $row->amount > $this->available($row->zone)
-			|| !$leads
-			|| $asking;
-		$this->save($row->rowid, array('status' => 'pending', 'need_board' => $board ? 1 : 0, 'approvals' => '[]', 'date_submitted' => $this->db->idate(OnboardingService::now())));
+		$needs = $this->needs($row, $member);
+		$board = in_array('president', $needs, true) || count(array_diff($needs, array('boss'))) > 1;
+		$this->save($row->rowid, array('status' => 'pending', 'needs' => json_encode($needs), 'need_board' => $board ? 1 : 0, 'approvals' => '[]', 'date_submitted' => $this->db->idate(OnboardingService::now())));
 		$row = $this->fetch($row->rowid);
+		$who = $this->needsText($row);
 
 		$name = $member ? trim($member->firstname.' '.$member->lastname) : 'A member';
 		$to = $member ? $member->email : '';
 		$org = getDolGlobalString('MAIN_INFO_SOCIETE_NOM', 'the makerspace');
-		$this->svc->mail($to, $row->ref.': we have your request', "Hi ".($member ? $member->firstname : 'there').",\n\nWe received your request ".$row->ref." for ".self::money($row->amount)." from the ".$row->zone." budget. ".($board ? "Because of its size or the zone, the treasurer and another director will look at it." : "The ".$row->zone." lead will look at it.")." You will get an email when it is decided.\n\n".$org);
+		$this->svc->mail($to, $row->ref.': we have your request', "Hi ".($member ? $member->firstname : 'there').",\n\nWe received your request ".$row->ref." for ".self::money($row->amount)." from the ".$row->zone." budget. ".ucfirst($who)." will look at it. You will get an email when it is decided.\n\n".$org);
 
 		$sent = 0;
 		foreach ($this->approvers($row) as $a) {
@@ -749,9 +851,9 @@ class OnboardingPurchase
 			}
 		}
 		if (!$sent) {
-			$this->svc->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), $row->ref.' has nobody to approve it', "Request ".$row->ref." (".self::money($row->amount)." from ".$row->zone.") was filed by ".$name.", but no approver has an email address. Set the zone leads, treasurer and directors on the Member onboarding setup page.");
+			$this->svc->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), $row->ref.' has nobody to approve it', "Request ".$row->ref." (".self::money($row->amount)." from ".$row->zone.") was filed by ".$name.", but no approver has an email address. Tag the treasurer, the president and the zone bosses on their member cards (Members, the member, Tags).");
 		}
-		return array('ok' => true, 'ref' => $row->ref, 'needs' => $board ? 'board' : 'lead');
+		return array('ok' => true, 'ref' => $row->ref, 'needs' => $board ? 'board' : 'lead', 'who' => $who);
 	}
 
 	/**
@@ -764,25 +866,27 @@ class OnboardingPurchase
 	{
 		$member = $this->memberById((int) $row->fk_adherent);
 		$own = $member ? OnboardingService::cleanEmail($member->email) : '';
+		$tags = array('treasurer' => array(self::ROLE_TREASURER), 'president' => array(self::ROLE_PRESIDENT), 'director' => self::BOARD_ROLES, 'boss' => array(self::bossRole($row->zone)));
 		$out = array();
-		if (!$row->need_board) {
-			foreach ($this->leadsOf($row->zone) as $lead) {
-				if ($lead->email) {
-					$out[] = array('email' => OnboardingService::cleanEmail($lead->email), 'name' => trim($lead->firstname.' '.$lead->lastname), 'role' => 'lead');
+		foreach (array_unique($this->needs($row)) as $seat) {
+			foreach ($this->roleMembers(isset($tags[$seat]) ? $tags[$seat] : array()) as $m) {
+				$e = OnboardingService::cleanEmail($m->email);
+				if ($e === '' || $e === $own) {
+					continue;
 				}
-			}
-		} else {
-			$treasurers = $this->treasurers();
-			foreach ($this->roleMembers(self::BOARD_ROLES) as $d) {
-				$e = OnboardingService::cleanEmail($d->email);
-				if ($e !== '') {
-					$out[] = array('email' => $e, 'name' => trim($d->firstname.' '.$d->lastname), 'role' => in_array($e, $treasurers, true) ? 'treasurer' : 'director');
+				if (!isset($out[$e])) {
+					$out[$e] = array('email' => $e, 'name' => trim($m->firstname.' '.$m->lastname), 'role' => '', 'seats' => array());
 				}
+				$out[$e]['seats'][] = $seat;
 			}
 		}
-		return array_values(array_filter($out, function ($a) use ($own) {
-			return $a['email'] !== $own;
-		}));
+		$labels = array('treasurer' => 'treasurer', 'president' => 'president', 'director' => 'director', 'boss' => $row->zone.' boss');
+		foreach ($out as $e => $a) {
+			$out[$e]['role'] = implode(', ', array_map(function ($s) use ($labels) {
+				return $labels[$s];
+			}, $a['seats']));
+		}
+		return array_values($out);
 	}
 
 	/**
@@ -796,7 +900,7 @@ class OnboardingPurchase
 		$b = "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from the ".$row->zone." budget.\n";
 		$b .= $row->kind == 'purchase' ? "They want the treasurer to buy it: ".$row->link."\n" : "Already bought at ".$row->vendor." on ".$row->purchase_date.". Receipts are attached to the request.\n";
 		$b .= "What and why: ".$row->description."\n\n";
-		$b .= $row->need_board ? "This one needs the treasurer and one other director to approve.\n\n" : "As the zone lead you can decide this one alone.\n\n";
+		$b .= "It needs ".$this->needsText($row)." to approve; you are asked as ".$a['role'].".\n\n";
 		$b .= "Look at it, then approve or reject (nothing changes until you press the button on that page):\n".$this->link($row->rowid, $a['email'], 'approve')."\n\n";
 		$b .= "Or reject it:\n".$this->link($row->rowid, $a['email'], 'reject')."\n";
 		return $b;
@@ -859,9 +963,10 @@ class OnboardingPurchase
 	 * @param int $id Request
 	 * @param string $email Approver
 	 * @param string $action approve or reject
+	 * @param string $reason For a rejection: why, sent to the member
 	 * @return string done, approved (the last approval came in), rejected, already, closed, not-approver
 	 */
-	public function decide($id, $email, $action)
+	public function decide($id, $email, $action, $reason = '')
 	{
 		$row = $this->fetch($id);
 		$email = OnboardingService::cleanEmail($email);
@@ -880,8 +985,9 @@ class OnboardingPurchase
 		$member = $this->memberById((int) $row->fk_adherent);
 		$who = $member ? trim($member->firstname.' '.$member->lastname) : 'the member';
 		if ($action == 'reject') {
-			$this->save($row->rowid, array('status' => 'rejected', 'decided_note' => 'Rejected by '.$mine['name']));
-			$this->svc->mail($member ? $member->email : '', $row->ref.': not approved', "Hi,\n\nYour request ".$row->ref." for ".self::money($row->amount)." from the ".$row->zone." budget was not approved. Ask ".$mine['name']." or the treasurer if you would like to know why or want to try again.");
+			$reason = trim(dol_trunc((string) $reason, 1000, 'right', 'UTF-8', 1));
+			$this->save($row->rowid, array('status' => 'rejected', 'decided_note' => dol_trunc('Rejected by '.$mine['name'].($reason !== '' ? ': '.$reason : ''), 250, 'right', 'UTF-8', 1)));
+			$this->svc->mail($member ? $member->email : '', $row->ref.': not approved', "Hi,\n\nYour request ".$row->ref." for ".self::money($row->amount)." from the ".$row->zone." budget was not approved by ".$mine['name'].".\n\n".($reason !== '' ? "Why: ".$reason."\n\nAsk ".$mine['name']." or the treasurer if you have questions or want to try again." : "Ask ".$mine['name']." or the treasurer if you would like to know why or want to try again."));
 			return 'rejected';
 		}
 		$approvals = $this->approvalsOf($row);
@@ -890,23 +996,23 @@ class OnboardingPurchase
 				return 'already';
 			}
 		}
-		$approvals[] = array('email' => $email, 'name' => $mine['name'], 'role' => $mine['role'], 'at' => OnboardingService::now());
-		$done = true;
-		if ($row->need_board) {
-			// The treasurer and one other director. If the treasurer is the one asking,
-			// any two other directors do.
-			$treasurers = $this->treasurers();
-			$own = $member ? OnboardingService::cleanEmail($member->email) : '';
-			$has = array_map(function ($a) {
-				return $a['email'];
-			}, $approvals);
-			$done = count($has) >= 2 && (!$treasurers || in_array($own, $treasurers, true) || array_intersect($treasurers, $has));
-		}
+		$approvals[] = array('email' => $email, 'name' => $mine['name'], 'role' => $mine['role'], 'seats' => $mine['seats'], 'at' => OnboardingService::now());
+		$done = self::enough($this->needs($row), $approvals);
 		$this->save($row->rowid, array('approvals' => json_encode($approvals), 'status' => $done ? 'approved' : 'pending'));
 		if ($done) {
 			$this->svc->mail($member ? $member->email : '', $row->ref.': approved', "Good news. Your request ".$row->ref." for ".self::money($row->amount)." from the ".$row->zone." budget was approved. ".($row->kind == 'purchase' ? "The treasurer will order it." : "The treasurer will pay you back by ".(isset(self::PAY_METHODS[$row->pay_method]) ? self::PAY_METHODS[$row->pay_method] : 'the method you chose').'.'));
 			foreach ($this->treasurers() as $tmail) {
-				$this->svc->mail($tmail, $row->ref.' is approved, ready to pay', "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from ".$row->zone." is approved. ".($row->kind == 'purchase' ? 'Buy it: '.$row->link : 'Pay '.(isset(self::PAY_METHODS[$row->pay_method]) ? self::PAY_METHODS[$row->pay_method] : '').' '.$row->pay_handle.'.')."\nThen press Mark paid on the Purchase requests page in Dolibarr.");
+				$body = "Request ".$row->ref." from ".$who.": ".self::money($row->amount)." from the ".$row->zone." budget is approved.\nWhat and why: ".$row->description."\n\n";
+				if ($row->kind == 'purchase') {
+					$body .= "Order it: ".$row->link."\nThen press Mark ordered on the Purchase requests page in Dolibarr.";
+				} else {
+					$body .= "Check the receipts:\n";
+					foreach ($this->files($row) as $i => $f) {
+						$body .= $this->link($row->rowid, $tmail, 'view', $i + 1)."\n";
+					}
+					$body .= "\nPay ".$who." back by ".(isset(self::PAY_METHODS[$row->pay_method]) ? self::PAY_METHODS[$row->pay_method] : $row->pay_method)." ".$row->pay_handle.", then press Mark reimbursed on the Purchase requests page in Dolibarr.";
+				}
+				$this->svc->mail($tmail, $row->ref.' is approved, ready to '.($row->kind == 'purchase' ? 'order' : 'reimburse'), $body);
 			}
 		}
 		return $done ? 'approved' : 'done';
@@ -927,7 +1033,7 @@ class OnboardingPurchase
 	{
 		$row = $this->fetch($id);
 		if (!$row || $row->status != 'approved') {
-			return 'Error: only an approved request can be marked paid.';
+			return 'Error: only an approved request can be marked reimbursed or ordered.';
 		}
 		require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
 		$acc = new Account($this->db);
@@ -949,8 +1055,12 @@ class OnboardingPurchase
 			$this->training->post('zone', $row->zone, -abs((float) $row->amount), 'spend', 0, $row->ref.' '.($row->vendor !== '' ? $row->vendor : 'purchase').($who !== '' ? ' ('.$who.')' : ''), 0, (int) $user->id);
 		}
 		$this->save($row->rowid, array('status' => 'paid', 'fk_bank_line' => (int) $line, 'paid_from' => $acc->label, 'paid_at' => $this->db->idate(OnboardingService::now()), 'fk_user_paid' => (int) $user->id));
-		$this->svc->mail($member ? $member->email : '', $row->ref.': paid', "Your request ".$row->ref." for ".self::money($row->amount)." was paid from ".$acc->label.". Thank you.");
-		return $row->ref.' marked paid: '.self::money($row->amount).' out of '.$acc->label.' and the '.$row->zone.' budget.';
+		if ($row->kind == 'purchase') {
+			$this->svc->mail($member ? $member->email : '', $row->ref.': ordered', "Your request ".$row->ref." for ".self::money($row->amount)." has been ordered by the treasurer. Thank you.");
+			return $row->ref.' marked ordered: '.self::money($row->amount).' out of '.$acc->label.' and the '.$row->zone.' budget.';
+		}
+		$this->svc->mail($member ? $member->email : '', $row->ref.': reimbursed', "Your request ".$row->ref." for ".self::money($row->amount)." was paid back to you from ".$acc->label.". Thank you.");
+		return $row->ref.' marked reimbursed: '.self::money($row->amount).' out of '.$acc->label.' and the '.$row->zone.' budget.';
 	}
 
 	/**
