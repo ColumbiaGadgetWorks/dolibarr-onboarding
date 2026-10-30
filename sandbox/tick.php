@@ -411,7 +411,10 @@ if ($job == 'daily') {
 		}
 		echo $made."\n";
 	} elseif ($what == 'pay') {
-		echo $pu->markPaid((int) $argv[3], (int) $argv[4], $user)."\n";
+		// pay ID BANK [FINAL [none]]: a request for purchase needs the final amount and the
+		// order receipt (a small PDF here; "none" leaves it out)
+		$pdf = "%PDF-1.4\n".str_repeat("1 0 obj<<>>endobj\n", 10)."%%EOF";
+		echo $pu->markPaid((int) $argv[3], (int) $argv[4], $user, isset($argv[5]) ? (float) $argv[5] : 0, isset($argv[6]) && $argv[6] == 'none' ? '' : $pdf)."\n";
 	} elseif ($what == 'link') {
 		echo $pu->link((int) $argv[3], $argv[4], $argv[5])."\n";
 	} elseif ($what == 'show') {

@@ -6,6 +6,8 @@
 --          zone boss: treasurer, president, director (any other) or boss (of the zone)
 --   need_board: 1 when it needs more than the treasurer and a zone boss (kept for the website)
 --   approvals: JSON list of {email, name, role, at}
+--   items: for a purchase, JSON list of {link, price}; amount is their total, an estimate
+--   amount_final: what the treasurer really paid, from the order receipt (tax, shipping and fees included)
 --   files: JSON list of stored receipt file names under onboarding/purchase/<rowid>/
 CREATE TABLE llx_onboarding_purchase(
 	rowid integer AUTO_INCREMENT PRIMARY KEY NOT NULL,
@@ -16,6 +18,8 @@ CREATE TABLE llx_onboarding_purchase(
 	zone varchar(100) NOT NULL,
 	kind varchar(12) NOT NULL,
 	amount double(24,8) NOT NULL,
+	amount_final double(24,8),
+	items text,
 	vendor varchar(200),
 	purchase_date date,
 	link varchar(500),

@@ -265,11 +265,14 @@ assert.doesNotMatch(await page(trainedLink), /showed up/, 'the link offers the a
 assert.match(await press(trainedLink, { do: 'trained' }), /has not happened yet/);
 const before = Number(tick('training', 'balance', 'trainer', String(adam)));
 const zoneBefore = Number(tick('training', 'balance', 'zone', 'Digital Fab'));
+const feesOf = async () => (await api('budget')).zones.find((z) => z.zone === 'Digital Fab').training;
+const feesBefore = await feesOf();
 // The page refuses answers before the session; the test answers as if it were over.
 assert.equal(JSON.parse(bk('answer', b1.ref, 'trained', String(end1 + 10))).ok, true);
 assert.equal(show(b1.ref).status, 'trained');
 assert.equal(Number(tick('training', 'balance', 'trainer', String(adam))), r2(before + 4.7));
 assert.equal(Number(tick('training', 'balance', 'zone', 'Digital Fab')), r2(zoneBefore + 4.7));
+assert.equal(r2(await feesOf()), r2(feesBefore + 4.7), '/budget shows what the zone raised from trainings');
 assert.ok(await heard(nina, `You are trained on the ${toolName}`));
 assert.equal(sql(`SELECT COUNT(*) FROM llx_categorie_member cm JOIN llx_categorie c ON c.rowid = cm.fk_categorie WHERE c.label = 'Trained: ${toolName}' AND cm.fk_member = ${np.member}`), '1');
 assert.match(sql(`SELECT trained_on FROM llx_adherent_extrafields WHERE fk_object = ${np.member}`), new RegExp(toolName));

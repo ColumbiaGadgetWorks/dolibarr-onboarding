@@ -110,10 +110,14 @@ $who = $member ? trim($member->firstname.' '.$member->lastname) : 'A member';
 $facts = '<dl><dt>Request</dt><dd>'.dol_escape_htmltag($row->ref).'</dd>';
 $facts .= '<dt>From</dt><dd>'.dol_escape_htmltag($who).'</dd>';
 $facts .= '<dt>Zone</dt><dd>'.dol_escape_htmltag($row->zone).' (available now '.dol_escape_htmltag(OnboardingPurchase::money($purchase->available($row->zone))).')</dd>';
-$facts .= '<dt>Amount</dt><dd><strong>'.dol_escape_htmltag(OnboardingPurchase::money($row->amount)).'</strong></dd>';
+$facts .= '<dt>Amount</dt><dd><strong>'.dol_escape_htmltag(OnboardingPurchase::money($row->amount)).'</strong>'.($row->kind == 'purchase' ? ' (estimate: tax, shipping and fees may be added)' : '').'</dd>';
 $facts .= '<dt>Kind</dt><dd>'.dol_escape_htmltag(OnboardingPurchase::KINDS[$row->kind]).'</dd>';
 if ($row->kind == 'purchase') {
-	$facts .= '<dt>Link</dt><dd>'.dol_escape_htmltag($row->link).'</dd>';
+	$lines = array();
+	foreach ($purchase->items($row) as $it) {
+		$lines[] = dol_escape_htmltag(OnboardingPurchase::money($it['price'])).' &nbsp;'.dol_escape_htmltag($it['link']);
+	}
+	$facts .= '<dt>Items</dt><dd>'.implode('<br>', $lines).'</dd>';
 } else {
 	$facts .= '<dt>Bought at</dt><dd>'.dol_escape_htmltag($row->vendor).' on '.dol_escape_htmltag($row->purchase_date).'</dd>';
 }

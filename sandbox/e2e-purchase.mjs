@@ -113,6 +113,7 @@ const press = async (id, email, action, expectStatus = 200, reason = '') => {
 
 step('budget: totals per zone, nothing personal');
 const w0 = await zone('Woodworking');
+assert.equal(typeof w0.training, 'number', 'what each zone raised from trainings');
 const c0 = await zone('Crafting');
 assert.ok(w0 && c0, 'both zones listed');
 sh('budget', 'Woodworking', '250');
@@ -304,20 +305,42 @@ assert.equal((await finish(t1)).who, 'another director', 'the treasurer asking: 
 await press(t1.id, treasurer, 'approve', 403);
 assert.match(await press(t1.id, dir1, 'approve'), /fully approved/);
 
-step('a request for purchase: the treasurer orders it, so it needs a link, not a receipt');
-const r6 = await ask({ kind: 'purchase', amount: 20, link: 'https://www.example.com/p/clamps', vendor: '', purchase_date: '', pay_method: '', pay_handle: '', ack_tax: false, description: 'More clamps' });
+step('a request for purchase: line items, each a link and an estimated price');
+const pBase = { kind: 'purchase', vendor: '', purchase_date: '', pay_method: '', pay_handle: '', ack_tax: false, description: 'More clamps' };
+assert.equal((await ask({ ...pBase, items: [{ link: 'https://www.example.com/p/clamps', price: '12' }, { link: 'not a url', price: '3' }] })).field, 'link', 'every item needs a web link');
+assert.equal((await ask({ ...pBase, items: [{ link: 'https://www.example.com/p/clamps', price: '0' }] })).field, 'amount', 'and a price');
+assert.equal((await ask({ ...pBase, items: Array.from({ length: 11 }, () => ({ link: 'https://www.example.com/p/x', price: '1' })) })).field, 'link', 'ten at most');
+const one = await ask({ ...pBase, amount: 9, link: 'https://www.example.com/p/one' });
+assert.equal(one.ok, true, 'one link and an amount still work');
+const r6 = await ask({ ...pBase, amount: 999, items: [{ link: 'https://www.example.com/p/clamps', price: '12.50' }, { link: 'https://www.example.com/p/glue', price: '7.50' }] });
 assert.equal(r6.ok, true, JSON.stringify(r6));
 const sent6 = await finish(r6);
 assert.equal(sent6.ok, true, JSON.stringify(sent6));
 assert.equal(sent6.who, 'the treasurer and the Woodworking boss');
 const p6 = show(r6.id);
 assert.equal(p6.kind, 'purchase');
-assert.equal(p6.link, 'https://www.example.com/p/clamps');
+assert.equal(Number(p6.amount), 20, 'the amount is the total of the items, not what was typed');
+assert.deepEqual(JSON.parse(p6.items).map((i) => i.link), ['https://www.example.com/p/clamps', 'https://www.example.com/p/glue']);
+const look6 = await (await fetch(tick('purchase', 'link', String(r6.id), leadEmail, 'approve').split('\n').pop().replace(/^https?:\/\/[^/]+/, DOLI))).text();
+assert.ok(look6.includes('/p/glue') && /estimate/.test(look6), 'the approver sees every item, and that the price is an estimate');
 await press(r6.id, leadEmail, 'approve');
 await press(r6.id, treasurer, 'approve');
 assert.ok(await heard(treasurer, `${r6.ref} is approved, ready to order`));
-assert.match(sh('pay', String(r6.id), String(bank)), /marked ordered/);
-assert.ok(await heard(pres, `${r6.ref}: ordered`));
+assert.match(await bodyOf(treasurer, `${r6.ref} is approved`), /p\/glue[\s\S]*final amount/, 'the treasurer gets every link and is told to record the final amount');
+
+step('ordered: the treasurer attaches the receipt and the final amount, which is what the budget pays');
+const w6 = await zone('Woodworking');
+assert.match(sh('pay', String(r6.id), String(bank)), /^Error: type the final amount/);
+assert.match(sh('pay', String(r6.id), String(bank), '23.91', 'none'), /^Error: attach the order receipt/);
+assert.equal(show(r6.id).status, 'approved', 'nothing changed');
+assert.match(sh('pay', String(r6.id), String(bank), '23.91'), /marked ordered: \$23\.91 \(estimated \$20(\.00)?\)/);
+const paid6 = show(r6.id);
+assert.equal(Number(paid6.amount_final), 23.91);
+assert.equal(JSON.parse(paid6.files).length, 1, 'the order receipt is kept with the request');
+const w7 = await zone('Woodworking');
+assert.equal(Math.round((w7.spent - w6.spent) * 100), 2391, 'tax and shipping included');
+assert.equal(Math.round((w6.committed - w7.committed) * 100), 2000, 'the estimate is no longer held back');
+assert.match(await bodyOf(pres, `${r6.ref}: ordered`), /\$23\.91 with tax, shipping and fees/);
 
 step('the General fund: up to $100 the treasurer alone, and it spends no zone');
 const r7 = await ask({ zone: 'General fund', amount: 25, vendor: 'Staples', description: 'Printer paper' });
