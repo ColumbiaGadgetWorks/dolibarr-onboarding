@@ -466,20 +466,33 @@ up, with the reason if one is typed.
 
 ### Setting up Google Calendar (once)
 
-The module writes to the calendar as a Google Cloud **service account**:
+The module edits the calendar through a small Google Apps Script that runs as the
+calendar's own account (columbiagadgetworks@gmail.com), so no Google Cloud project, service
+account or key file is needed. The script is `google/calendar-bridge.gs` in this module.
 
-1. In the Google Cloud console (console.cloud.google.com, signed in as
-   columbiagadgetworks@gmail.com), make a project, then APIs & Services, Library, **Google
-   Calendar API**, Enable.
-2. IAM & Admin, Service accounts, **Create service account** (any name, no roles). Open it,
-   Keys, Add key, Create new key, **JSON**. A key file downloads.
-3. In Google Calendar, the calendar's **Settings and sharing**, Share with specific people,
-   add the service account's email (it ends in `iam.gserviceaccount.com`) with **Make changes
-   to events**. On the same page, Integrate calendar, copy the **Calendar ID**.
-4. On the setup page, **Free classes**: paste the whole key file and the Calendar ID, save,
-   then pick the **Monthly class series** from the list and save again.
+1. Signed in as columbiagadgetworks@gmail.com, open the Apps Script project that holds the
+   Open Hack Night holiday script (script.google.com), and paste `google/calendar-bridge.gs`
+   at the end. It uses that script's `CALENDAR_ID`. (In a new project, add a
+   `const CALENDAR_ID = 'columbiagadgetworks@gmail.com';` line.)
+2. **Services** (the + next to Services, on the left), **Google Calendar API**, **Add**. Keep
+   the identifier `Calendar`.
+3. **Project Settings** (the gear), **Script properties**, **Add script property**: name
+   `DOLIBARR_SECRET`, value a long random string (at least 20 characters; a password
+   manager's generator is fine). Save.
+4. **Deploy**, **New deployment**, type **Web app**. Execute as: **Me**. Who has access:
+   **Anyone**. **Deploy**, then allow access to the calendar when Google asks. Copy the **Web
+   app URL** (it ends in `/exec`). Opening it in a browser says "The Dolibarr calendar bridge
+   is running."
+5. On the setup page, **Free classes**: paste the URL into **Calendar script address** and
+   the same secret into **Calendar script secret**, save, then pick the **Monthly class
+   series** from the list and save again.
 
-Keep the key file out of email and chat; delete the download once it is pasted.
+"Anyone" means anyone with the address can call the script, but it does nothing without
+the secret, and with it can only read and change events on that one calendar. To change
+the secret, change it in both places. After editing the script's code, use **Deploy,
+Manage deployments**, the pencil, **Version: New version**, **Deploy**: the URL stays the
+same. The holiday script's `install()` removes timers only, so it does not touch the web
+app.
 
 ## Member votes
 
