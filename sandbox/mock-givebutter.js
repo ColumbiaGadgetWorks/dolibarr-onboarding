@@ -20,6 +20,7 @@
 //   CAMPAIGN_CODE      campaign code put on dues transactions (default SANDBOX)
 //   RETURN_URL         "back to the signup" link shown after paying
 const http = require('node:http');
+const crypto = require('node:crypto');
 
 const PORT = Number(process.env.PORT || 8090);
 let WEBHOOK_URL = process.env.WEBHOOK_URL || '';
@@ -171,6 +172,45 @@ const plaidItems = [];
 let PAYPAL_SEARCH = true;
 let GITHUB_EXPIRES = '2099-01-01 00:00:00 UTC';
 
+// Fake Google Calendar (see /control/gcal): the service account token exchange,
+// one repeating series (the monthly class: first Tuesday, 6 to 8 PM Chicago, for
+// a year from next month) and single events.
+const gcal = { calendar: 'classes@group.calendar.google.com', email: 'classes-robot@sandbox.iam.gserviceaccount.com', publicKey: '', calls: [], series: null, instances: new Map(), singles: new Map() };
+function chicagoUtc(y, m, d, hour) {
+  for (const off of [5, 6]) {
+    const t = Date.UTC(y, m, d, hour + off);
+    const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hourCycle: 'h23' }).format(new Date(t)));
+    if (h === hour) return t;
+  }
+  return Date.UTC(y, m, d, hour + 6);
+}
+function gcalSeed() {
+  gcal.calls = [];
+  gcal.singles = new Map();
+  gcal.instances = new Map();
+  gcal.series = { id: 'oca-series', summary: 'Free public class, City of Columbia series', description: '', recurrence: ['RRULE:FREQ=MONTHLY;BYDAY=1TU;COUNT=12'], status: 'confirmed', start: {}, end: {} };
+  const now = new Date();
+  for (let i = 1; i <= 12; i++) {
+    const y = now.getUTCFullYear(), m = now.getUTCMonth() + i;
+    const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
+    const day = 1 + ((2 - first + 7) % 7); // first Tuesday
+    const t = chicagoUtc(new Date(Date.UTC(y, m, 1)).getUTCFullYear(), new Date(Date.UTC(y, m, 1)).getUTCMonth(), day, 18);
+    const id = `oca-series_${new Date(t).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '')}`;
+    gcal.instances.set(id, { id, recurringEventId: 'oca-series', summary: gcal.series.summary, description: '', status: 'confirmed', start: { dateTime: new Date(t).toISOString(), timeZone: 'America/Chicago' }, end: { dateTime: new Date(t + 7200e3).toISOString(), timeZone: 'America/Chicago' }, originalStartTime: { dateTime: new Date(t).toISOString() } });
+  }
+  if (!gcal.series.start.dateTime) {
+    const firstI = [...gcal.instances.values()][0];
+    gcal.series.start = firstI.start;
+    gcal.series.end = firstI.end;
+  }
+}
+gcalSeed();
+function gcalEvent(id) { return gcal.instances.get(id) || gcal.singles.get(id) || (id === 'oca-series' ? gcal.series : null); }
+function gcalApply(e, b) {
+  for (const k of ['summary', 'description', 'location', 'start', 'end', 'status']) if (b[k] !== undefined) e[k] = b[k];
+  return e;
+}
+
 const send = (res, code, body, type = 'text/html; charset=utf-8', extra = {}) => { res.writeHead(code, { 'content-type': type, ...extra }); res.end(body); };
 const json = (res, code, obj) => send(res, code, JSON.stringify(obj), 'application/json');
 
@@ -290,6 +330,56 @@ http.createServer(async (req, res) => {
       g = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/issues$/);
       if (g && req.method === 'POST') return gh(201, { html_url: `https://github.com/${g[1]}/issues/${++seq}` });
       return gh(404, { message: 'Not Found' });
+    }
+    if (path === '/gcal/token' && req.method === 'POST') {
+      const b = await readBody(req);
+      const parts = String(b.assertion || '').split('.');
+      if (b.grant_type !== 'urn:ietf:params:oauth:grant-type:jwt-bearer' || parts.length !== 3) return json(res, 400, { error: 'invalid_request' });
+      const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      const good = claims.iss === gcal.email && /calendar/.test(claims.scope || '') && (!gcal.publicKey || crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), gcal.publicKey, Buffer.from(parts[2], 'base64url')));
+      if (!good) return json(res, 400, { error: 'invalid_grant', error_description: 'Invalid JWT Signature.' });
+      return json(res, 200, { access_token: `gcal-token-${++seq}`, expires_in: 3600, token_type: 'Bearer' });
+    }
+    let gm = path.match(/^\/gcal\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/]+))?(\/instances)?$/);
+    if (gm) {
+      if (!/^Bearer gcal-token-/.test(req.headers.authorization || '')) return json(res, 401, { error: { code: 401, message: 'Invalid Credentials' } });
+      if (decodeURIComponent(gm[1]) !== gcal.calendar) return json(res, 404, { error: { code: 404, message: 'Not Found' } });
+      const id = gm[2] ? decodeURIComponent(gm[2]) : '';
+      const method = String(req.headers['x-http-method-override'] || req.method).toUpperCase();
+      const b = req.method === 'POST' ? await readBody(req) : {};
+      gcal.calls.push({ method, id, body: b });
+      if (!id && method === 'GET') return json(res, 200, { items: [gcal.series, ...gcal.singles.values()] });
+      if (!id && method === 'POST') {
+        const e = gcalApply({ id: `single${++seq}`, status: 'confirmed' }, b);
+        gcal.singles.set(e.id, e);
+        return json(res, 200, e);
+      }
+      if (gm[3] && method === 'GET') {
+        if (id !== 'oca-series') return json(res, 404, { error: { code: 404, message: 'Not Found' } });
+        const from = Date.parse(url.searchParams.get('timeMin') || '1970-01-01'), to = Date.parse(url.searchParams.get('timeMax') || '2999-01-01');
+        return json(res, 200, { items: [...gcal.instances.values()].filter((e) => e.status !== 'cancelled' && Date.parse(e.start.dateTime) >= from && Date.parse(e.start.dateTime) < to) });
+      }
+      const e = gcalEvent(id);
+      if (!e) return json(res, 404, { error: { code: 404, message: 'Not Found' } });
+      if (method === 'GET') return json(res, 200, e);
+      if (method === 'PATCH') return json(res, 200, gcalApply(e, b));
+      if (method === 'DELETE') {
+        if (e.status === 'cancelled') return json(res, 410, { error: { code: 410, message: 'Resource has been deleted' } });
+        if (gcal.instances.has(id)) e.status = 'cancelled'; else gcal.singles.delete(id);
+        res.writeHead(204); return res.end();
+      }
+      return json(res, 405, {});
+    }
+    if (path === '/control/gcal') {
+      if (req.method === 'POST') {
+        const b = await readBody(req);
+        if (b.reset) gcalSeed();
+        if (b.calendar) gcal.calendar = b.calendar;
+        if (b.email) gcal.email = b.email;
+        if (b.public_key !== undefined) gcal.publicKey = b.public_key;
+        if (b.edit) gcalApply(gcalEvent(b.edit.id) || {}, b.edit);
+      }
+      return json(res, 200, { calendar: gcal.calendar, calls: gcal.calls, series: gcal.series, instances: [...gcal.instances.values()], singles: [...gcal.singles.values()] });
     }
     if (path === '/control/github') {
       if (req.method === 'POST') { const b = await readBody(req); if (b.expires) GITHUB_EXPIRES = b.expires; github.length = 0; }

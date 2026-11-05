@@ -14,7 +14,7 @@
  * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter, trainings,
  * trainingstart, budget, purchase, purchasefile, purchasefinish,
  * catalog, slots, trainee, traineenew, signlink, book, bookingstatus, lookup,
- * closeddays, notifyback, websitereport, classinfo, classjoin
+ * closeddays, notifyback, websitereport, classinfo, classjoin, freeclasses, freeclasssignup
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -200,6 +200,18 @@ if ($action == 'trainingstart') {
 	dol_include_once('/onboarding/class/training.class.php');
 	$training = new OnboardingTraining($db, $svc);
 	onboarding_reply($training->register($in));
+}
+
+if ($action == 'freeclasses' || $action == 'freeclasssignup') {
+	// The website's /classes/ page: the free classes to come with the seats left, and
+	// signing up (name, email, the email-updates tick). Turnstile and the per-IP
+	// limit are the Worker's. The answer never says whether the email was known.
+	dol_include_once('/onboarding/class/freeclass.class.php');
+	$fc = new OnboardingFreeClass($db);
+	if ($action == 'freeclasses') {
+		onboarding_reply(array('ok' => true, 'classes' => $fc->publicList()));
+	}
+	onboarding_reply($fc->signUp($in));
 }
 
 if (in_array($action, array('budget', 'purchase', 'purchasefile', 'purchasefinish'), true)) {

@@ -106,6 +106,14 @@ class OnboardingCron
 			return 1;
 		}
 		$svc->alertClear('cron-security', 'Removing logins and old bank data works again.');
+		// Free classes: put back calendar events someone changed by hand.
+		dol_include_once('/onboarding/class/freeclass.class.php');
+		try {
+			$this->output .= '; '.(new OnboardingFreeClass($this->db))->checkCalendar();
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			return 1;
+		}
 		return 0;
 	}
 
@@ -140,6 +148,16 @@ class OnboardingCron
 			return 1;
 		}
 		$booking->svc->alertClear('cron-votes', 'The member vote job runs cleanly again.');
+		// Free classes share this job too: reminders, class lists, classes that are over.
+		dol_include_once('/onboarding/class/freeclass.class.php');
+		try {
+			$this->output .= '; '.(new OnboardingFreeClass($this->db))->run();
+		} catch (Throwable $e) {
+			$this->error = $e->getMessage();
+			$booking->svc->alert('cron-freeclasses', 'The free class job failed', 'The free class steps in the scheduled job "Onboarding: training bookings" stopped with: '.$e->getMessage()."\n\nClass reminders and class lists are not going out until it runs cleanly.");
+			return 1;
+		}
+		$booking->svc->alertClear('cron-freeclasses', 'The free class job runs cleanly again.');
 		return 0;
 	}
 

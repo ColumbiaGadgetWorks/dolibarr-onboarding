@@ -67,6 +67,8 @@ jobs:
         run: node e2e-plaid.mjs
       - name: Security policy (logins, retention)
         run: node e2e-security.mjs
+      - name: Free classes
+        run: node e2e-freeclass.mjs
       - name: Staff pages render
         run: bash smoke-pages.sh
       - name: Logs
