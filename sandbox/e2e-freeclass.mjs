@@ -1,5 +1,6 @@
-// Free classes against the sandbox stack and its fake Google Calendar: the
-// service account sign-in, picking a date of the monthly series and writing only
+// Free classes against the sandbox stack and its fake Google Calendar behind a
+// fake Apps Script web app: the shared secret, picking a date of the monthly
+// series and writing only
 // that date, an extra class with its own event, signing up on the website (a new
 // person, a member, email updates, full, the same email twice), giving up a seat
 // from the email link, the day-before reminder and class list, the daily check
@@ -7,7 +8,6 @@
 //
 //   node e2e-freeclass.mjs   (after e2e.mjs)
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
 import assert from 'node:assert/strict';
 
 const DOLI = process.env.DOLI_URL || 'http://localhost:8080';
@@ -48,27 +48,25 @@ function local(hoursAhead) {
   return { day: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
 }
 
-const robot = `classes-${ts}@sandbox.iam.gserviceaccount.com`;
-const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const keyFile = JSON.stringify({ type: 'service_account', client_email: robot, private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }), token_uri: 'http://givebutter:8090/gcal/token' });
-const calendar = `classes-${ts}@group.calendar.google.com`;
+const secret = `calendar-secret-${ts}-0123456789`;
 
 try {
   step('not set up: no monthly dates, and a monthly class cannot be made');
-  pu('const', 'ONBOARDING_GCAL_KEY', '');
+  pu('const', 'ONBOARDING_GCAL_SECRET', '');
   assert.equal(fc('dates'), 'null');
   assert.match(fcj('save', JSON.stringify({ kind: 'oca', date: 'x', title: 'Soldering', seats: 5 })).error, /could not be read/);
 
-  step('the service account signs in with its key; a wrong key is refused');
-  await gcal({ reset: true, calendar, email: robot, public_key: publicKey.export({ type: 'spki', format: 'pem' }) });
-  pu('const', 'ONBOARDING_GCAL_API_BASE', 'http://givebutter:8090/gcal/calendar/v3');
-  pu('const', 'ONBOARDING_GCAL_CALENDAR', calendar);
-  const other = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });
-  pu('const', 'ONBOARDING_GCAL_KEY', JSON.stringify({ ...JSON.parse(keyFile), private_key: other }));
-  assert.equal(fc('series'), 'null', 'signed with the wrong key');
-  pu('const', 'ONBOARDING_GCAL_KEY', keyFile);
+  step('the calendar script answers only to its secret, through its redirect');
+  await gcal({ reset: true, secret });
+  pu('const', 'ONBOARDING_GCAL_SCRIPT_URL', 'http://givebutter:8090/gcal/script');
+  pu('const', 'ONBOARDING_GCAL_SECRET', 'not-the-secret-not-the-secret');
+  assert.equal(fc('series'), 'null', 'a wrong secret is refused');
+  pu('const', 'ONBOARDING_GCAL_SECRET', secret);
   const series = fcj('series');
   assert.equal(series['oca-series'], 'Free public class, City of Columbia series', 'the repeating events are listed to pick from');
+  const listCall = (await gcal()).calls.find((c) => c.op === 'list');
+  assert.equal(listCall.query.singleEvents, false, 'query values go to the script as true and false, not strings');
+  assert.equal(listCall.query.maxResults, 250);
   pu('const', 'ONBOARDING_GCAL_SERIES', 'oca-series');
 
   step('the monthly dates: first Tuesdays, 6 to 8 PM');
@@ -198,6 +196,6 @@ try {
 
   console.log('\nFREE CLASSES PASSED');
 } finally {
-  pu('const', 'ONBOARDING_GCAL_KEY', '');
+  pu('const', 'ONBOARDING_GCAL_SECRET', '');
   pu('const', 'ONBOARDING_GCAL_SERIES', '');
 }

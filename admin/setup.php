@@ -37,8 +37,8 @@ function onboarding_back()
 	return preg_match('#^/(?![/\\\\])[^\s\\\\]*$#', $back) ? $back : '';
 }
 
-// name => array(label, kind, help). Kinds: text, secret, area, secretarea (a key
-// file: blank keeps the saved one), gcalseries (picked from the Google Calendar).
+// name => array(label, kind, help). Kinds: text, secret, area, gcalseries (picked
+// from the Google Calendar).
 $sections = array(
 	'Website connection' => array(
 		'ONBOARDING_API_KEY' => array('Key for the website', 'text', 'The website Worker sends this as its DOLIBARR_API_KEY secret. Changing it disconnects the website until the secret is updated.'),
@@ -173,8 +173,8 @@ $sections = array(
 		'ONBOARDING_BANKDATA_YEARS' => array('Delete bank transactions read from the banks after (years)', 'text', 'Default 7. Statement lines and bank feed transactions, and uploaded statement files, older than this are deleted by the daily job. The Dolibarr bank entries (the books) stay. 0 keeps them.'),
 	),
 	'Free classes' => array(
-		'ONBOARDING_GCAL_KEY' => array('Google service account key', 'secretarea', 'The JSON key file of a Google Cloud service account with the Google Calendar API turned on: open the file and paste all of it. Then share the calendar with the service account\'s email ("Make changes to events").'),
-		'ONBOARDING_GCAL_CALENDAR' => array('Google Calendar ID', 'text', 'Google Calendar, the calendar\'s Settings and sharing, Integrate calendar, Calendar ID. The calendar the website shows.'),
+		'ONBOARDING_GCAL_SCRIPT_URL' => array('Calendar script address', 'text', 'The Web app URL of the Google Apps Script that edits the calendar (google/calendar-bridge.gs in this module; see the README, Free classes). It starts https://script.google.com/macros/s/ and ends /exec.'),
+		'ONBOARDING_GCAL_SECRET' => array('Calendar script secret', 'secret', 'The same long random string as the script\'s DOLIBARR_SECRET script property.'),
 		'ONBOARDING_GCAL_SERIES' => array('Monthly class series', 'gcalseries', 'The repeating event of the monthly City of Columbia (OCA) classes. A monthly class is made on one of its dates.'),
 		'ONBOARDING_CLASS_LOCATION' => array('Where classes are', 'text', 'Put on the calendar and in the emails. Empty: '.OnboardingFreeClass::LOCATION.'.'),
 	),
@@ -189,21 +189,10 @@ if ($action == 'save') {
 	$errors = 0;
 	foreach ($sections as $fields) {
 		foreach ($fields as $name => $def) {
-			if (($def[1] == 'secret' || $def[1] == 'secretarea') && trim((string) GETPOST($name, 'none')) === '') {
+			if ($def[1] == 'secret' && GETPOST($name, 'none') === '') {
 				continue; // Left blank: keep the stored secret.
 			}
-			if ($def[1] == 'secretarea') {
-				$value = trim((string) GETPOST($name, 'none'));
-				$k = json_decode($value, true);
-				if (!is_array($k) || empty($k['client_email']) || empty($k['private_key'])) {
-					setEventMessages($def[0].': that is not a service account key file (JSON with client_email and private_key). It was not changed.', null, 'errors');
-					$errors++;
-					continue;
-				}
-				$value = json_encode($k);
-			} else {
-				$value = $def[1] == 'area' ? GETPOST($name, 'nohtml') : trim(GETPOST($name, 'alphanohtml'));
-			}
+			$value = $def[1] == 'area' ? GETPOST($name, 'nohtml') : trim(GETPOST($name, 'alphanohtml'));
 			if ($name == 'ONBOARDING_API_KEY' && strlen($value) < 24) {
 				setEventMessages('The website key must be at least 24 characters. It was not changed.', null, 'errors');
 				$errors++;
@@ -457,14 +446,9 @@ foreach ($sections as $title => $fields) {
 				print '<a id="home-layout"></a>';
 			}
 			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : ($name == 'ONBOARDING_RECONCILE_RULES' ? 20 : 6))).'" class="quatrevingtpercent"'.(in_array($name, array('ONBOARDING_HOME_YAML', 'ONBOARDING_RECONCILE_RULES'), true) ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown).'</textarea>';
-		} elseif ($def[1] == 'secretarea') {
-			$robot = OnboardingGcal::robotEmail();
-			print '<textarea name="'.$name.'" rows="3" class="quatrevingtpercent" style="font-family:monospace" spellcheck="false" autocomplete="off" placeholder="'.($value !== '' ? 'Saved. Paste a new key file to replace it.' : 'Not set').'"></textarea>';
-			if ($robot !== '') {
-				print '<br>Share the calendar with <strong>'.dol_escape_htmltag($robot).'</strong> ("Make changes to events").';
-			}
 		} elseif ($def[1] == 'gcalseries') {
-			$list = OnboardingGcal::configured() ? (new OnboardingGcal())->series() : null;
+			$gcal = new OnboardingGcal();
+			$list = OnboardingGcal::configured() ? $gcal->series() : null;
 			if ($list) {
 				print '<select name="'.$name.'"><option value="">(choose)</option>';
 				foreach ($list as $sid => $sname) {
@@ -472,7 +456,7 @@ foreach ($sections as $title => $fields) {
 				}
 				print '</select>';
 			} else {
-				print '<input type="text" name="'.$name.'" value="'.dol_escape_htmltag($value).'" class="minwidth400"><br><span class="opacitymedium small">Save the key and the calendar ID first; then the repeating events on the calendar are listed here to pick from.</span>';
+				print '<input type="text" name="'.$name.'" value="'.dol_escape_htmltag($value).'" class="minwidth400"><br><span class="opacitymedium small">'.(OnboardingGcal::configured() ? 'The calendar could not be read: '.dol_escape_htmltag($gcal->error) : 'Save the script\'s address and secret first; then the repeating events on the calendar are listed here to pick from.').'</span>';
 			}
 		} elseif ($def[1] == 'secret') {
 			print '<input type="password" name="'.$name.'" value="" class="minwidth400" autocomplete="new-password" placeholder="'.($value !== '' ? 'Saved. Type a new one to replace it.' : 'Not set').'">';
