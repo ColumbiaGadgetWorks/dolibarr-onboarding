@@ -689,6 +689,33 @@ if ($job == 'daily') {
 		$out['member_files'] = $mdir !== '' ? array_map('basename', glob($mdir.'/*') ?: array()) : array();
 	}
 	echo json_encode($out)."\n";
+} elseif ($job == 'freeclass') {
+	// Free classes. freeclass series | dates | save JSON [ID] | show ID | list |
+	// run [HOURS] | check | cancel ID [WHY] | link SIGNUP
+	dol_include_once('/onboarding/class/freeclass.class.php');
+	$fc = new OnboardingFreeClass($db);
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'series') {
+		$r = (new OnboardingGcal())->series();
+		echo json_encode($r)."\n";
+	} elseif ($what == 'dates') {
+		echo json_encode($fc->freeDates())."\n";
+	} elseif ($what == 'save') {
+		echo json_encode($fc->saveClass(json_decode($argv[3], true), $user, isset($argv[4]) ? (int) $argv[4] : 0))."\n";
+	} elseif ($what == 'show') {
+		$c = $fc->fetch((int) $argv[3]);
+		echo json_encode(array('class' => $c, 'signups' => $c ? $fc->signups((int) $c->rowid, '') : array()))."\n";
+	} elseif ($what == 'list') {
+		echo json_encode($fc->publicList())."\n";
+	} elseif ($what == 'run') {
+		echo $fc->run(dol_now() + (int) (isset($argv[3]) ? $argv[3] : 0) * 3600)."\n";
+	} elseif ($what == 'check') {
+		echo $fc->checkCalendar()."\n";
+	} elseif ($what == 'cancel') {
+		echo $fc->cancelClass((int) $argv[3], isset($argv[4]) ? $argv[4] : '')."\n";
+	} elseif ($what == 'link') {
+		echo $fc->link($fc->signupRow((int) $argv[3]))."\n";
+	}
 } elseif ($job == 'memberfiles') {
 	// Copies on the member card. memberfiles EMAIL drop NAME | forget | copy
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');

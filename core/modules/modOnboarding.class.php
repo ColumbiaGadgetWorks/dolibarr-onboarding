@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.21.0';
+		$this->version = '0.22.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -189,6 +189,11 @@ class modOnboarding extends DolibarrModules
 		$this->rights[$r][0] = $this->numero.'11';
 		$this->rights[$r][1] = 'Start yearly tax filings and mark their steps done';
 		$this->rights[$r][4] = 'filing';
+		$this->rights[$r][5] = 'write';
+		$r++;
+		$this->rights[$r][0] = $this->numero.'12';
+		$this->rights[$r][1] = 'Make and manage free classes (the classes lead and the officers)';
+		$this->rights[$r][4] = 'freeclass';
 		$this->rights[$r][5] = 'write';
 		$r++;
 
@@ -436,6 +441,22 @@ class modOnboarding extends DolibarrModules
 			'target' => '',
 			'user' => 0,
 		);
+		// Its own entry under Members: the classes lead may not see Onboarding.
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members',
+			'type' => 'left',
+			'titre' => 'Free classes',
+			'prefix' => img_picto('', 'calendar', 'class="pictofixedwidth valignmiddle"'),
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_freeclasses',
+			'url' => '/onboarding/freeclasses.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->admin || $user->hasRight("onboarding", "freeclass", "write")',
+			'target' => '',
+			'user' => 0,
+		);
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=project',
 			'type' => 'left',
@@ -478,6 +499,7 @@ class modOnboarding extends DolibarrModules
 				$cgw[] = array('cgw_'.$m['leftmenu'], 'cgw_onboarding', $m['titre'], $m['url'].$sep.'mainmenu=cgw&leftmenu=cgw_onboarding', $m['perms'], '');
 			}
 		}
+		$cgw[] = array('cgw_freeclasses', '', 'Free classes', '/onboarding/freeclasses.php?mainmenu=cgw&leftmenu=cgw_freeclasses', '$user->admin || $user->hasRight("onboarding", "freeclass", "write")', '<i class="fa fa-chalkboard-teacher fa-fw paddingright pictofixedwidth"></i>');
 		$cgw[] = array('cgw_deadlines', 'cgw_onboarding', 'Deadline reminders', '/onboarding/deadlines.php?mainmenu=cgw&leftmenu=cgw_onboarding', 'isModEnabled("project") && $user->hasRight("projet", "lire")', '');
 		$cgw[] = array('cgw_onboarding_setup', 'cgw_onboarding', 'Onboarding setup', '/onboarding/admin/setup.php?mainmenu=cgw&leftmenu=cgw_onboarding', '$user->admin', '');
 		foreach ($cgw as $c) {

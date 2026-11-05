@@ -429,6 +429,58 @@ reports how long it lasted, and Dolibarr emails that too. The website sends no e
 6. Deploy the website branch with the booking page, then press **Send to the website now**.
 7. When the waiver and agreement files hold your wording, set their GitHub addresses.
 
+## Free classes
+
+Free classes people sign up for on the website's **/classes/** page. Members, **Free classes**
+(also under CGW) lists them; it needs the permission "Make and manage free classes" (give it
+to the classes lead and the officers) or an administrator.
+
+**New free class** asks which kind:
+
+- **Monthly OCA class**: one date of the monthly City of Columbia series (first Tuesday,
+  6 to 8 PM), already a repeating event on the Google Calendar. Pick the date from the list
+  the calendar gives. Saving writes the class's name, description and sign-up link onto
+  **that one date** only; the rest of the series is left alone, and the time stays as the
+  series has it. The City's credit ("Financial assistance for this program has been
+  provided by the City of Columbia Office of Cultural Affairs.") is added by itself.
+- **Extra class**: any date and time. It gets an event of its own on the calendar.
+
+Then a name, a description, the class size and the instructor (a member card). The website
+calendar and Discord read the Google Calendar, so they follow within the hour. Changing a
+class writes it again; moving an extra class emails the people signed up. The daily job puts
+back any class whose event was changed or removed by hand on the calendar (editing the whole
+series in Google can wipe changes to single dates), and the class's page has **Write it
+again**.
+
+**Signing up** on the website takes a name, an email and an "email me about CGW events" tick.
+The email is matched to a member card or contact (shown on the class's page); someone new
+becomes a contact; the tick adds them to email updates the same way as the signup box. The
+page never says whether an email is known. Seats are counted one at a time, so a full class
+takes nobody more; signing up again with the same email keeps the one seat. Everyone gets a
+confirmation with a link to give up their seat, which frees it for someone else.
+
+The day before, everyone signed up gets a reminder, and the instructor and whoever made the
+class get the list. Afterwards, tick who came on the class's page. **Cancel the class**
+takes it off the calendar (for a monthly class, only that date) and emails everyone signed
+up, with the reason if one is typed.
+
+### Setting up Google Calendar (once)
+
+The module writes to the calendar as a Google Cloud **service account**:
+
+1. In the Google Cloud console (console.cloud.google.com, signed in as
+   columbiagadgetworks@gmail.com), make a project, then APIs & Services, Library, **Google
+   Calendar API**, Enable.
+2. IAM & Admin, Service accounts, **Create service account** (any name, no roles). Open it,
+   Keys, Add key, Create new key, **JSON**. A key file downloads.
+3. In Google Calendar, the calendar's **Settings and sharing**, Share with specific people,
+   add the service account's email (it ends in `iam.gserviceaccount.com`) with **Make changes
+   to events**. On the same page, Integrate calendar, copy the **Calendar ID**.
+4. On the setup page, **Free classes**: paste the whole key file and the Calendar ID, save,
+   then pick the **Monthly class series** from the list and save again.
+
+Keep the key file out of email and chat; delete the download once it is pasted.
+
 ## Member votes
 
 Bylaw changes and the board election at the annual meeting (bylaws section 4; the steps are in
