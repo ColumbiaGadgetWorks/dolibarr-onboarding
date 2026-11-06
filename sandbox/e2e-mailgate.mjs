@@ -59,15 +59,25 @@ try {
   assert.match(r1.html, /Hi Ann,\s+Thanks/, 'the email itself is in the request, line breaks kept');
   assert.deepEqual(await subjects(ann), [], 'nothing reaches the member before approval');
 
+  step('the same signup started again while it waits: one email, asked once, the newest link');
+  await api('start', { firstname: 'Ann', lastname: 'Held', email: ann });
+  await api('start', { firstname: 'Ann', lastname: 'Held', email: ann });
+  await sleep(500);
+  assert.equal((await subjects(APPROVER)).filter((s) => s.startsWith(`Approve email to ${ann}:`)).length, 1, 'the approver is asked once');
+
   step('the link only shows the email; a wrong token is refused');
   assert.equal((await page(r1.h, 'nope')).status, 403);
   const shown = await (await page(r1.h, r1.t, '&do=approve')).text();
   assert.match(shown, /Send this email\?/);
   assert.deepEqual(await subjects(ann), [], 'opening the link sends nothing');
 
-  step('Approve sends it, once');
+  step('Approve sends it, once, with the link that works');
   assert.match(await press(r1.h, r1.t, 'approve'), /Approved and sent/);
   assert.equal((await subjects(ann)).length, 1);
+  const sent = (await (await fetch(`${MAIL}/api/v1/message/${(await mails(ann))[0].ID}`)).json()).Text.replace(/=\r?\n/g, '');
+  const tok = (sent.match(/#t=([0-9a-f]{48})/) || [])[1];
+  assert.ok(tok, 'a resume link in the email');
+  assert.equal((await api('status', { token: tok })).ok, true, 'the link sent is the newest, so it works');
   assert.match(await press(r1.h, r1.t, 'approve'), /Already sent/);
   assert.equal((await subjects(ann)).length, 1);
 

@@ -104,6 +104,12 @@ class OnboardingMailGate
 		if ($this->isAllowed($kind)) {
 			return 0;
 		}
+		// The same email again while one waits (someone pressing Next twice on the
+		// join page because the first link has not come): it replaces the waiting
+		// one, so the approver is asked once and approving sends only the newest.
+		if ($this->replaceWaiting($mail, $kind)) {
+			return 1;
+		}
 		$id = $this->hold($mail, $kind);
 		if ($id <= 0) {
 			// Never let an email through that should have been held.
@@ -112,6 +118,29 @@ class OnboardingMailGate
 		}
 		$this->requestApproval($id);
 		return 1;
+	}
+
+	/**
+	 * Put a new copy of an email in place of the same one still waiting: same kind,
+	 * same recipients and subject, no attachments. Its approval link stays valid.
+	 *
+	 * @param CMailFile $mail The email
+	 * @param string $kind Its kind
+	 * @return bool Replaced
+	 */
+	public function replaceWaiting($mail, $kind)
+	{
+		global $conf;
+		if (!empty($mail->filename_list)) {
+			return false;
+		}
+		$p = $this->db->prefix();
+		$res = $this->db->query("SELECT rowid FROM ".$p."onboarding_mail_hold WHERE entity = ".((int) $conf->entity)." AND status = 'pending' AND kind = '".$this->db->escape($kind)."' AND mail_to = '".$this->db->escape((string) $mail->addr_to)."' AND mail_cc = '".$this->db->escape((string) $mail->addr_cc)."' AND subject = '".$this->db->escape(dol_trunc((string) $mail->subject, 250, 'right', 'UTF-8', 1))."' AND (files IS NULL OR files = '' OR files = '[]') ORDER BY rowid DESC LIMIT 1");
+		$row = $res ? $this->db->fetch_object($res) : null;
+		if (!$row) {
+			return false;
+		}
+		return (bool) $this->db->query("UPDATE ".$p."onboarding_mail_hold SET mail_from = '".$this->db->escape((string) $mail->addr_from)."', mail_bcc = '".$this->db->escape((string) $mail->addr_bcc)."', reply_to = '".$this->db->escape((string) $mail->reply_to)."', body = '".$this->db->escape((string) $mail->msg)."', ishtml = ".((int) $mail->msgishtml).", css = '".$this->db->escape((string) $mail->css)."', trackid = '".$this->db->escape((string) $mail->trackid)."' WHERE status = 'pending' AND rowid = ".((int) $row->rowid));
 	}
 
 	/**

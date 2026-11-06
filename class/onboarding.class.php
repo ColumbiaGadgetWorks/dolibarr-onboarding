@@ -938,7 +938,13 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	}
 
 	/**
-	 * Issue a fresh token and email the applicant a link back into the signup.
+	 * The applicant's link token, and email them a link back into the signup.
+	 *
+	 * Each signup has one token for good, worked out from its own random salt and a
+	 * secret, so every "pick up where you left off" email carries the same link and
+	 * an older email still works. (Until 0.22.3 every email made a new token and
+	 * killed the links sent before, so someone who asked twice, or whose first email
+	 * waited for approval, was sent back to the start.) Only its hash is stored.
 	 *
 	 * @param object $app Applicant row
 	 * @param bool $send Send the email
@@ -946,8 +952,22 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	 */
 	public function issueToken($app, $send = true)
 	{
-		$token = bin2hex(random_bytes(24));
-		$this->save($app->rowid, array('token_hash' => hash('sha256', $token)));
+		global $conf;
+		$salt = isset($app->token_salt) ? (string) $app->token_salt : '';
+		if ($salt === '') {
+			$salt = bin2hex(random_bytes(16));
+			$this->save($app->rowid, array('token_salt' => $salt));
+		}
+		$secret = getDolGlobalString('ONBOARDING_SIGNUP_SECRET');
+		if ($secret === '') {
+			require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+			$secret = bin2hex(random_bytes(24));
+			dolibarr_set_const($this->db, 'ONBOARDING_SIGNUP_SECRET', $secret, 'chaine', 0, 'Makes the links in membership signup emails', $conf->entity);
+		}
+		$token = substr(hash_hmac('sha256', 'signup:'.((int) $app->rowid).':'.$salt, $secret), 0, 48);
+		if (!isset($app->token_hash) || $app->token_hash !== hash('sha256', $token)) {
+			$this->save($app->rowid, array('token_hash' => hash('sha256', $token)));
+		}
 		$base = getDolGlobalString('ONBOARDING_JOIN_URL');
 		if ($send && $base) {
 			// The token rides in the fragment so it never reaches a server log.

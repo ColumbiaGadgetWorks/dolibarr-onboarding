@@ -9,6 +9,7 @@ CREATE TABLE llx_onboarding_applicant(
 	notify_events integer DEFAULT 0 NOT NULL,
 	notify_news integer DEFAULT 0 NOT NULL,
 	token_hash varchar(64),
+	token_salt varchar(32),
 	fk_socpeople integer,
 	fk_adherent integer,
 	waiver_signed_at datetime,
