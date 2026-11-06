@@ -689,6 +689,18 @@ if ($job == 'daily') {
 		$out['member_files'] = $mdir !== '' ? array_map('basename', glob($mdir.'/*') ?: array()) : array();
 	}
 	echo json_encode($out)."\n";
+} elseif ($job == 'areas') {
+	// areas get NAME | set NAME TEXT (TEXT taken as is) | repair
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+	$what = isset($argv[2]) ? $argv[2] : '';
+	if ($what == 'get') {
+		echo json_encode(getDolGlobalString($argv[3]))."\n";
+	} elseif ($what == 'set') {
+		dolibarr_set_const($db, $argv[3], $argv[4], 'chaine', 0, '', $conf->entity);
+		echo "ok\n";
+	} elseif ($what == 'repair') {
+		echo json_encode(OnboardingService::repairAreaSettings($db))."\n";
+	}
 } elseif ($job == 'freeclass') {
 	// Free classes. freeclass series | dates | save JSON [ID] | show ID | list |
 	// run [HOURS] | check | cancel ID [WHY] | link SIGNUP

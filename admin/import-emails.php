@@ -52,7 +52,7 @@ if ($report) {
 print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<p>Where this list came from (written on each new contact): <input type="text" name="source" class="minwidth300" value="'.dol_escape_htmltag($source !== '' ? $source : 'website signup list').'"></p>';
-print '<textarea name="sheet" rows="16" class="centpercent" spellcheck="false">'.dol_escape_htmltag($text).'</textarea><br><br>';
+print '<textarea name="sheet" rows="16" class="centpercent" spellcheck="false">'.dol_escape_htmltag($text, 0, 1).'</textarea><br><br>';
 print '<button type="submit" name="action" value="check" class="button">Check</button> ';
 print '<button type="submit" name="action" value="import" class="button button-save">Import</button>';
 print '</form>';

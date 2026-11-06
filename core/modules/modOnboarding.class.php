@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.22.1';
+		$this->version = '0.22.2';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -547,6 +547,7 @@ class modOnboarding extends DolibarrModules
 		if (!getDolGlobalString('ONBOARDING_API_KEY')) {
 			dolibarr_set_const($this->db, 'ONBOARDING_API_KEY', bin2hex(random_bytes(24)), 'chaine', 0, 'Key the website Worker sends to the onboarding endpoint', $conf->entity);
 		}
+		OnboardingService::repairAreaSettings($this->db);
 		// Members are created by the module with their email as login.
 		OnboardingService::installMemberTypes($this->db, $user);
 		// The role tags (president, treasurer, woodworking-boss and so on) that purchase requests read.

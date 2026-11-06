@@ -4,6 +4,7 @@
 //
 //   node e2e-security.mjs   (after e2e-purchase.mjs)
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
 const MAIL = process.env.MAIL_URL || 'http://localhost:8025';
@@ -135,6 +136,17 @@ try {
   assert.match(done, /recorded as done/);
   assert.equal(JSON.parse(sec('reviews'))[year].by, owner);
   assert.equal(sec('yearly', '15'), `access review: ${year} done`, 'no more reminders');
+
+  step('settings saved as one line by the old setup page get their line breaks back');
+  const area = (...a) => last(tick('areas', ...a));
+  const home = readFileSync(new URL('../home.default.yaml', import.meta.url), 'utf8');
+  area('set', 'ONBOARDING_HOME_YAML', home.replace(/ {2,}/g, ' ').replace(/\r?\n/g, '\\n'));
+  area('set', 'ONBOARDING_SECURITY_CHECKLIST', 'Google\\nVoidAuth\\nThe shop door code');
+  assert.deepEqual(JSON.parse(area('repair')), ['ONBOARDING_HOME_YAML', 'ONBOARDING_SECURITY_CHECKLIST']);
+  assert.equal(JSON.parse(area('get', 'ONBOARDING_HOME_YAML')), '', 'the built-in layout is kept as the default');
+  assert.equal(JSON.parse(area('get', 'ONBOARDING_SECURITY_CHECKLIST')), 'Google\nVoidAuth\nThe shop door code', 'a list of its own keeps its lines');
+  assert.deepEqual(JSON.parse(area('repair')), [], 'nothing twice');
+  pu('const', 'ONBOARDING_SECURITY_CHECKLIST', '');
 
   console.log('\nAll security checks passed');
 } finally {

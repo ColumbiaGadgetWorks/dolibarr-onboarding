@@ -191,6 +191,53 @@ class OnboardingService
 	}
 
 	/**
+	 * The setup page's many-line settings. Up to 0.22.1 the page showed their line
+	 * breaks as the two characters \n, so pressing Save stored each one as a single
+	 * line (a broken CGW home page layout, reconcile rules, yearly filings list).
+	 */
+	const AREA_SETTINGS = array('ONBOARDING_MAIL_TRAINED_BODY', 'ONBOARDING_FILING_YEARLY', 'ONBOARDING_RECONCILE_RULES', 'ONBOARDING_MAIL_REMINDER_BODY', 'ONBOARDING_MAIL_REMINDER_PAYPAL_BODY', 'ONBOARDING_MAIL_LAPSED_BODY', 'ONBOARDING_MAIL_WELCOME_BODY', 'ONBOARDING_MAIL_RESUME_BODY', 'ONBOARDING_WAIVER_TEXT', 'ONBOARDING_AGREEMENT_TEXT', 'ONBOARDING_HOME_YAML', 'ONBOARDING_SECURITY_CHECKLIST');
+
+	/**
+	 * Put back the line breaks of settings saved as a single line, and drop the ones
+	 * that are just the built-in default (so later improvements to it arrive).
+	 * Run when the module is enabled or updated.
+	 *
+	 * @param DoliDB $db Database handler
+	 * @return string[] The settings repaired
+	 */
+	public static function repairAreaSettings($db)
+	{
+		global $conf;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+		dol_include_once('/onboarding/class/reconcile.class.php');
+		dol_include_once('/onboarding/class/filing.class.php');
+		$defaults = array(
+			'ONBOARDING_HOME_YAML' => (string) @file_get_contents(dirname(__DIR__).'/home.default.yaml'),
+			'ONBOARDING_RECONCILE_RULES' => OnboardingReconcile::DEFAULT_RULES,
+			'ONBOARDING_FILING_YEARLY' => OnboardingFiling::DEFAULT_YEARLY,
+		);
+		$fixed = array();
+		foreach (self::AREA_SETTINGS as $name) {
+			$v = getDolGlobalString($name);
+			if ($v === '' || strpos($v, "\n") !== false || strpos($v, '\n') === false) {
+				continue;
+			}
+			$v = str_replace(array('\r\n', '\n', '\r'), array("\n", "\n", ''), $v);
+			// The same page also squeezed runs of spaces, so the default is recognised
+			// whatever its spacing.
+			$squeeze = function ($t) {
+				return trim((string) preg_replace('/\s+/', ' ', $t));
+			};
+			if (isset($defaults[$name]) && $squeeze($v) === $squeeze($defaults[$name])) {
+				$v = '';
+			}
+			dolibarr_set_const($db, $name, $v, 'chaine', 0, '', $conf->entity);
+			$fixed[] = $name;
+		}
+		return $fixed;
+	}
+
+	/**
 	 * Make sure a Standard and a Supporter member type exist and are configured.
 	 *
 	 * @param DoliDB $db Database handler
