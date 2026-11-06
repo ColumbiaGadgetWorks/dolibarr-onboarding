@@ -192,7 +192,9 @@ if ($action == 'save') {
 			if ($def[1] == 'secret' && GETPOST($name, 'none') === '') {
 				continue; // Left blank: keep the stored secret.
 			}
-			$value = $def[1] == 'area' ? GETPOST($name, 'nohtml') : trim(GETPOST($name, 'alphanohtml'));
+			// Many-line boxes are taken as typed: the "nohtml" filter squeezes runs of
+			// spaces, which breaks the home page layout's indentation. Admins only.
+			$value = $def[1] == 'area' ? str_replace("\r\n", "\n", (string) GETPOST($name, 'none')) : trim(GETPOST($name, 'alphanohtml'));
 			if ($name == 'ONBOARDING_API_KEY' && strlen($value) < 24) {
 				setEventMessages('The website key must be at least 24 characters. It was not changed.', null, 'errors');
 				$errors++;
@@ -445,7 +447,7 @@ foreach ($sections as $title => $fields) {
 				$shown = OnboardingHome::layoutText();
 				print '<a id="home-layout"></a>';
 			}
-			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : ($name == 'ONBOARDING_RECONCILE_RULES' ? 20 : 6))).'" class="quatrevingtpercent"'.(in_array($name, array('ONBOARDING_HOME_YAML', 'ONBOARDING_RECONCILE_RULES'), true) ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown).'</textarea>';
+			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : ($name == 'ONBOARDING_RECONCILE_RULES' ? 20 : 6))).'" class="quatrevingtpercent"'.(in_array($name, array('ONBOARDING_HOME_YAML', 'ONBOARDING_RECONCILE_RULES'), true) ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown, 0, 1).'</textarea>';
 		} elseif ($def[1] == 'gcalseries') {
 			$gcal = new OnboardingGcal();
 			$list = OnboardingGcal::configured() ? $gcal->series() : null;

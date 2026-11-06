@@ -196,7 +196,7 @@ if ($canfree) {
 	print '<details'.($importOut ? ' open' : '').'><summary><strong>Import a list of people already trained</strong></summary>';
 	print '<p class="opacitymedium">One per line: an email, or email, first name, last name (tab, comma or semicolon). Each is recorded as trained on the tool with no fee. Press Check first.</p>';
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'"><input type="hidden" name="token" value="'.newToken().'"><select name="tool">'.$toolOpts.'</select><br>';
-	print '<textarea name="list" rows="6" class="quatrevingtpercent">'.dol_escape_htmltag(GETPOST('list', 'restricthtml')).'</textarea><br>';
+	print '<textarea name="list" rows="6" class="quatrevingtpercent">'.dol_escape_htmltag(GETPOST('list', 'restricthtml'), 0, 1).'</textarea><br>';
 	print '<button class="button smallpaddingimp" name="action" value="importcheck">Check</button> <button class="button smallpaddingimp" name="action" value="importgo">Import</button></form>';
 	if ($importOut) {
 		print '<div class="info">'.implode('<br>', array_map('dol_escape_htmltag', $importOut)).'</div>';
