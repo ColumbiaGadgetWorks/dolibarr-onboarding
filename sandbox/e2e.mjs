@@ -86,8 +86,8 @@ step('same email again gets no token');
 const again = await api('start', { firstname: 'Eve', lastname: 'Else', email });
 assert.equal(again.check_email, true);
 assert.equal(again.token, undefined);
-// The emailed link replaced the token, as it would for the real owner.
-assert.equal((await api('status', { token })).status, 404);
+// The link already in hand keeps working: every email carries the same one.
+assert.equal((await api('status', { token })).ok, true, 'asking again does not break the link');
 const fresh = dump();
 assert.equal(fresh.applicant.firstname, 'Ada', 'a second signup must not overwrite the first');
 assert.equal(fresh.contact_fields.options_discord_handle, 'ada#1');
@@ -100,6 +100,9 @@ const list = await (await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponen
 const body = await (await fetch(`${MAIL}/api/v1/message/${list.messages[0].ID}`)).json();
 const t2 = (body.Text.match(/#t=([a-f0-9]{48})/) || [])[1];
 assert.ok(t2, 'resume link with token in the email');
+assert.equal(t2, token, 'the same link every time, so an older email still works');
+const body2 = await (await fetch(`${MAIL}/api/v1/message/${list.messages[list.messages.length - 1].ID}`)).json();
+assert.equal((body2.Text.match(/#t=([a-f0-9]{48})/) || [])[1], token, 'the first email too');
 
 step('step 2: paperwork');
 const signature = png(48).toString('base64');

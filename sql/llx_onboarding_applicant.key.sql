@@ -5,3 +5,4 @@ ALTER TABLE llx_onboarding_applicant ADD COLUMN birthdate date;
 ALTER TABLE llx_onboarding_applicant ADD COLUMN guardian_name varchar(200);
 ALTER TABLE llx_onboarding_applicant ADD COLUMN guardian_relation varchar(50);
 ALTER TABLE llx_onboarding_applicant ADD COLUMN guardian_email varchar(255);
+ALTER TABLE llx_onboarding_applicant ADD COLUMN token_salt varchar(32);
