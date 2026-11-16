@@ -177,7 +177,7 @@ print '</table></div><br>';
 
 if ($canfree) {
 	$toolOpts = '';
-	foreach ($bk->tools(true) as $t) {
+	foreach ($bk->schedule()->tools(true) as $t) {
 		$toolOpts .= '<option value="'.((int) $t->rowid).'">'.dol_escape_htmltag($t->label).'</option>';
 	}
 	print '<h3>Mark trained (no fee)</h3>';

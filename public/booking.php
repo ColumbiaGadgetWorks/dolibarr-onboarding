@@ -129,12 +129,12 @@ $now = OnboardingService::now();
 $trainerId = (int) GETPOST('t', 'int');
 if ($trainerId > 0) {
 	$until = (int) GETPOST('x', 'int');
-	if (!$bk->spotLinkValid($trainerId, $until, $key)) {
+	if (!$bk->spots()->spotLinkValid($trainerId, $until, $key)) {
 		onboarding_booking_page('Link not valid', '<p>This link is not valid or has run out (it works for '.((int) (OnboardingBooking::SPOT_LINK_MINUTES / 60)).' hours). Ask for a new one on the training booking page: <a href="'.dol_escape_htmltag($bk->bookUrl()).'">'.dol_escape_htmltag($bk->bookUrl()).'</a></p>', 403);
 	}
 	$res = $db->query("SELECT email FROM ".$db->prefix()."adherent WHERE rowid = ".$trainerId);
 	$o = $res ? $db->fetch_object($res) : null;
-	$tools = $o ? $bk->spotTools($bk->memberRow((string) $o->email)) : array();
+	$tools = $o ? $bk->spots()->spotTools($bk->memberRow((string) $o->email)) : array();
 	$hidden = array('t' => (string) $trainerId, 'x' => (string) $until, 'k' => $key);
 	$expires = OnboardingBooking::fmt($now + OnboardingBooking::SPOT_HOURS * 3600, 'g:i A');
 	if (!$tools) {
@@ -142,7 +142,7 @@ if ($trainerId > 0) {
 	}
 	$done = '';
 	if ($post && $do == 'spot') {
-		$r = $bk->spotRequest($trainerId, (int) GETPOST('tool', 'int'), GETPOST('email', 'alphanohtml'));
+		$r = $bk->spots()->spotRequest($trainerId, (int) GETPOST('tool', 'int'), GETPOST('email', 'alphanohtml'));
 		if (!empty($r['ok'])) {
 			$done = '<p class="ok">Sent. The trainee has an email asking whether they asked for this training ('.dol_escape_htmltag($r['ref']).'). If they say yes, they sign the waiver and pay online; you get an email once they have paid. The request expires at '.dol_escape_htmltag(OnboardingBooking::fmt($r['expires'], 'g:i A')).' if they have not paid by then.</p><h2>Train someone else</h2>';
 		} else {
@@ -164,7 +164,7 @@ if ($trainerId > 0) {
 // ---------------------------------------------------------------- group class list
 $classId = (int) GETPOST('c', 'int');
 if ($classId > 0) {
-	$c = $bk->klass($classId);
+	$c = $bk->classes()->klass($classId);
 	if (!$c || !hash_equals($bk->sign('class:'.$classId), (string) $key)) {
 		onboarding_booking_page('Link not valid', '<p>This link is not valid. Ask the secretary to confirm the class in Dolibarr.</p>', 403);
 	}
@@ -172,7 +172,7 @@ if ($classId > 0) {
 	$facts = '<div class="facts"><strong>'.dol_escape_htmltag($c->tool).'</strong> group class<br>'.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($c->session_start))).' &middot; code '.dol_escape_htmltag($c->code).'</div>';
 	if ($post && $do == 'finish') {
 		$ids = GETPOST('trained', 'array');
-		$msg = $bk->classFinish($c, is_array($ids) ? $ids : array());
+		$msg = $bk->classes()->classFinish($c, is_array($ids) ? $ids : array());
 		onboarding_booking_page('Class list confirmed', $facts.'<p class="ok">Thank you. '.dol_escape_htmltag($msg).' Everyone trained gets an email.</p>');
 	}
 	$rows = $bk->bookingsWhere("fk_class = ".((int) $classId)." AND status IN ('confirmed', 'trained')");
@@ -229,7 +229,7 @@ if ($b->source == 'spot' && in_array($b->status, array('requested', 'held', 'exp
 		onboarding_booking_page('Waiting for the trainee', $facts.'<p>'.($open ? 'The trainee has not paid yet. The request expires at '.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($b->hold_until), 'g:i A')).'.' : 'This request has expired.').'</p>');
 	}
 	if ($post && ($do == 'spot_yes' || $do == 'spot_no')) {
-		$r = $bk->spotAnswer($b, $do == 'spot_yes');
+		$r = $bk->spots()->spotAnswer($b, $do == 'spot_yes');
 		if (empty($r['ok'])) {
 			$message($r, '');
 		}
@@ -340,7 +340,7 @@ if ($action == 'other') {
 	onboarding_booking_page('Tell us what you need', $html);
 }
 
-$slots = $bk->available((int) $b->fk_tool, (int) $b->rowid);
+$slots = $bk->schedule()->available((int) $b->fk_tool, (int) $b->rowid);
 $list = '';
 foreach (array_slice($slots, 0, 20) as $s) {
 	$list .= '<li>'.onboarding_booking_form($hidden + array('slot' => (string) $s['slot'], 'start' => (string) $s['ts']), 'pick', $s['label'].' with '.$s['trainer'], '', 'alt').'</li>';

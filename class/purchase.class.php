@@ -771,12 +771,29 @@ class OnboardingPurchase
 		}
 
 		$token = bin2hex(random_bytes(24));
-		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_purchase (entity, token, fk_adherent, zone, kind, amount, items, vendor, purchase_date, link, description, pay_method, pay_handle, status, need_board, ip, files, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$token."', ".((int) $m->rowid).", '".$this->db->escape($zone)."', '".$this->db->escape($kind)."', ".price2num($amount).", ".($items ? "'".$this->db->escape(json_encode($items))."'" : 'NULL').", '".$this->db->escape($vendor)."', '".$this->db->escape($date)."', '".$this->db->escape($link)."', '".$this->db->escape($description)."', '".$this->db->escape($method)."', '".$this->db->escape($handle)."', 'draft', 0, '".$this->db->escape($ip)."', '[]', '".$this->db->idate(OnboardingService::now())."')";
-		if (!$this->db->query($sql)) {
+		$id = OnboardingSql::insert($this->db, 'onboarding_purchase', array(
+			'entity' => (int) $conf->entity,
+			'token' => $token,
+			'fk_adherent' => (int) $m->rowid,
+			'zone' => $zone,
+			'kind' => $kind,
+			'amount' => (float) price2num($amount),
+			'items' => $items ? json_encode($items) : null,
+			'vendor' => $vendor,
+			'purchase_date' => $date,
+			'link' => $link,
+			'description' => $description,
+			'pay_method' => $method,
+			'pay_handle' => $handle,
+			'status' => 'draft',
+			'need_board' => 0,
+			'ip' => $ip,
+			'files' => '[]',
+			'datec' => $this->db->idate(OnboardingService::now()),
+		));
+		if (!$id) {
 			return array('ok' => false, 'error' => 'server', 'http' => 500);
 		}
-		$id = (int) $this->db->last_insert_id($this->db->prefix().'onboarding_purchase');
 		$ref = 'PR-'.sprintf('%04d', $id);
 		$this->save($id, array('ref' => $ref));
 		return array('ok' => true, 'id' => $id, 'token' => $token, 'ref' => $ref);

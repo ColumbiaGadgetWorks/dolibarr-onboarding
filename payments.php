@@ -49,9 +49,9 @@ if ($action == 'assign' && $canwrite) {
 		setEventMessages('Choose the member, or type their signup email.', null, 'errors');
 	}
 	if ($app) {
-		setEventMessages('Payment: '.$svc->applyPayment($app, $payment), null);
+		setEventMessages('Payment: '.$svc->givebutter()->applyPayment($app, $payment), null);
 		// Their other payments now match by their Givebutter contact.
-		$more = $svc->retryUnmatched();
+		$more = $svc->givebutter()->retryUnmatched();
 		if ($more) {
 			setEventMessages($more.' more payment'.($more == 1 ? '' : 's').' matched.', null);
 		}
@@ -60,7 +60,7 @@ if ($action == 'assign' && $canwrite) {
 	exit;
 }
 if ($action == 'retry' && $canwrite) {
-	$n = $svc->retryUnmatched();
+	$n = $svc->givebutter()->retryUnmatched();
 	setEventMessages($n ? $n.' payment'.($n == 1 ? '' : 's').' matched.' : 'Still no match for these. Choose the member for each one.', null, $n ? 'mesgs' : 'warnings');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;

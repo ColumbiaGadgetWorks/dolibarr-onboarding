@@ -219,13 +219,22 @@ class OnboardingPaypal
 			return 'duplicate';
 		}
 		if (!$row) {
-			$sql = "INSERT INTO ".$p."onboarding_paypal (entity, txid, payer_id, email, name, amount, fee, event_code, transacted_at, status, datec) VALUES (";
-			$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($payer)."', '".$this->db->escape($email)."', '".$this->db->escape(dol_trunc($name, 190, 'right', 'UTF-8', 1))."', ";
-			$sql .= price2num($amount).", ".price2num($fee).", '".$this->db->escape($code)."', '".$this->db->idate($when ? $when : OnboardingService::now())."', 'unmatched', '".$this->db->idate(OnboardingService::now())."')";
-			if (!$this->db->query($sql)) {
+			$rowid = OnboardingSql::insert($this->db, 'onboarding_paypal', array(
+				'entity' => (int) $conf->entity,
+				'txid' => $txid,
+				'payer_id' => $payer,
+				'email' => $email,
+				'name' => dol_trunc($name, 190, 'right', 'UTF-8', 1),
+				'amount' => (float) price2num($amount),
+				'fee' => (float) price2num($fee),
+				'event_code' => $code,
+				'transacted_at' => $this->db->idate($when ? $when : OnboardingService::now()),
+				'status' => 'unmatched',
+				'datec' => $this->db->idate(OnboardingService::now()),
+			));
+			if (!$rowid) {
 				return 'duplicate';
 			}
-			$rowid = (int) $this->db->last_insert_id($p.'onboarding_paypal');
 		} else {
 			$rowid = (int) $row->rowid;
 		}
@@ -377,7 +386,7 @@ class OnboardingPaypal
 			}
 			$note = $this->bank($adh, $subid, $row, $when, $who) ? 'recorded with bank lines' : 'recorded';
 		} else {
-			$this->svc->extendToAnniversary((int) $adh->id, $when, $months);
+			$this->svc->givebutter()->extendToAnniversary((int) $adh->id, $when, $months);
 		}
 		// A lapsed member who pays again is a member again.
 		$adh->fetch((int) $adh->id);

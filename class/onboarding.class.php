@@ -10,10 +10,17 @@ require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/categories/class/categorie.class.php';
+dol_include_once('/onboarding/class/mails.class.php');
+dol_include_once('/onboarding/class/sql.class.php');
 
 /**
- * All onboarding logic. The applicant table is the source of truth; the extra
- * fields on contacts and members mirror it so staff see it on the normal cards.
+ * Core onboarding logic: applicants, members, signed documents, mail and
+ * alerts. The applicant table is the source of truth; the extra fields on
+ * contacts and members mirror it so staff see it on the normal cards.
+ *
+ * The rest lives in parts reached from here: givebutter() (payments),
+ * signup() (the signup steps), dues() (reminders and lapses) and updates()
+ * (the email-updates list).
  */
 class OnboardingService
 {
@@ -86,6 +93,55 @@ class OnboardingService
 	public function __construct($db)
 	{
 		$this->db = $db;
+	}
+
+	/** @var array<string,object> The parts below, made on first use */
+	private $parts = array();
+
+	/**
+	 * @param string $file File in class/, without .class.php
+	 * @param string $class Class name
+	 * @return object
+	 */
+	private function part($file, $class)
+	{
+		if (!isset($this->parts[$class])) {
+			dol_include_once('/onboarding/class/'.$file.'.class.php');
+			$this->parts[$class] = new $class($this);
+		}
+		return $this->parts[$class];
+	}
+
+	/**
+	 * @return OnboardingGivebutter Givebutter client, webhooks, sync and dues payments
+	 */
+	public function givebutter()
+	{
+		return $this->part('givebutter', 'OnboardingGivebutter');
+	}
+
+	/**
+	 * @return OnboardingSignup Signup steps: details, signatures, ID photo
+	 */
+	public function signup()
+	{
+		return $this->part('signup', 'OnboardingSignup');
+	}
+
+	/**
+	 * @return OnboardingDues Dues reminders and lapses
+	 */
+	public function dues()
+	{
+		return $this->part('dues', 'OnboardingDues');
+	}
+
+	/**
+	 * @return OnboardingUpdates The email-updates list
+	 */
+	public function updates()
+	{
+		return $this->part('updates', 'OnboardingUpdates');
 	}
 
 	/**
@@ -458,7 +514,7 @@ class OnboardingService
 	 * @param string $where SQL condition
 	 * @return object|null Applicant row
 	 */
-	private function one($where)
+	public function one($where)
 	{
 		global $conf;
 		$res = $this->db->query("SELECT * FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND ".$where." LIMIT 1");
@@ -603,6 +659,43 @@ class OnboardingService
 	}
 
 	/**
+	 * File name for a signed document. The version is part of the name, so a
+	 * newer version signed later sits beside the older one instead of replacing it.
+	 *
+	 * @param string $doc waiver or agreement (or a longer name prefix)
+	 * @param string $version Document version signed; '' gives the old unversioned name
+	 * @param string $suffix .pdf, .txt or -signature.png
+	 * @return string
+	 */
+	public static function signedName($doc, $version, $suffix)
+	{
+		$v = trim((string) preg_replace('/[^A-Za-z0-9._-]+/', '-', (string) $version), '-.');
+		return $doc.($v !== '' ? '-'.$v : '').$suffix;
+	}
+
+	/**
+	 * The signed waiver or agreement on file for an applicant: the version they
+	 * signed last, else a file from before names carried the version.
+	 *
+	 * @param object $app Applicant row
+	 * @param string $doc waiver or agreement
+	 * @return string Full path, '' if there is none
+	 */
+	public function signedFile($app, $doc)
+	{
+		$dir = DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid);
+		$version = isset($app->{$doc.'_version'}) ? (string) $app->{$doc.'_version'} : '';
+		foreach (array(self::signedName($doc, $version, ''), $doc) as $base) {
+			foreach (array('.pdf', '.txt') as $ext) {
+				if (is_readable($dir.'/'.$base.$ext)) {
+					return $dir.'/'.$base.$ext;
+				}
+			}
+		}
+		return '';
+	}
+
+	/**
 	 * Copy the signed waiver and agreement and the ID photo onto the member card, so
 	 * they show under its Attached files and documents. A file is copied again only
 	 * when it changes (signed again, a new photo), so one deleted from the member card
@@ -619,10 +712,9 @@ class OnboardingService
 		$src = DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid);
 		$files = array();
 		foreach (array('waiver', 'agreement') as $doc) {
-			foreach (array('pdf', 'txt') as $ext) {
-				if (!isset($files[$doc]) && is_readable($src.'/'.$doc.'.'.$ext)) {
-					$files[$doc] = $doc.'.'.$ext;
-				}
+			$path = $this->signedFile($app, $doc);
+			if ($path !== '') {
+				$files[$doc] = basename($path);
 			}
 		}
 		if (!empty($app->id_file) && is_readable($src.'/'.basename($app->id_file))) {
@@ -648,7 +740,8 @@ class OnboardingService
 					return $copied;
 				}
 			}
-			$name = self::MEMBER_FILES[$what].'.'.pathinfo($file, PATHINFO_EXTENSION);
+			$ext = '.'.pathinfo($file, PATHINFO_EXTENSION);
+			$name = $what == 'id' ? self::MEMBER_FILES[$what].$ext : self::signedName(self::MEMBER_FILES[$what], (string) $app->{$what.'_version'}, $ext);
 			$isNew = !file_exists($dest.'/'.$name);
 			if (!@copy($src.'/'.$file, $dest.'/'.$name)) {
 				dol_syslog('Onboarding: could not copy '.$file.' to member '.$app->fk_adherent, LOG_WARNING);
@@ -916,15 +1009,14 @@ You get at most one email an hour about this, and one more when it is fixed.");
 	/**
 	 * Fill a template from the setup page.
 	 *
-	 * @param string $const Constant holding the template
-	 * @param string $default Default text
+	 * @param string $const Setting holding the template; its built-in text is in OnboardingMails::MEMBER
 	 * @param object $app Applicant row
 	 * @param array<string,string> $extra Extra placeholders
 	 * @return string
 	 */
-	public function template($const, $default, $app, $extra = array())
+	public function template($const, $app, $extra = array())
 	{
-		$text = getDolGlobalString($const, $default);
+		$text = OnboardingMails::text($const);
 		$vars = array(
 			'{firstname}' => (string) $app->firstname,
 			'{lastname}' => (string) $app->lastname,
@@ -935,1120 +1027,6 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			$vars['{'.$k.'}'] = $v;
 		}
 		return strtr($text, $vars);
-	}
-
-	/**
-	 * The applicant's link token, and email them a link back into the signup.
-	 *
-	 * Each signup has one token for good, worked out from its own random salt and a
-	 * secret, so every "pick up where you left off" email carries the same link and
-	 * an older email still works. (Until 0.22.3 every email made a new token and
-	 * killed the links sent before, so someone who asked twice, or whose first email
-	 * waited for approval, was sent back to the start.) Only its hash is stored.
-	 *
-	 * @param object $app Applicant row
-	 * @param bool $send Send the email
-	 * @return string The token
-	 */
-	public function issueToken($app, $send = true)
-	{
-		global $conf;
-		$salt = isset($app->token_salt) ? (string) $app->token_salt : '';
-		if ($salt === '') {
-			$salt = bin2hex(random_bytes(16));
-			$this->save($app->rowid, array('token_salt' => $salt));
-		}
-		$secret = getDolGlobalString('ONBOARDING_SIGNUP_SECRET');
-		if ($secret === '') {
-			require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-			$secret = bin2hex(random_bytes(24));
-			dolibarr_set_const($this->db, 'ONBOARDING_SIGNUP_SECRET', $secret, 'chaine', 0, 'Makes the links in membership signup emails', $conf->entity);
-		}
-		$token = substr(hash_hmac('sha256', 'signup:'.((int) $app->rowid).':'.$salt, $secret), 0, 48);
-		if (!isset($app->token_hash) || $app->token_hash !== hash('sha256', $token)) {
-			$this->save($app->rowid, array('token_hash' => hash('sha256', $token)));
-		}
-		$base = getDolGlobalString('ONBOARDING_JOIN_URL');
-		if ($send && $base) {
-			// The token rides in the fragment so it never reaches a server log.
-			$link = $base.'#t='.$token;
-			$body = $this->template('ONBOARDING_MAIL_RESUME_BODY', "Hi {firstname},\n\nThanks for starting your {org} membership. If you get interrupted, this link takes you back to where you left off:\n\n{link}\n\nIf you did not start a signup, you can ignore this email.", $app, array('link' => $link));
-			$this->mail($app->email, $this->template('ONBOARDING_MAIL_RESUME_SUBJECT', 'Your {org} membership signup', $app), $body);
-		}
-		return $token;
-	}
-
-	// ---------------------------------------------------------------- signup steps
-
-	/**
-	 * Step 1. Create the applicant and their contact card.
-	 *
-	 * @param array<string,mixed> $in Form fields
-	 * @return array<string,mixed> Response for the website
-	 */
-	public function start($in)
-	{
-		global $conf;
-
-		$email = self::cleanEmail(isset($in['email']) ? $in['email'] : '');
-		$first = trim(dol_string_nohtmltag((string) (isset($in['firstname']) ? $in['firstname'] : '')));
-		$last = trim(dol_string_nohtmltag((string) (isset($in['lastname']) ? $in['lastname'] : '')));
-		$discord = trim(dol_string_nohtmltag((string) (isset($in['discord']) ? $in['discord'] : '')));
-		if (!isValidEmail($email) || $first === '' || $last === '') {
-			return array('ok' => false, 'error' => 'invalid', 'http' => 400);
-		}
-
-		// A known address never gets a token back in the browser: whoever typed it
-		// may not own it. The link goes to the inbox instead.
-		$existing = $this->findByEmail($email);
-		if ($existing && !empty($existing->training_only) && $existing->stage != 'complete') {
-			// Came for a training, now joining: the signup carries on from what they signed.
-			$this->save($existing->rowid, array('training_only' => 0));
-			$existing = $this->refreshStage($existing->rowid);
-		}
-		if ($existing) {
-			if ($existing->stage == 'complete') {
-				$this->mail($existing->email, $this->template('ONBOARDING_MAIL_ALREADY_SUBJECT', 'You are already a {org} member', $existing), $this->template('ONBOARDING_MAIL_ALREADY_BODY', "Hi {firstname},\n\nSomeone started a membership signup with this email address, but you are already a member, so nothing was changed.", $existing));
-			} else {
-				$this->issueToken($existing, true);
-			}
-			return array('ok' => true, 'check_email' => true);
-		}
-		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE email = '".$this->db->escape($email)."' AND entity IN (".getEntity('adherent').") LIMIT 1");
-		if ($res && $this->db->fetch_object($res)) {
-			return array('ok' => true, 'check_email' => true);
-		}
-
-		$actor = $this->actor();
-		$contact = new Contact($this->db);
-		$contact->firstname = $first;
-		$contact->lastname = $last;
-		$contact->email = $email;
-		$contact->statut = 1;
-		$contact->status = 1;
-		$contact->note_private = 'Created by the website membership signup.';
-		$cid = $contact->create($actor);
-		if ($cid <= 0) {
-			dol_syslog('Onboarding: contact create failed: '.$contact->error, LOG_ERR);
-			return array('ok' => false, 'error' => 'server', 'http' => 500);
-		}
-
-		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_applicant (entity, email, firstname, lastname, discord, notify_events, notify_news, fk_socpeople, ip, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$this->db->escape($email)."', '".$this->db->escape($first)."', '".$this->db->escape($last)."', '".$this->db->escape(substr($discord, 0, 100))."', ";
-		$sql .= (empty($in['notify_events']) ? 0 : 1).", ".(empty($in['notify_news']) ? 0 : 1).", ".((int) $cid).", '".$this->db->escape(substr((string) (isset($in['ip']) ? $in['ip'] : ''), 0, 64))."', '".$this->db->idate(self::now())."')";
-		if (!$this->db->query($sql)) {
-			dol_syslog('Onboarding: applicant insert failed: '.$this->db->lasterror(), LOG_ERR);
-			return array('ok' => false, 'error' => 'server', 'http' => 500);
-		}
-		$app = $this->fetch($this->db->last_insert_id($this->db->prefix()."onboarding_applicant"));
-		$token = $this->issueToken($app, true);
-		$this->syncExtraFields($app);
-		// Either box ticked puts them on the email updates list too. The two
-		// notify fields keep exactly what was ticked.
-		if (!empty($in['notify_events']) || !empty($in['notify_news'])) {
-			$tagged = new Contact($this->db);
-			if ($tagged->fetch((int) $cid) > 0) {
-				$this->tagForUpdates($tagged, false);
-			}
-		}
-
-		return array('ok' => true, 'token' => $token) + $this->status($this->fetch($app->rowid));
-	}
-
-	/**
-	 * What the website needs to draw the right step.
-	 *
-	 * @param object $app Applicant row
-	 * @return array<string,mixed>
-	 */
-	public function status($app)
-	{
-		$docs = $this->docs();
-		return array(
-			'stage' => $app->stage,
-			'firstname' => $app->firstname,
-			'lastname' => $app->lastname,
-			'email' => $app->email,
-			'waiver' => !empty($app->waiver_signed_at) && $app->waiver_version == $docs['waiver']['version'],
-			'agreement' => !empty($app->agreement_signed_at) && $app->agreement_version == $docs['agreement']['version'],
-			'id' => !empty($app->id_uploaded_at),
-			'paid' => $app->payment_state == 'active',
-			'training_only' => !empty($app->training_only),
-			'birthdate' => !empty($app->birthdate),
-			'needs' => $this->trainingNeeds($app),
-			'checkout' => array(
-				'url' => getDolGlobalString('ONBOARDING_CHECKOUT_URL'),
-				'standard' => (float) getDolGlobalString('ONBOARDING_DUES_STANDARD', '50'),
-				'supporter' => (float) getDolGlobalString('ONBOARDING_DUES_SUPPORTER', '100'),
-			),
-		);
-	}
-
-	/**
-	 * @param object $app Applicant row
-	 * @return string[] What they still have to sign before booking a training
-	 */
-	public function trainingNeeds($app)
-	{
-		dol_include_once('/onboarding/class/booking.class.php');
-		$b = new OnboardingBooking($this->db, $this);
-		$p = $b->person($app->email);
-		return $p['needs'];
-	}
-
-	/**
-	 * Step 2a/2b. Record a signature on the waiver or the agreement.
-	 *
-	 * Someone signing to book a training also gives their date of birth. Under
-	 * 18, a parent or guardian signs the waiver for them: the typed name is the
-	 * guardian's, and the record says whose waiver it is. Under the minimum age
-	 * (setting) nobody can sign online.
-	 *
-	 * @param object $app Applicant row
-	 * @param string $doc 'waiver' or 'agreement'
-	 * @param string $name Typed full name (the guardian's, for a minor)
-	 * @param string $version Version the browser showed
-	 * @param string $ip Signer's address
-	 * @param string $signature The drawn signature, PNG bytes
-	 * @param array<string,string> $extra birthdate (Y-m-d), guardian_name, guardian_relation, guardian_email
-	 * @return array<string,mixed>
-	 */
-	public function sign($app, $doc, $name, $version, $ip, $signature = '', $extra = array())
-	{
-		$docs = $this->docs();
-		$name = trim(dol_string_nohtmltag((string) $name));
-		if (!isset($docs[$doc]) || strlen($name) < 3) {
-			return array('ok' => false, 'error' => 'invalid', 'http' => 400);
-		}
-		if ($version !== $docs[$doc]['version']) {
-			// The text changed while the form was open. They must read the new one.
-			return array('ok' => false, 'error' => 'stale', 'http' => 409);
-		}
-		$info = strlen($signature) > 200 && strlen($signature) < 1024 * 1024 ? @getimagesizefromstring($signature) : false;
-		if (!$info || $info[2] != IMAGETYPE_PNG || $info[0] > 2400 || $info[1] > 1200) {
-			return array('ok' => false, 'error' => 'signature', 'http' => 400);
-		}
-		$now = self::now();
-		$fields = array();
-		$guardian = '';
-		if ($doc == 'waiver') {
-			$birth = isset($extra['birthdate']) ? trim((string) $extra['birthdate']) : '';
-			if ($birth === '' && !empty($app->birthdate)) {
-				$birth = substr((string) $app->birthdate, 0, 10);
-			}
-			if ($birth === '' && !empty($app->training_only)) {
-				return array('ok' => false, 'error' => 'birthdate', 'http' => 400);
-			}
-			if ($birth !== '') {
-				$bd = DateTime::createFromFormat('!Y-m-d', $birth);
-				if (!$bd || $bd->format('Y-m-d') !== $birth || $bd->getTimestamp() > $now) {
-					return array('ok' => false, 'error' => 'birthdate', 'http' => 400);
-				}
-				$age = (int) $bd->diff(new DateTime('@'.$now))->y;
-				if ($age < (int) getDolGlobalString('ONBOARDING_TRAINING_MIN_AGE', '12')) {
-					return array('ok' => false, 'error' => 'too_young', 'http' => 400);
-				}
-				$fields['birthdate'] = $birth;
-				if ($age < 18) {
-					$gname = trim(dol_string_nohtmltag(isset($extra['guardian_name']) ? (string) $extra['guardian_name'] : ''));
-					$grel = trim(dol_string_nohtmltag(isset($extra['guardian_relation']) ? (string) $extra['guardian_relation'] : ''));
-					$gmail = self::cleanEmail(isset($extra['guardian_email']) ? $extra['guardian_email'] : '');
-					if (strlen($gname) < 3 || $grel === '' || ($gmail !== '' && !isValidEmail($gmail))) {
-						return array('ok' => false, 'error' => 'guardian', 'http' => 400);
-					}
-					$name = $gname;
-					$fields['guardian_name'] = dol_trunc($gname, 200, 'right', 'UTF-8', 1);
-					$fields['guardian_relation'] = dol_trunc($grel, 50, 'right', 'UTF-8', 1);
-					$fields['guardian_email'] = $gmail;
-					$guardian = "Signed by: ".$gname." (".$grel.") as parent or guardian of ".$app->firstname.' '.$app->lastname.", born ".$birth.($gmail !== '' ? ", guardian email ".$gmail : '')."\n";
-				}
-			}
-		}
-		// The words signed are kept in Dolibarr whatever happens to the source later.
-		if (!$this->docAt($doc, $version)) {
-			$this->addDocVersion($doc, $docs[$doc]['title'], $docs[$doc]['text'], $docs[$doc]['source']);
-		}
-		$this->save($app->rowid, $fields + array(
-			$doc.'_signed_at' => $this->db->idate($now),
-			$doc.'_name' => substr($name, 0, 200),
-			$doc.'_version' => $version,
-			$doc.'_ip' => substr((string) $ip, 0, 64),
-		));
-
-		$record = $docs[$doc]['title']."\n".str_repeat('=', 60)."\n\n".$docs[$doc]['text']."\n\n".str_repeat('-', 60)."\n";
-		$record .= "Signed electronically by: ".$name."\n";
-		$record .= $guardian;
-		$record .= "Account: ".$app->firstname.' '.$app->lastname.' <'.$app->email.">\n";
-		if (!empty($fields['birthdate']) && $guardian === '') {
-			$record .= "Date of birth: ".$fields['birthdate']."\n";
-		}
-		$record .= "Date: ".dol_print_date($now, '%Y-%m-%d %H:%M:%S', 'gmt')." UTC\n";
-		$record .= "IP address: ".$ip."\n";
-		$record .= "Document version: ".$version.($docs[$doc]['source'] !== '' ? ' ('.$docs[$doc]['source'].')' : '')."\n";
-		$dir = $this->dir($app);
-		file_put_contents($dir.'/'.$doc.'.txt', $record);
-		file_put_contents($dir.'/'.$doc.'-signature.png', $signature);
-		$this->writePdf($dir.'/'.$doc.'.pdf', $docs[$doc]['title'], $record, $dir.'/'.$doc.'-signature.png');
-
-		$app = $this->refreshStage($app->rowid);
-		return array('ok' => true) + $this->status($app);
-	}
-
-	/**
-	 * Best effort PDF of a signed document. The .txt beside it is the fallback.
-	 *
-	 * @param string $path Target file
-	 * @param string $title Title
-	 * @param string $text Text
-	 * @param string $image Drawn signature to place under the text
-	 * @return void
-	 */
-	private function writePdf($path, $title, $text, $image = '')
-	{
-		global $langs;
-		try {
-			require_once DOL_DOCUMENT_ROOT.'/core/lib/pdf.lib.php';
-			$pdf = pdf_getInstance();
-			if (method_exists($pdf, 'setPrintHeader')) {
-				$pdf->setPrintHeader(false);
-				$pdf->setPrintFooter(false);
-			}
-			$pdf->SetTitle($title);
-			$pdf->SetMargins(15, 15, 15);
-			$pdf->SetAutoPageBreak(true, 15);
-			$pdf->AddPage();
-			$pdf->SetFont(pdf_getPDFFont($langs), '', 10);
-			$pdf->MultiCell(0, 5, $text, 0, 'L');
-			if ($image && is_readable($image)) {
-				if ($pdf->GetY() > 240) {
-					$pdf->AddPage();
-				}
-				$pdf->Image($image, 15, $pdf->GetY() + 3, 80);
-			}
-			$pdf->Output($path, 'F');
-		} catch (Throwable $e) {
-			dol_syslog('Onboarding: PDF failed: '.$e->getMessage(), LOG_WARNING);
-		}
-	}
-
-	/**
-	 * Step 2c. Store the ID photo.
-	 *
-	 * @param object $app Applicant row
-	 * @param string $bytes Raw image bytes
-	 * @return array<string,mixed>
-	 */
-	public function uploadId($app, $bytes)
-	{
-		if (strlen($bytes) < 100 || strlen($bytes) > 8 * 1024 * 1024) {
-			return array('ok' => false, 'error' => 'size', 'http' => 400);
-		}
-		$info = @getimagesizefromstring($bytes);
-		$ext = array(IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp');
-		if (!$info || !isset($ext[$info[2]])) {
-			return array('ok' => false, 'error' => 'type', 'http' => 400);
-		}
-		$dir = $this->dir($app);
-		foreach (glob($dir.'/id.*') as $old) {
-			@unlink($old);
-		}
-		$file = 'id.'.$ext[$info[2]];
-		if (file_put_contents($dir.'/'.$file, $bytes) === false) {
-			return array('ok' => false, 'error' => 'server', 'http' => 500);
-		}
-		$this->save($app->rowid, array('id_uploaded_at' => $this->db->idate(self::now()), 'id_file' => $file));
-		$app = $this->refreshStage($app->rowid);
-		return array('ok' => true) + $this->status($app);
-	}
-
-	// ---------------------------------------------------------------- Givebutter
-
-	/**
-	 * GET from the Givebutter API.
-	 *
-	 * @param string $url Full URL, or a path under the API base
-	 * @return array|null Decoded JSON, null on failure
-	 */
-	public function gbGet($url)
-	{
-		$key = getDolGlobalString('ONBOARDING_GB_API_KEY');
-		if (!$key) {
-			return null;
-		}
-		if (strpos($url, 'http') !== 0) {
-			$url = rtrim(getDolGlobalString('ONBOARDING_GB_API_BASE', 'https://api.givebutter.com/v1'), '/').$url;
-		}
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
-		$r = getURLContent($url, 'GET', '', 1, array('Authorization: Bearer '.$key, 'Accept: application/json'), array('http', 'https'), 2);
-		if (empty($r['http_code']) || $r['http_code'] != 200) {
-			dol_syslog('Onboarding: Givebutter GET '.$url.' returned '.(isset($r['http_code']) ? $r['http_code'] : '?').' '.(isset($r['curl_error_msg']) ? $r['curl_error_msg'] : ''), LOG_WARNING);
-			return null;
-		}
-		$json = json_decode($r['content'], true);
-		return is_array($json) ? $json : null;
-	}
-
-	/**
-	 * Entry point for a Givebutter webhook.
-	 *
-	 * @param string $event Event name, e.g. transaction.succeeded
-	 * @param array $data Event data
-	 * @return string What was done, for the log
-	 */
-	public function handleEvent($event, $data)
-	{
-		if (!is_array($data)) {
-			return 'ignored: no data';
-		}
-		if ($event == 'transaction.succeeded') {
-			return $this->processTransaction($data);
-		}
-		if (strpos($event, 'plan.') === 0) {
-			return $this->processPlan($data, $event);
-		}
-		return 'ignored: '.$event;
-	}
-
-	/**
-	 * Find who a Givebutter record belongs to.
-	 *
-	 * @param string $contactId Givebutter contact id
-	 * @param string $planId Givebutter plan id
-	 * @param string $email Email typed at checkout
-	 * @return object|null Applicant row
-	 */
-	public function match($contactId, $planId, $email)
-	{
-		$app = null;
-		if ($planId !== '') {
-			$app = $this->one("gb_plan_id = '".$this->db->escape($planId)."'");
-		}
-		if (!$app && $contactId !== '') {
-			$app = $this->one("gb_contact_id = '".$this->db->escape($contactId)."'");
-		}
-		if (!$app) {
-			$app = $this->findByEmail($email);
-		}
-		return $app;
-	}
-
-	/**
-	 * Who a payment belongs to: a signup (by plan, contact or email), else a
-	 * member who was here before the signup form, by email or by a name only
-	 * one member has. A member found that way gets an applicant row, so the
-	 * next payment matches by its Givebutter contact.
-	 *
-	 * @param string $contactId Givebutter contact id
-	 * @param string $planId Givebutter plan id
-	 * @param string $email Email typed at checkout
-	 * @param string $first First name at Givebutter
-	 * @param string $last Last name at Givebutter
-	 * @return object|null Applicant row
-	 */
-	public function payer($contactId, $planId, $email, $first = '', $last = '')
-	{
-		$app = $this->match($contactId, $planId, $email);
-		if (!$app) {
-			$mid = $this->memberFor($email, $first, $last);
-			if ($mid > 0) {
-				$app = $this->applicantForMember($mid, $email);
-			}
-		}
-		return $app;
-	}
-
-	/**
-	 * A Dolibarr member, by email, else by a first and last name that exactly
-	 * one member has. Excluded members are never matched.
-	 *
-	 * @param string $email Email
-	 * @param string $first First name
-	 * @param string $last Last name
-	 * @return int Member id, 0 when none or not sure
-	 */
-	public function memberFor($email, $first = '', $last = '')
-	{
-		$where = "entity IN (".getEntity('adherent').") AND statut <> ".((int) Adherent::STATUS_EXCLUDED);
-		$email = self::cleanEmail($email);
-		if ($email !== '') {
-			$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE ".$where." AND LOWER(TRIM(email)) = '".$this->db->escape($email)."' ORDER BY (statut = 1) DESC, rowid LIMIT 1");
-			if ($res && ($obj = $this->db->fetch_object($res))) {
-				return (int) $obj->rowid;
-			}
-		}
-		$first = strtolower(trim((string) $first));
-		$last = strtolower(trim((string) $last));
-		if ($first === '' || $last === '') {
-			return 0;
-		}
-		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE ".$where." AND LOWER(TRIM(firstname)) = '".$this->db->escape($first)."' AND LOWER(TRIM(lastname)) = '".$this->db->escape($last)."' LIMIT 2");
-		if ($res && $this->db->num_rows($res) == 1 && ($obj = $this->db->fetch_object($res))) {
-			return (int) $obj->rowid;
-		}
-		return 0;
-	}
-
-	/**
-	 * The applicant row for a member, made when the member was added before the
-	 * signup form existed (by the import scripts or by hand) and has none.
-	 *
-	 * @param int $adhId Member id
-	 * @param string $email Fallback email when the member card has none
-	 * @return object|null Applicant row
-	 */
-	public function applicantForMember($adhId, $email = '')
-	{
-		global $conf;
-		$app = $this->one("fk_adherent = ".((int) $adhId));
-		if ($app) {
-			return $app;
-		}
-		$adh = new Adherent($this->db);
-		if ($adh->fetch((int) $adhId) <= 0) {
-			return null;
-		}
-		$addr = self::cleanEmail($adh->email);
-		if (!isValidEmail($addr)) {
-			$addr = self::cleanEmail($email);
-		}
-		if (!isValidEmail($addr)) {
-			return null;
-		}
-		$app = $this->findByEmail($addr);
-		if ($app) {
-			if ($app->fk_adherent > 0) {
-				return null; // That address belongs to another member's record.
-			}
-			$this->save($app->rowid, array('fk_adherent' => (int) $adhId));
-			return $this->fetch($app->rowid);
-		}
-		$cid = $this->contactByEmail($addr);
-		// Like the rows the booking page makes: it holds a member's Givebutter link
-		// and signatures, with no signup stages to walk through.
-		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_applicant (entity, email, firstname, lastname, fk_socpeople, fk_adherent, training_only, stage, payment_state, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$this->db->escape($addr)."', '".$this->db->escape(dol_trunc((string) $adh->firstname, 100, 'right', 'UTF-8', 1))."', '".$this->db->escape(dol_trunc((string) $adh->lastname, 100, 'right', 'UTF-8', 1))."', ";
-		$sql .= ($cid > 0 ? (int) $cid : 'NULL').", ".((int) $adhId).", 1, 'complete', 'active', '".$this->db->idate(self::now())."')";
-		if (!$this->db->query($sql)) {
-			dol_syslog('Onboarding: applicant for member '.$adhId.' failed: '.$this->db->lasterror(), LOG_ERR);
-			return null;
-		}
-		return $this->fetch((int) $this->db->last_insert_id($this->db->prefix()."onboarding_applicant"));
-	}
-
-	/**
-	 * Try again to match the payments nobody claimed, oldest first: a member
-	 * may have been added, or a payment assigned by hand, since they came in.
-	 *
-	 * @return int Payments applied
-	 */
-	public function retryUnmatched()
-	{
-		global $conf;
-		$res = $this->db->query("SELECT rowid, gb_contact_id, gb_plan_id, email, firstname, lastname FROM ".$this->db->prefix()."onboarding_payment WHERE entity = ".((int) $conf->entity)." AND status = 'unmatched' ORDER BY transacted_at, rowid");
-		$rows = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$rows[] = $obj;
-		}
-		$applied = 0;
-		foreach ($rows as $obj) {
-			$app = $this->payer((string) $obj->gb_contact_id, (string) $obj->gb_plan_id, (string) $obj->email, (string) $obj->firstname, (string) $obj->lastname);
-			if ($app && strpos($this->applyPayment($app, $obj->rowid), 'applied') === 0) {
-				$applied++;
-			}
-		}
-		return $applied;
-	}
-
-	/**
-	 * Record a Givebutter transaction and, when it belongs to someone, apply it.
-	 *
-	 * @param array $t TransactionResource
-	 * @return string
-	 */
-	public function processTransaction($t)
-	{
-		global $conf;
-
-		$txid = isset($t['id']) ? (string) $t['id'] : '';
-		if ($txid === '') {
-			return 'ignored: no id';
-		}
-		if (isset($t['status']) && $t['status'] !== 'succeeded') {
-			return 'ignored: status '.$t['status'];
-		}
-		$campaign = isset($t['campaign_code']) ? (string) $t['campaign_code'] : '';
-		// Training fees have their own campaign and their own bookkeeping.
-		dol_include_once('/onboarding/class/training.class.php');
-		if (OnboardingTraining::isTrainingCampaign($campaign)) {
-			$training = new OnboardingTraining($this->db, $this);
-			return $training->process($t);
-		}
-		$want = getDolGlobalString('ONBOARDING_GB_CAMPAIGN_CODE');
-		if ($want !== '' && strcasecmp($campaign, $want) != 0) {
-			return 'ignored: campaign '.$campaign;
-		}
-
-		$planId = isset($t['plan_id']) ? (string) $t['plan_id'] : '';
-		$contactId = isset($t['contact_id']) ? (string) $t['contact_id'] : '';
-		$email = self::cleanEmail(isset($t['email']) ? $t['email'] : '');
-		$amount = isset($t['amount']) ? (float) $t['amount'] : 0;
-		$when = !empty($t['transacted_at']) ? strtotime((string) $t['transacted_at']) : 0;
-		if (!$when) {
-			$when = self::now();
-		}
-
-		$table = $this->db->prefix()."onboarding_payment";
-		$res = $this->db->query("SELECT rowid, status FROM ".$table." WHERE gb_transaction_id = '".$this->db->escape($txid)."' AND entity = ".((int) $conf->entity));
-		$row = $res ? $this->db->fetch_object($res) : null;
-		if ($row && $row->status != 'unmatched') {
-			return 'duplicate';
-		}
-
-		$first = substr((string) (isset($t['first_name']) ? $t['first_name'] : ''), 0, 100);
-		$last = substr((string) (isset($t['last_name']) ? $t['last_name'] : ''), 0, 100);
-		$app = $this->payer($contactId, $planId, $email, $first, $last);
-		if (!$row) {
-			$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, gb_plan_id, gb_contact_id, email, firstname, lastname, amount, campaign_code, transacted_at, status, datec) VALUES (";
-			$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($planId)."', '".$this->db->escape($contactId)."', '".$this->db->escape($email)."', ";
-			$sql .= "'".$this->db->escape($first)."', '".$this->db->escape($last)."', ";
-			$sql .= price2num($amount).", '".$this->db->escape($campaign)."', '".$this->db->idate($when)."', 'unmatched', '".$this->db->idate(self::now())."')";
-			if (!$this->db->query($sql)) {
-				// Lost a race with another delivery of the same event.
-				return 'duplicate';
-			}
-			$rowid = $this->db->last_insert_id($table);
-		} else {
-			$rowid = $row->rowid;
-		}
-		if (!$app) {
-			return 'unmatched';
-		}
-		return $this->applyPayment($app, $rowid);
-	}
-
-	/**
-	 * Apply a recorded payment to an applicant: make them a member if they are
-	 * not one yet, and record the dues period.
-	 *
-	 * @param object $app Applicant row
-	 * @param int $paymentId Row in onboarding_payment
-	 * @return string
-	 */
-	public function applyPayment($app, $paymentId)
-	{
-		global $user;
-
-		$table = $this->db->prefix()."onboarding_payment";
-		$res = $this->db->query("SELECT * FROM ".$table." WHERE rowid = ".((int) $paymentId));
-		$pay = $res ? $this->db->fetch_object($res) : null;
-		if (!$pay || $pay->status == 'matched') {
-			return 'duplicate';
-		}
-		// Claim the row first so a second delivery cannot record the dues twice.
-		$claim = $this->db->query("UPDATE ".$table." SET status = 'matched', fk_applicant = ".((int) $app->rowid)." WHERE rowid = ".((int) $paymentId)." AND status <> 'matched'");
-		if (!$claim || $this->db->affected_rows($claim) < 1) {
-			return 'duplicate';
-		}
-
-		$actor = $this->actor();
-		$saved = $user;
-		$user = $actor; // Adherent::subscription() reads the global.
-
-		$amount = (float) $pay->amount;
-		$when = $this->db->jdate($pay->transacted_at);
-		$supporter = $amount >= (float) getDolGlobalString('ONBOARDING_DUES_SUPPORTER', '100');
-		$typeid = getDolGlobalInt($supporter ? 'ONBOARDING_TYPE_SUPPORTER' : 'ONBOARDING_TYPE_STANDARD');
-
-		$adh = $this->ensureMember($app, $typeid);
-		if (!$adh) {
-			$this->db->query("UPDATE ".$table." SET status = 'unmatched' WHERE rowid = ".((int) $paymentId));
-			$user = $saved;
-			return 'error: member create failed';
-		}
-		// A Standard member who starts paying the Supporter rate, or the reverse.
-		$managed = array(getDolGlobalInt('ONBOARDING_TYPE_STANDARD'), getDolGlobalInt('ONBOARDING_TYPE_SUPPORTER'));
-		if ($typeid > 0 && $adh->typeid != $typeid && in_array((int) $adh->typeid, $managed)) {
-			$this->db->query("UPDATE ".$this->db->prefix()."adherent SET fk_adherent_type = ".((int) $typeid)." WHERE rowid = ".((int) $adh->id));
-		}
-		// Dues already on the card for this payment: recorded by import_dues.py
-		// from an export ("Givebutter 2026-09-18 Name"), or by an earlier run.
-		$subs = 0;
-		$recorded = false;
-		$dates = array();
-		foreach (array(-1, 0, 1) as $d) {
-			$dates[] = 'Givebutter '.date('Y-m-d', $when + $d * 86400);
-		}
-		$res = $this->db->query("SELECT dateadh, subscription, note FROM ".$this->db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
-		while ($res && ($o = $this->db->fetch_object($res))) {
-			$subs++;
-			$note = (string) $o->note;
-			$start = $this->db->jdate($o->dateadh);
-			if (($pay->gb_transaction_id !== '' && strpos($note, $pay->gb_transaction_id) !== false)
-				|| (abs($start - $when) <= 3 * 86400 && abs((float) $o->subscription - $amount) < 0.01)) {
-				$recorded = true;
-			}
-			foreach ($dates as $label) {
-				if (strpos($note, $label) !== false) {
-					$recorded = true;
-				}
-			}
-		}
-		// Welcome emails only for someone whose first dues these are.
-		$first = $app->payment_state == 'none' && $subs == 0;
-
-		$adh->array_options['options_payment_channel'] = 'Givebutter';
-		$adh->insertExtraFields();
-		if ($adh->statut != Adherent::STATUS_VALIDATED && $adh->statut != Adherent::STATUS_EXCLUDED) {
-			$adh->validate($actor);
-		}
-
-		// Period paid for: one month unless the plan says otherwise.
-		$months = 1;
-		if ($pay->gb_plan_id) {
-			$plan = $this->gbGet('/plans/'.rawurlencode($pay->gb_plan_id));
-			if (isset($plan['data'])) {
-				$plan = $plan['data'];
-			}
-			$freq = is_array($plan) && isset($plan['frequency']) ? strtolower((string) $plan['frequency']) : '';
-			if (strpos($freq, 'year') !== false || $freq == 'annually') {
-				$months = 12;
-			} elseif (strpos($freq, 'quarter') !== false) {
-				$months = 3;
-			}
-		}
-		if (!$recorded) {
-			$end = dol_time_plus_duree(dol_time_plus_duree($when, $months, 'm'), -1, 'd');
-			$subid = $adh->subscription($when, $amount, 0, '', 'Givebutter '.$pay->gb_transaction_id, '', '', '', $end);
-			if ($subid <= 0) {
-				dol_syslog('Onboarding: subscription failed: '.$adh->error, LOG_ERR);
-			}
-		} else {
-			$this->extendToAnniversary((int) $adh->id, $when, $months);
-		}
-		$user = $saved;
-
-		$fields = array(
-			'fk_adherent' => $adh->id,
-			'payment_state' => 'active',
-			'problem_since' => null,
-			'reminders_sent' => null,
-		);
-		if ($pay->gb_contact_id) {
-			$fields['gb_contact_id'] = $pay->gb_contact_id;
-		}
-		if ($pay->gb_plan_id) {
-			$fields['gb_plan_id'] = $pay->gb_plan_id;
-		}
-		$this->save($app->rowid, $fields);
-		$app = $this->refreshStage($app->rowid);
-
-		if ($first) {
-			$missing = self::paperworkDone($app) ? '' : "\n\nNote: their waiver, agreement or ID photo is still missing.";
-			$this->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), 'New paying member: '.$app->firstname.' '.$app->lastname, $app->firstname.' '.$app->lastname.' <'.$app->email.'> has set up dues ('.price($amount).') and needs a badge.'.$missing);
-			$this->mail($app->email, $this->template('ONBOARDING_MAIL_WELCOME_SUBJECT', 'Welcome to {org}', $app), $this->template('ONBOARDING_MAIL_WELCOME_BODY', "Hi {firstname},\n\nYour dues payment came through and your membership is active. Someone from the membership team will be in touch about your badge.", $app));
-		}
-		return 'applied to applicant '.$app->rowid.($recorded ? ' (dues were already recorded)' : '');
-	}
-
-	/**
-	 * The dues import records a payment as the calendar month it falls in
-	 * (paid 28 September: 1 to 30 September), but Givebutter charges again on
-	 * the same day next month, so the member looked expired for four weeks.
-	 * Make the subscription that holds a payment run until the day before the
-	 * next charge, and the member's end date with it. Only ever lengthens.
-	 *
-	 * @param int $adhId Member
-	 * @param int $when When the payment was made
-	 * @param int $months Period it pays for
-	 * @return bool Something was changed
-	 */
-	public function extendToAnniversary($adhId, $when, $months = 1)
-	{
-		$p = $this->db->prefix();
-		$target = dol_time_plus_duree(dol_time_plus_duree($when, max(1, (int) $months), 'm'), -1, 'd');
-		$res = $this->db->query("SELECT rowid, datef FROM ".$p."subscription WHERE fk_adherent = ".((int) $adhId)." AND dateadh <= '".$this->db->idate($when + 86400)."' AND datef >= '".$this->db->idate($when - 86400)."' ORDER BY datef DESC LIMIT 1");
-		$sub = $res ? $this->db->fetch_object($res) : null;
-		if (!$sub || $this->db->jdate($sub->datef) >= $target - 3600) {
-			return false;
-		}
-		$this->db->query("UPDATE ".$p."subscription SET datef = '".$this->db->idate($target)."' WHERE rowid = ".((int) $sub->rowid));
-		$this->db->query("UPDATE ".$p."adherent SET datefin = '".$this->db->idate($target)."' WHERE rowid = ".((int) $adhId)." AND (datefin IS NULL OR datefin < '".$this->db->idate($target)."')");
-		return true;
-	}
-
-	/**
-	 * How long a member's Givebutter dues really cover: their end date, or a
-	 * month after the newest Givebutter payment matched to them, whichever is
-	 * later.
-	 *
-	 * @param object $app Applicant row
-	 * @param int $datefin Member end date
-	 * @return int
-	 */
-	public function paidThrough($app, $datefin)
-	{
-		$p = $this->db->prefix();
-		$ends = array((int) $datefin);
-		$res = $this->db->query("SELECT MAX(transacted_at) AS t FROM ".$p."onboarding_payment WHERE fk_applicant = ".((int) $app->rowid)." AND status = 'matched'");
-		$obj = $res ? $this->db->fetch_object($res) : null;
-		if ($obj && $obj->t) {
-			$ends[] = dol_time_plus_duree(dol_time_plus_duree((int) $this->db->jdate($obj->t), 1, 'm'), -1, 'd');
-		}
-		if ($app->fk_adherent > 0) {
-			// PayPal: the newest payment the PayPal sync matched to them.
-			$res = @$this->db->query("SELECT MAX(transacted_at) AS t, MAX(amount) AS a FROM ".$p."onboarding_paypal WHERE fk_adherent = ".((int) $app->fk_adherent)." AND status = 'matched'");
-			$obj = $res ? $this->db->fetch_object($res) : null;
-			if ($obj && $obj->t) {
-				dol_include_once('/onboarding/class/paypal.class.php');
-				$ends[] = dol_time_plus_duree(dol_time_plus_duree((int) $this->db->jdate($obj->t), OnboardingPaypal::months((float) $obj->a), 'm'), -1, 'd');
-			}
-			// A period the dues import recorded as a calendar month: it really runs
-			// from the day it was paid (its bank line) for as many months.
-			$res = @$this->db->query("SELECT s.dateadh, s.datef, b.dateo FROM ".$p."subscription AS s INNER JOIN ".$p."bank AS b ON b.rowid = s.fk_bank WHERE s.fk_adherent = ".((int) $app->fk_adherent)." ORDER BY s.datef DESC LIMIT 1");
-			$obj = $res ? $this->db->fetch_object($res) : null;
-			if ($obj && $obj->dateo && $obj->datef) {
-				$months = max(1, (int) round(((int) $this->db->jdate($obj->datef) - (int) $this->db->jdate($obj->dateadh)) / (30.44 * 86400)));
-				$ends[] = dol_time_plus_duree(dol_time_plus_duree((int) $this->db->jdate($obj->dateo), $months, 'm'), -1, 'd');
-			}
-		}
-		return max($ends);
-	}
-
-	/**
-	 * Undo the old "held as paid" end dates (0.8.2 to 0.10.x held PayPal and
-	 * Legacy members' end date at tomorrow while PayPal data was missing): a
-	 * member whose end date is later than their newest subscription gets the
-	 * subscription's end back. Now that PayPal payments come in by themselves,
-	 * the end date is simply what was paid.
-	 *
-	 * @return int Members changed
-	 */
-	public function restoreEndDates()
-	{
-		$p = $this->db->prefix();
-		$sql = "SELECT a.rowid, MAX(s.datef) AS paidto FROM ".$p."adherent AS a INNER JOIN ".$p."subscription AS s ON s.fk_adherent = a.rowid";
-		$sql .= " LEFT JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid LEFT JOIN ".$p."adherent_type AS t ON t.rowid = a.fk_adherent_type";
-		$sql .= " WHERE a.entity IN (".getEntity('adherent').") AND (e.payment_channel = 'PayPal' OR LOWER(t.libelle) = 'legacy' OR COALESCE(e.payment_channel, '') = '')";
-		$sql .= " GROUP BY a.rowid, a.datefin HAVING a.datefin > MAX(s.datef)";
-		$res = $this->db->query($sql);
-		$rows = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$rows[] = $obj;
-		}
-		foreach ($rows as $obj) {
-			$this->db->query("UPDATE ".$p."adherent SET datefin = '".$this->db->escape($obj->paidto)."' WHERE rowid = ".((int) $obj->rowid));
-		}
-		return count($rows);
-	}
-
-	/**
-	 * PayPal members added before the signup form have no applicant row, which
-	 * is what reminders and lapses work from. Make one for each.
-	 *
-	 * @return void
-	 */
-	public function ensurePaypalApplicants()
-	{
-		$p = $this->db->prefix();
-		$res = $this->db->query("SELECT a.rowid FROM ".$p."adherent AS a INNER JOIN ".$p."adherent_extrafields AS e ON e.fk_object = a.rowid LEFT JOIN ".$p."onboarding_applicant AS o ON o.fk_adherent = a.rowid WHERE a.entity IN (".getEntity('adherent').") AND a.statut = ".((int) Adherent::STATUS_VALIDATED)." AND e.payment_channel = 'PayPal' AND o.rowid IS NULL");
-		$ids = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$ids[] = (int) $obj->rowid;
-		}
-		foreach ($ids as $id) {
-			$this->applicantForMember($id);
-		}
-	}
-
-	/**
-	 * Fix periods recorded as calendar months for Givebutter payments already
-	 * matched (see extendToAnniversary). Run daily; does nothing once fixed.
-	 *
-	 * @return int Members changed
-	 */
-	public function repairPeriods()
-	{
-		global $conf;
-		$res = $this->db->query("SELECT a.fk_adherent, p.transacted_at FROM ".$this->db->prefix()."onboarding_payment AS p INNER JOIN ".$this->db->prefix()."onboarding_applicant AS a ON a.rowid = p.fk_applicant WHERE p.entity = ".((int) $conf->entity)." AND p.status = 'matched' AND a.fk_adherent > 0 AND p.transacted_at > '".$this->db->idate(self::now() - 400 * 86400)."' ORDER BY p.transacted_at");
-		$rows = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$rows[] = $obj;
-		}
-		$changed = array();
-		foreach ($rows as $obj) {
-			if ($this->extendToAnniversary((int) $obj->fk_adherent, (int) $this->db->jdate($obj->transacted_at))) {
-				$changed[(int) $obj->fk_adherent] = true;
-			}
-		}
-		return count($changed);
-	}
-
-	/**
-	 * A recurring plan changed.
-	 *
-	 * @param array $p RecurringPlanResource
-	 * @param string $event Webhook event name, or '' when called from the sync
-	 * @return string
-	 */
-	public function processPlan($p, $event = '')
-	{
-		$planId = isset($p['id']) ? (string) $p['id'] : '';
-		if ($planId === '') {
-			return 'ignored: no id';
-		}
-		// Only plans that have already paid dues are tracked. A plan we have never
-		// seen pay may be a recurring donation, which must not affect membership.
-		$app = $this->one("gb_plan_id = '".$this->db->escape($planId)."'");
-		if (!$app) {
-			return 'ignored: unknown plan';
-		}
-		$status = strtolower(isset($p['status']) ? (string) $p['status'] : '');
-		$state = '';
-		if ($event == 'plan.canceled' || !empty($p['canceled_at']) || strpos($status, 'cancel') === 0) {
-			$state = 'cancelled';
-		} elseif ($event == 'plan.failed' || $event == 'plan.paused' || in_array($status, array('failed', 'paused', 'past_due', 'ended'))) {
-			$state = 'past_due';
-		} elseif ($event == 'plan.resumed' || $status == 'active') {
-			$state = 'active';
-		}
-		if ($state == '' || $app->payment_state == 'lapsed') {
-			return 'ignored: '.$status;
-		}
-		if ($state == 'active') {
-			if ($app->payment_state != 'active') {
-				$this->save($app->rowid, array('payment_state' => 'active', 'problem_since' => null, 'reminders_sent' => null));
-				$this->refreshStage($app->rowid);
-			}
-			return 'plan active';
-		}
-		$this->setProblem($app, $state);
-		return 'plan '.$state;
-	}
-
-	/**
-	 * Start (or keep) the reminder clock for a member.
-	 *
-	 * @param object $app Applicant row
-	 * @param string $state 'cancelled' or 'past_due'
-	 * @param int $since When the problem began, default now
-	 * @return void
-	 */
-	public function setProblem($app, $state, $since = 0)
-	{
-		$fields = array('payment_state' => $state);
-		if (empty($app->problem_since)) {
-			$fields['problem_since'] = $this->db->idate($since ? $since : self::now());
-			$fields['reminders_sent'] = null;
-		}
-		$this->save($app->rowid, $fields);
-		$this->refreshStage($app->rowid);
-	}
-
-	/**
-	 * Pull recent transactions and plan statuses from Givebutter.
-	 *
-	 * @return string Summary
-	 */
-	public function reconcile()
-	{
-		global $conf;
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-
-		if (!getDolGlobalString('ONBOARDING_GB_API_KEY')) {
-			return 'no Givebutter API key set';
-		}
-		$started = self::now();
-		$last = getDolGlobalInt('ONBOARDING_GB_LAST_SYNC');
-		// Overlap a day; transactions are applied once however often they are seen.
-		$after = $last > 0 ? $last - 86400 : $started - 35 * 86400;
-		$url = '/transactions?updatedAfter='.rawurlencode(gmdate('Y-m-d\TH:i:s\Z', $after));
-		$seen = 0;
-		$applied = 0;
-		for ($page = 0; $page < 25 && $url; $page++) {
-			$json = $this->gbGet($url);
-			if ($json === null) {
-				return 'Givebutter transactions request failed';
-			}
-			foreach ((isset($json['data']) && is_array($json['data']) ? $json['data'] : array()) as $t) {
-				$seen++;
-				if (strpos($this->processTransaction($t), 'applied') === 0) {
-					$applied++;
-				}
-			}
-			$url = !empty($json['links']['next']) ? $json['links']['next'] : '';
-		}
-
-		$applied += $this->retryUnmatched();
-
-		$plans = 0;
-		$res = $this->db->query("SELECT rowid, gb_plan_id FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND gb_plan_id IS NOT NULL AND gb_plan_id <> '' AND payment_state IN ('active', 'past_due', 'cancelled')");
-		$rows = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$rows[] = $obj;
-		}
-		foreach ($rows as $obj) {
-			$json = $this->gbGet('/plans/'.rawurlencode($obj->gb_plan_id));
-			if ($json === null) {
-				continue;
-			}
-			$this->processPlan(isset($json['data']) ? $json['data'] : $json);
-			$plans++;
-		}
-
-		dolibarr_set_const($this->db, 'ONBOARDING_GB_LAST_SYNC', $started, 'chaine', 0, '', $conf->entity);
-		return $seen.' transactions seen, '.$applied.' applied, '.$plans.' plans checked';
-	}
-
-	/**
-	 * Ask Givebutter for the payments of the last hour and apply any not seen
-	 * yet. Called while someone waits on the booking page and by the 15-minute
-	 * job when a booking is waiting for payment, so a lost webhook delays a
-	 * confirmation by seconds, not an hour. At most once every 20 seconds.
-	 *
-	 * @return int Payments applied by this call
-	 */
-	public function quickSync()
-	{
-		global $conf;
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-		if (!getDolGlobalString('ONBOARDING_GB_API_KEY')) {
-			return 0;
-		}
-		$now = self::now();
-		$last = getDolGlobalInt('ONBOARDING_GB_QUICK_SYNC');
-		if ($last > 0 && $last <= $now && $now - $last < 20) {
-			return 0;
-		}
-		dolibarr_set_const($this->db, 'ONBOARDING_GB_QUICK_SYNC', $now, 'chaine', 0, '', $conf->entity);
-		$json = $this->gbGet('/transactions?updatedAfter='.rawurlencode(gmdate('Y-m-d\TH:i:s\Z', $now - 3600)));
-		$applied = 0;
-		foreach ((isset($json['data']) && is_array($json['data']) ? $json['data'] : array()) as $t) {
-			$r = $this->processTransaction($t);
-			if (strpos($r, 'applied') === 0 || preg_match('/^booking .* paid/', $r) || preg_match('/recorded/', $r)) {
-				$applied++;
-				$this->noteMissedWebhook();
-			}
-		}
-		return $applied;
-	}
-
-	/**
-	 * Remember a Givebutter call, for the setup page and the missed-webhook alert.
-	 *
-	 * @param string $result What was done, or why it was refused
-	 * @param bool $refused The call was refused (bad signature, not connected)
-	 * @return void
-	 */
-	public function noteWebhook($result, $refused = false)
-	{
-		global $conf;
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-		$name = $refused ? 'ONBOARDING_GB_WEBHOOK_REFUSED' : 'ONBOARDING_GB_WEBHOOK_LAST';
-		dolibarr_set_const($this->db, $name, self::now().' '.dol_trunc((string) $result, 200, 'right', 'UTF-8', 1), 'chaine', 0, '', $conf->entity);
-		if (!$refused) {
-			dolibarr_del_const($this->db, 'ONBOARDING_GB_MISSED', $conf->entity);
-			$this->alertClear('givebutter-webhook', 'Givebutter webhooks reach Dolibarr again.');
-		}
-	}
-
-	/**
-	 * @param string $name ONBOARDING_GB_WEBHOOK_LAST or ONBOARDING_GB_WEBHOOK_REFUSED
-	 * @return array{0:int,1:string} When, and what happened
-	 */
-	public static function webhookNote($name)
-	{
-		$v = getDolGlobalString($name);
-		$sp = strpos($v, ' ');
-		return $v === '' ? array(0, '') : array((int) ($sp === false ? $v : substr($v, 0, $sp)), $sp === false ? '' : substr($v, $sp + 1));
-	}
-
-	/**
-	 * A payment was picked up by asking Givebutter: its webhook did not arrive.
-	 * Three in a row with no webhook in between emails the alerts address.
-	 *
-	 * @return void
-	 */
-	public function noteMissedWebhook()
-	{
-		global $conf;
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-		$n = getDolGlobalInt('ONBOARDING_GB_MISSED') + 1;
-		dolibarr_set_const($this->db, 'ONBOARDING_GB_MISSED', $n, 'chaine', 0, '', $conf->entity);
-		if ($n >= 3 && getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID') !== '') {
-			list($when, $what) = self::webhookNote('ONBOARDING_GB_WEBHOOK_LAST');
-			list($rwhen, $rwhat) = self::webhookNote('ONBOARDING_GB_WEBHOOK_REFUSED');
-			$this->alert('givebutter-webhook', 'Givebutter webhooks are not reaching Dolibarr', 'The last '.$n.' Givebutter payments were found by asking Givebutter, not reported by its webhook. Confirmations still go out, but later than they should.'
-				."\n\nThe webhook points at: ".$this->webhookUrl()
-				."\nLast webhook received: ".($when ? dol_print_date($when, 'dayhour').' ('.$what.')' : 'never')
-				."\nLast webhook refused: ".($rwhen ? dol_print_date($rwhen, 'dayhour').' ('.$rwhat.')' : 'none')
-				."\n\nCheck Givebutter's webhook delivery log (Settings, Developers, Webhooks). If that address is internal or behind a login or a Cloudflare challenge, set \"This Dolibarr's public address\" on the setup page and press Reconnect, or point the webhook at the website (https://columbiagadgetworks.org/api/givebutter-webhook), which passes it on.");
-		}
-	}
-
-	/**
-	 * Create the webhook in Givebutter so it reports payments straight to this
-	 * Dolibarr. Replaces one created earlier.
-	 *
-	 * @param string $target Override of the address Givebutter should call
-	 * @return string What happened
-	 */
-	public function connectGivebutter($target = '')
-	{
-		global $conf;
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/geturl.lib.php';
-
-		$key = getDolGlobalString('ONBOARDING_GB_API_KEY');
-		if (!$key) {
-			return 'Set the Givebutter API key first.';
-		}
-		if ($target === '') {
-			$target = $this->webhookUrl();
-		}
-		$base = rtrim(getDolGlobalString('ONBOARDING_GB_API_BASE', 'https://api.givebutter.com/v1'), '/');
-		$headers = array('Authorization: Bearer '.$key, 'Accept: application/json', 'Content-Type: application/json');
-		$old = getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID');
-		if ($old !== '') {
-			getURLContent($base.'/webhooks/'.rawurlencode($old), 'DELETE', '', 1, $headers, array('http', 'https'), 2);
-		}
-		$body = json_encode(array(
-			'name' => 'Dolibarr member onboarding',
-			'url' => $target,
-			'events' => array('transaction.succeeded', 'plan.canceled', 'plan.failed', 'plan.paused', 'plan.resumed'),
-			'enabled' => true,
-		));
-		$r = getURLContent($base.'/webhooks', 'POSTALREADYFORMATED', $body, 1, $headers, array('http', 'https'), 2);
-		$json = isset($r['content']) ? json_decode($r['content'], true) : null;
-		if (isset($json['data']) && is_array($json['data'])) {
-			$json = $json['data'];
-		}
-		if (empty($r['http_code']) || $r['http_code'] >= 300 || empty($json['id'])) {
-			return 'Givebutter refused: HTTP '.(isset($r['http_code']) ? $r['http_code'] : '?').' '.dol_trunc(isset($r['content']) ? (string) $r['content'] : '', 200);
-		}
-		dolibarr_set_const($this->db, 'ONBOARDING_GB_WEBHOOK_ID', (string) $json['id'], 'chaine', 0, '', $conf->entity);
-		dolibarr_set_const($this->db, 'ONBOARDING_GB_WEBHOOK_SECRET', isset($json['signature']) ? (string) $json['signature'] : '', 'chaine', 0, '', $conf->entity);
-		return 'Connected. Givebutter will report payments to '.$target;
-	}
-
-	/**
-	 * @param string $file File in the module's public folder
-	 * @return string Its address from outside: on "This Dolibarr's public address" when set
-	 */
-	public static function publicUrl($file)
-	{
-		$public = rtrim(getDolGlobalString('ONBOARDING_PUBLIC_URL'), '/');
-		if ($public !== '') {
-			return $public.'/custom/onboarding/public/'.$file;
-		}
-		return dol_buildpath('/onboarding/public/'.$file, 2);
-	}
-
-	/**
-	 * @return string Address Givebutter calls
-	 */
-	public function webhookUrl()
-	{
-		return self::publicUrl('givebutter.php');
 	}
 
 	// ---------------------------------------------------------------- legacy import
@@ -2172,14 +1150,24 @@ You get at most one email an hour about this, and one more when it is fixed.");
 				continue;
 			}
 			$when = $this->db->idate($joined ? $joined : self::now());
-			$sql = "INSERT INTO ".$this->db->prefix()."onboarding_applicant (entity, email, firstname, lastname, discord, notify_events, notify_news, fk_socpeople, payment_state, id_uploaded_at, datec) VALUES (";
-			$sql .= ((int) $conf->entity).", '".$this->db->escape($email)."', '".$this->db->escape($first)."', '".$this->db->escape($last)."', '".$this->db->escape(substr($get('discord'), 0, 100))."', 0, 0, ".((int) $cid).", ";
-			$sql .= "'".($isMember ? 'active' : 'none')."', ".($hasId ? "'".$when."'" : "NULL").", '".$when."')";
-			if (!$this->db->query($sql)) {
+			$newId = OnboardingSql::insert($this->db, 'onboarding_applicant', array(
+				'entity' => (int) $conf->entity,
+				'email' => $email,
+				'firstname' => $first,
+				'lastname' => $last,
+				'discord' => substr($get('discord'), 0, 100),
+				'notify_events' => 0,
+				'notify_news' => 0,
+				'fk_socpeople' => (int) $cid,
+				'payment_state' => $isMember ? 'active' : 'none',
+				'id_uploaded_at' => $hasId ? $when : null,
+				'datec' => $when,
+			));
+			if (!$newId) {
 				$report[] = $label.': FAILED: '.$this->db->lasterror();
 				continue;
 			}
-			$app = $this->fetch($this->db->last_insert_id($this->db->prefix()."onboarding_applicant"));
+			$app = $this->fetch($newId);
 			$adh = $this->ensureMember($app, $isMember ? $this->memberType($type) : 0, $joined, implode("\n", $notes));
 			if (!$adh) {
 				$report[] = $label.': contact added, but the member record FAILED.';
@@ -2217,208 +1205,106 @@ You get at most one email an hour about this, and one more when it is fixed.");
 		return $report;
 	}
 
-	// ---------------------------------------------------------------- reminders
+	// ---------------------------------------------------------------- people found by email or payment
 
 	/**
-	 * Send due reminders and lapse members past the grace period.
+	 * A Dolibarr member, by email, else by a first and last name that exactly
+	 * one member has. Excluded members are never matched.
 	 *
-	 * @return string Summary
+	 * @param string $email Email
+	 * @param string $first First name
+	 * @param string $last Last name
+	 * @return int Member id, 0 when none or not sure
 	 */
-	public function dunning()
+	public function memberFor($email, $first = '', $last = '')
+	{
+		$where = "entity IN (".getEntity('adherent').") AND statut <> ".((int) Adherent::STATUS_EXCLUDED);
+		$email = self::cleanEmail($email);
+		if ($email !== '') {
+			$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE ".$where." AND LOWER(TRIM(email)) = '".$this->db->escape($email)."' ORDER BY (statut = 1) DESC, rowid LIMIT 1");
+			if ($res && ($obj = $this->db->fetch_object($res))) {
+				return (int) $obj->rowid;
+			}
+		}
+		$first = strtolower(trim((string) $first));
+		$last = strtolower(trim((string) $last));
+		if ($first === '' || $last === '') {
+			return 0;
+		}
+		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."adherent WHERE ".$where." AND LOWER(TRIM(firstname)) = '".$this->db->escape($first)."' AND LOWER(TRIM(lastname)) = '".$this->db->escape($last)."' LIMIT 2");
+		if ($res && $this->db->num_rows($res) == 1 && ($obj = $this->db->fetch_object($res))) {
+			return (int) $obj->rowid;
+		}
+		return 0;
+	}
+
+	/**
+	 * The applicant row for a member, made when the member was added before the
+	 * signup form existed (by the import scripts or by hand) and has none.
+	 *
+	 * @param int $adhId Member id
+	 * @param string $email Fallback email when the member card has none
+	 * @return object|null Applicant row
+	 */
+	public function applicantForMember($adhId, $email = '')
 	{
 		global $conf;
-
-		$now = self::now();
-		$offsets = array();
-		foreach (explode(',', getDolGlobalString('ONBOARDING_REMINDER_DAYS', '3,7,14')) as $o) {
-			if (is_numeric(trim($o)) && (int) $o >= 0) {
-				$offsets[] = (int) $o;
-			}
+		$app = $this->one("fk_adherent = ".((int) $adhId));
+		if ($app) {
+			return $app;
 		}
-		sort($offsets);
-		$grace = max(1, (int) getDolGlobalString('ONBOARDING_GRACE_DAYS', '30'));
-		$sent = 0;
-		$lapsed = 0;
-		$cleared = 0;
-		$repaired = $this->repairPeriods();
-		$restored = $this->restoreEndDates();
-		$this->ensurePaypalApplicants();
-		// PayPal members are judged only while the PayPal sync is up to date: a
-		// broken sync must not look like everyone stopped paying.
-		$paypalFresh = getDolGlobalString('ONBOARDING_PAYPAL_CLIENT_ID') !== '' && getDolGlobalInt('ONBOARDING_PAYPAL_SYNCED_THROUGH') > $now - 86400;
-
-		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND fk_adherent > 0 AND payment_state IN ('active', 'past_due', 'cancelled')");
-		$ids = array();
-		while ($res && ($obj = $this->db->fetch_object($res))) {
-			$ids[] = (int) $obj->rowid;
-		}
-		foreach ($ids as $id) {
-			$app = $this->fetch($id);
-			$adh = new Adherent($this->db);
-			if ($adh->fetch((int) $app->fk_adherent) <= 0) {
-				continue;
-			}
-			$waived = isset($adh->array_options['options_dues_waived_until']) ? $adh->array_options['options_dues_waived_until'] : '';
-			if ($waived !== '' && $waived !== null) {
-				$waivedTs = is_numeric($waived) ? (int) $waived : strtotime((string) $waived);
-				if ($waivedTs && $waivedTs >= $now) {
-					continue; // Scholarship or board-approved pause.
-				}
-			}
-			$channel = isset($adh->array_options['options_payment_channel']) ? (string) $adh->array_options['options_payment_channel'] : '';
-			if ($channel !== '' && $channel !== 'Givebutter' && $channel !== 'PayPal') {
-				continue; // Check, cash and scholarship members are kept up by hand.
-			}
-			if ($channel === 'PayPal' && !$paypalFresh) {
-				continue;
-			}
-			$paidUntil = $this->paidThrough($app, (int) $adh->datefin);
-
-			// A "ran out" problem flagged before the dues really ran out (a period
-			// recorded too short): not a problem. A failed or cancelled plan is
-			// reported after the paid period, so it is never cleared here.
-			if ($app->payment_state == 'past_due' && !empty($app->problem_since) && $this->db->jdate($app->problem_since) <= $paidUntil) {
-				$this->save($id, array('payment_state' => 'active', 'problem_since' => null, 'reminders_sent' => null));
-				$cleared++;
-				continue;
-			}
-
-			// Dues that simply ran out, with no cancellation ever reported.
-			if ($app->payment_state == 'active') {
-				if ($paidUntil > 0 && $paidUntil < $now - 2 * 86400) {
-					$this->setProblem($app, 'past_due', $paidUntil);
-					$app = $this->fetch($id);
-				} else {
-					continue;
-				}
-			}
-			if (empty($app->problem_since)) {
-				continue;
-			}
-			$days = (int) floor(($now - $this->db->jdate($app->problem_since)) / 86400);
-
-			if ($days >= $grace && $paidUntil < $now) {
-				$this->lapse($app, $adh);
-				$lapsed++;
-				continue;
-			}
-
-			$done = array_filter(explode(',', (string) $app->reminders_sent), 'strlen');
-			$due = array();
-			foreach ($offsets as $o) {
-				if ($o <= $days && $o < $grace && !in_array((string) $o, $done)) {
-					$due[] = $o;
-				}
-			}
-			if ($due) {
-				$left = max(0, $grace - $days);
-				if ($channel === 'PayPal') {
-					$body = $this->template('ONBOARDING_MAIL_REMINDER_PAYPAL_BODY', "Hi {firstname},\n\nWe have not received your {org} dues through PayPal since {paid_until}. Please check that your PayPal subscription is still active, or set up dues here instead:\n\n{payment_url}\n\nYour membership will end in {days_left} days if we do not hear from you. If dues are a hardship, just reply to this email and we will work something out.", $app, array('days_left' => (string) $left, 'paid_until' => dol_print_date($paidUntil, 'day')));
-				} else {
-					$body = $this->template('ONBOARDING_MAIL_REMINDER_BODY', "Hi {firstname},\n\nYour {org} dues payment did not go through or was cancelled. To keep your membership and badge access, please set up dues again here:\n\n{payment_url}\n\nUse the same email address you joined with. Your membership will end in {days_left} days if we do not hear from you. If dues are a hardship, just reply to this email and we will work something out.", $app, array('days_left' => (string) $left));
-				}
-				$this->mail($app->email, $this->template('ONBOARDING_MAIL_REMINDER_SUBJECT', 'Your {org} dues need attention', $app), $body);
-				// One email even if several offsets came due at once.
-				$this->save($id, array('reminders_sent' => implode(',', array_merge($done, $due))));
-				$sent++;
-			}
-		}
-		return $sent.' reminders sent, '.$lapsed.' members marked non-paying, '.$cleared.' false payment problems cleared, '.$repaired.' dues periods lengthened to the next charge'.($restored ? ', '.$restored.' held end dates put back' : '');
-	}
-
-
-
-	/**
-	 * Mark a member non-paying.
-	 *
-	 * @param object $app Applicant row
-	 * @param Adherent $adh Member
-	 * @return void
-	 */
-	public function lapse($app, $adh)
-	{
-		$actor = $this->actor();
-		if ($adh->statut == Adherent::STATUS_VALIDATED) {
-			$adh->resiliate($actor);
-		}
-		$this->save($app->rowid, array('payment_state' => 'lapsed', 'problem_since' => null));
-		$app = $this->refreshStage($app->rowid);
-		$badge = isset($adh->array_options['options_member_code']) ? (string) $adh->array_options['options_member_code'] : '';
-		if ($badge === '' && !empty($adh->array_options['options_credential_id'])) {
-			$badge = (string) $adh->array_options['options_credential_id'];
-		}
-		$access = !empty($adh->array_options['options_access_enabled']);
-		$this->mail($app->email, $this->template('ONBOARDING_MAIL_LAPSED_SUBJECT', 'Your {org} membership has ended', $app), $this->template('ONBOARDING_MAIL_LAPSED_BODY', "Hi {firstname},\n\nWe did not receive your dues, so your {org} membership has ended and your badge access will be turned off. You are welcome back any time:\n\n{payment_url}", $app));
-		$this->mail(getDolGlobalString('ONBOARDING_STAFF_EMAIL'), 'Membership ended: '.$app->firstname.' '.$app->lastname, $app->firstname.' '.$app->lastname.' <'.$app->email.'> is now non-paying.'.($badge !== '' ? ' Badge '.$badge.($access ? ' still has access and should be turned off.' : ' is already marked as having no access.') : ' No badge is recorded for them.'));
-	}
-
-	// ---------------------------------------------------------------- email updates
-
-	/**
-	 * The contact tag that marks "send me email updates". Mass emailings pick
-	 * their recipients by it (Emailing, Contacts, filter by tag).
-	 *
-	 * @param bool $create Create the tag if it does not exist yet
-	 * @return Categorie|null
-	 */
-	public function updatesTag($create = true)
-	{
-		static $tag = null;
-		if ($tag !== null) {
-			return $tag;
-		}
-		if (!isModEnabled('categorie')) {
-			dol_syslog('Onboarding: the Tags/Categories module is off, so email signups are not tagged', LOG_WARNING);
+		$adh = new Adherent($this->db);
+		if ($adh->fetch((int) $adhId) <= 0) {
 			return null;
 		}
-		$label = getDolGlobalString('ONBOARDING_UPDATES_TAG', 'Email updates');
-		$cat = new Categorie($this->db);
-		if ($cat->fetch(0, $label, Categorie::TYPE_CONTACT) > 0) {
-			return $tag = $cat;
+		$addr = self::cleanEmail($adh->email);
+		if (!isValidEmail($addr)) {
+			$addr = self::cleanEmail($email);
 		}
-		if (!$create) {
+		if (!isValidEmail($addr)) {
 			return null;
 		}
-		$cat = new Categorie($this->db);
-		$cat->label = $label;
-		$cat->type = Categorie::TYPE_CONTACT;
-		$cat->description = 'People who asked for email updates on the website. Use this tag to pick recipients for a mass emailing.';
-		$cat->visible = 0;
-		if ($cat->create($this->actor()) <= 0) {
-			dol_syslog('Onboarding: could not create the email updates tag: '.$cat->error, LOG_ERR);
+		$app = $this->findByEmail($addr);
+		if ($app) {
+			if ($app->fk_adherent > 0) {
+				return null; // That address belongs to another member's record.
+			}
+			$this->save($app->rowid, array('fk_adherent' => (int) $adhId));
+			return $this->fetch($app->rowid);
+		}
+		$cid = $this->contactByEmail($addr);
+		// Like the rows the booking page makes: it holds a member's Givebutter link
+		// and signatures, with no signup stages to walk through.
+		$newId = OnboardingSql::insert($this->db, 'onboarding_applicant', array(
+			'entity' => (int) $conf->entity,
+			'email' => $addr,
+			'firstname' => dol_trunc((string) $adh->firstname, 100, 'right', 'UTF-8', 1),
+			'lastname' => dol_trunc((string) $adh->lastname, 100, 'right', 'UTF-8', 1),
+			'fk_socpeople' => $cid > 0 ? (int) $cid : null,
+			'fk_adherent' => (int) $adhId,
+			'training_only' => 1,
+			'stage' => 'complete',
+			'payment_state' => 'active',
+			'datec' => $this->db->idate(self::now()),
+		));
+		if (!$newId) {
+			dol_syslog('Onboarding: applicant for member '.$adhId.' failed: '.$this->db->lasterror(), LOG_ERR);
 			return null;
 		}
-		return $tag = $cat;
+		return $this->fetch($newId);
 	}
 
 	/**
-	 * @param int $contactId Contact id
-	 * @return bool Contact carries the email updates tag
+	 * @param string $file File in the module's public folder
+	 * @return string Its address from outside: on "This Dolibarr's public address" when set
 	 */
-	public function isTaggedForUpdates($contactId)
+	public static function publicUrl($file)
 	{
-		$tag = $this->updatesTag(false);
-		return $tag ? (bool) $tag->containsObject(Categorie::TYPE_CONTACT, (int) $contactId) : false;
-	}
-
-	/**
-	 * Put a contact on the email updates list: tag it and tick both notify fields.
-	 *
-	 * @param Contact $contact Fetched contact (its extra fields are rewritten)
-	 * @param bool $fields Also tick both notify fields
-	 * @return void
-	 */
-	public function tagForUpdates($contact, $fields = true)
-	{
-		$tag = $this->updatesTag();
-		if ($tag && !$tag->containsObject(Categorie::TYPE_CONTACT, $contact->id)) {
-			$tag->add_type($contact, Categorie::TYPE_CONTACT);
+		$public = rtrim(getDolGlobalString('ONBOARDING_PUBLIC_URL'), '/');
+		if ($public !== '') {
+			return $public.'/custom/onboarding/public/'.$file;
 		}
-		if ($fields && (empty($contact->array_options['options_notify_events']) || empty($contact->array_options['options_notify_news']))) {
-			$contact->array_options['options_notify_events'] = 1;
-			$contact->array_options['options_notify_news'] = 1;
-			$contact->insertExtraFields();
-		}
+		return dol_buildpath('/onboarding/public/'.$file, 2);
 	}
 
 	/**
@@ -2432,285 +1318,5 @@ You get at most one email an hour about this, and one more when it is fixed.");
 			return (int) $obj->rowid;
 		}
 		return 0;
-	}
-
-	/**
-	 * @param string $email Email
-	 * @return bool The address is on Dolibarr's unsubscribe list
-	 */
-	public function isUnsubscribed($email)
-	{
-		$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."mailing_unsubscribe WHERE LOWER(email) = '".$this->db->escape(self::cleanEmail($email))."' AND entity IN (".getEntity('mailing', 0).") LIMIT 1");
-		return $res && $this->db->fetch_object($res);
-	}
-
-	/**
-	 * Someone asked for email updates. Finds or creates their contact and puts
-	 * it on the list.
-	 *
-	 * A signup on the website is a fresh request, so it also takes the address
-	 * off Dolibarr's unsubscribe list. An import ($optin false) never does: an
-	 * old list must not undo an unsubscribe.
-	 *
-	 * @param array<string,mixed> $in email, and optionally name, page, date (Y-m-d), source
-	 * @param bool $optin The person is asking right now
-	 * @param bool $dry Only report what would happen
-	 * @return array<string,mixed> ok, result (added, tagged, already, unsubscribed) or error
-	 */
-	public function subscribe($in, $optin = true, $dry = false)
-	{
-		$email = self::cleanEmail(isset($in['email']) ? $in['email'] : '');
-		if (!isValidEmail($email)) {
-			return array('ok' => false, 'error' => 'invalid', 'http' => 400);
-		}
-		if (!$optin && $this->isUnsubscribed($email)) {
-			return array('ok' => true, 'result' => 'unsubscribed');
-		}
-		$name = trim(dol_string_nohtmltag((string) (isset($in['name']) ? $in['name'] : '')));
-		$source = trim(dol_string_nohtmltag((string) (isset($in['source']) ? $in['source'] : 'the website')));
-		$page = trim(dol_string_nohtmltag((string) (isset($in['page']) ? $in['page'] : '')));
-		$date = isset($in['date']) && preg_match('/^\d{4}-\d{2}-\d{2}/', (string) $in['date']) ? substr((string) $in['date'], 0, 10) : dol_print_date(self::now(), '%Y-%m-%d');
-		$line = 'Asked for email updates on '.$date.' ('.$source.($page !== '' ? ', '.$page : '').').';
-
-		$contact = new Contact($this->db);
-		$id = $this->contactByEmail($email);
-		if ($id > 0) {
-			if ($contact->fetch($id) <= 0) {
-				return array('ok' => false, 'error' => 'server', 'http' => 500);
-			}
-			if ($this->isTaggedForUpdates($id) && !($optin && $this->isUnsubscribed($email))) {
-				return array('ok' => true, 'result' => 'already');
-			}
-			if ($dry) {
-				return array('ok' => true, 'result' => 'tagged');
-			}
-			$contact->update_note(trim($contact->note_private."\n".$line), '_private');
-			$result = 'tagged';
-		} else {
-			if ($dry) {
-				return array('ok' => true, 'result' => 'added');
-			}
-			$pos = strrpos($name, ' ');
-			// Both name columns hold 50 characters; a longer value makes the insert fail.
-			$contact->firstname = dol_substr($pos === false ? '' : substr($name, 0, $pos), 0, 50);
-			// A contact needs a last name. With no name given, the address stands in.
-			$contact->lastname = dol_substr($name === '' ? $email : ($pos === false ? $name : substr($name, $pos + 1)), 0, 50);
-			$contact->email = $email;
-			$contact->statut = 1;
-			$contact->status = 1;
-			$contact->note_private = $line;
-			if ($contact->create($this->actor()) <= 0) {
-				$why = trim($contact->error.' '.implode(' ', (array) $contact->errors));
-				dol_syslog('Onboarding: contact create failed: '.$why, LOG_ERR);
-				return array('ok' => false, 'error' => 'server', 'detail' => $why, 'http' => 500);
-			}
-			$contact->fetch($contact->id);
-			$result = 'added';
-		}
-		$this->tagForUpdates($contact);
-		if ($optin) {
-			$contact->setNoEmail(0);
-		}
-		return array('ok' => true, 'result' => $result);
-	}
-
-	/**
-	 * Import an old email list. Paste, check, import. Columns are matched by
-	 * name: email is required; name (or first and last name) and a signup date
-	 * are used when present. Addresses on the unsubscribe list are skipped.
-	 *
-	 * @param string $text Pasted spreadsheet or CSV
-	 * @param string $source Where the list came from, written on each contact
-	 * @param bool $dry Only report what would happen
-	 * @return string[] Summary first, then one line per row that needs a look
-	 */
-	public function importEmails($text, $source, $dry = true)
-	{
-		$lines = preg_split('/\r\n|\r|\n/', trim((string) $text));
-		if (count($lines) < 2) {
-			return array('Nothing to import: paste the header line and at least one row.');
-		}
-		$sep = strpos($lines[0], "\t") !== false ? "\t" : (substr_count($lines[0], ';') > substr_count($lines[0], ',') ? ';' : ',');
-		$head = array_map(function ($h) {
-			return preg_replace('/[^a-z]/', '', strtolower($h));
-		}, str_getcsv(array_shift($lines), $sep, '"', '\\'));
-		$find = function ($names) use ($head) {
-			foreach ($names as $n) {
-				$i = array_search($n, $head, true);
-				if ($i !== false) {
-					return $i;
-				}
-			}
-			return -1;
-		};
-		$ce = $find(array('email', 'emailaddress', 'mail', 'subscriber', 'subscriberemail'));
-		if ($ce < 0) {
-			return array('The header line needs an "email" column.');
-		}
-		$cn = $find(array('name', 'fullname', 'displayname'));
-		$cf = $find(array('firstname', 'first', 'givenname'));
-		$cl = $find(array('lastname', 'last', 'surname', 'familyname'));
-		$cd = $find(array('subscribed', 'date', 'datesubscribed', 'subscriptiondate', 'created', 'createdat', 'signupdate', 'optintime', 'confirmtime'));
-		$source = trim((string) $source) === '' ? 'imported list' : trim((string) $source);
-
-		$count = array('added' => 0, 'tagged' => 0, 'already' => 0, 'unsubscribed' => 0, 'invalid' => 0, 'duplicate' => 0, 'failed' => 0);
-		$notes = array();
-		$seen = array();
-		foreach ($lines as $n => $line) {
-			if (trim($line) === '') {
-				continue;
-			}
-			$cells = str_getcsv($line, $sep, '"', '\\');
-			$get = function ($i) use ($cells) {
-				return $i >= 0 && isset($cells[$i]) ? trim($cells[$i]) : '';
-			};
-			$email = self::cleanEmail($get($ce));
-			if (isset($seen[$email])) {
-				$count['duplicate']++;
-				continue;
-			}
-			$seen[$email] = 1;
-			$name = $cn >= 0 ? $get($cn) : trim($get($cf).' '.$get($cl));
-			$date = '';
-			$raw = $get($cd);
-			if ($raw !== '' && ($t = strtotime($raw)) !== false) {
-				$date = gmdate('Y-m-d', $t);
-			}
-			$r = $this->subscribe(array('email' => $email, 'name' => $name, 'date' => $date, 'source' => $source), false, $dry);
-			if (!$r['ok'] && $r['error'] == 'invalid') {
-				$count['invalid']++;
-				$notes[] = 'Row '.($n + 2).': "'.$get($ce).'" is not a valid email address, skipped.';
-				continue;
-			}
-			if (!$r['ok']) {
-				$count['failed']++;
-				$notes[] = 'Row '.($n + 2).' ('.$email.'): Dolibarr could not save the contact'.(empty($r['detail']) ? '' : ': '.$r['detail']).'.';
-				continue;
-			}
-			$count[$r['result']]++;
-		}
-		$verb = $dry ? 'would be' : 'were';
-		$summary = $count['added'].' new contacts '.$verb.' added, '.$count['tagged'].' existing contacts '.$verb.' added to the list, '
-			.$count['already'].' were already on it, '.$count['unsubscribed'].' skipped because they unsubscribed, '
-			.$count['invalid'].' invalid'.($count['duplicate'] ? ', '.$count['duplicate'].' repeated in the paste' : '')
-			.($count['failed'] ? ', '.$count['failed'].' COULD NOT BE SAVED (see below)' : '').'.';
-		return array_merge(array($summary), $notes);
-	}
-
-	/**
-	 * Can this signup still be thrown away? Not once it is complete or any
-	 * dues have been paid: from then on it is a member's record.
-	 *
-	 * @param object $app Applicant row
-	 * @return bool
-	 */
-	public function canDiscard($app)
-	{
-		return $app && $app->stage != 'complete' && $app->payment_state == 'none';
-	}
-
-	/**
-	 * Delete a signup that never became a membership: the applicant row, its
-	 * signed documents and ID photo, its contact, and the draft member made when
-	 * the paperwork was done. A contact on the email updates list is kept, and so
-	 * is any member record that is more than an unpaid draft.
-	 *
-	 * @param object $app Applicant row
-	 * @return void
-	 */
-	public function discard($app)
-	{
-		$actor = $this->actor();
-		if ($app->fk_adherent > 0) {
-			$adh = new Adherent($this->db);
-			if ($adh->fetch((int) $app->fk_adherent) > 0 && (int) $adh->statut == Adherent::STATUS_DRAFT) {
-				$res = $this->db->query("SELECT COUNT(*) AS n FROM ".$this->db->prefix()."subscription WHERE fk_adherent = ".((int) $adh->id));
-				$obj = $res ? $this->db->fetch_object($res) : null;
-				if ($obj && (int) $obj->n == 0) {
-					// Dolibarr 20 dropped the leading $rowid argument.
-					$params = (new ReflectionMethod($adh, 'delete'))->getParameters();
-					if ($params && $params[0]->getName() == 'rowid') {
-						$adh->delete($adh->id, $actor);
-					} else {
-						$adh->delete($actor);
-					}
-				}
-			}
-		}
-		if ($app->fk_socpeople > 0) {
-			$contact = new Contact($this->db);
-			// Someone who asked for email updates stays on the list even though
-			// they never finished joining.
-			if ($contact->fetch((int) $app->fk_socpeople) > 0 && !$this->isTaggedForUpdates($contact->id)) {
-				$contact->delete($actor);
-			}
-		}
-		dol_delete_dir_recursive(DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $app->rowid));
-		$this->db->query("DELETE FROM ".$this->db->prefix()."onboarding_applicant WHERE rowid = ".((int) $app->rowid));
-	}
-
-	/**
-	 * The applicant pressed "Start over" on the join page.
-	 *
-	 * @param object $app Applicant row
-	 * @return array<string,mixed> Response for the website
-	 */
-	public function cancel($app)
-	{
-		if (!$this->canDiscard($app)) {
-			return array('ok' => false, 'error' => 'paid', 'http' => 409);
-		}
-		$this->discard($app);
-		return array('ok' => true);
-	}
-
-	/**
-	 * Delete abandoned signups and expired ID photos.
-	 *
-	 * @return string Summary
-	 */
-	public function cleanup()
-	{
-		global $conf;
-
-		$now = self::now();
-		$deleted = 0;
-		$photos = 0;
-		$actor = $this->actor();
-
-		$days = (int) getDolGlobalString('ONBOARDING_DRAFT_DAYS', '30');
-		if ($days > 0) {
-			$res = $this->db->query("SELECT rowid FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND stage <> 'complete' AND payment_state = 'none' AND (fk_adherent IS NULL OR fk_adherent = 0) AND datec < '".$this->db->idate($now - $days * 86400)."'");
-			$ids = array();
-			while ($res && ($obj = $this->db->fetch_object($res))) {
-				$ids[] = (int) $obj->rowid;
-			}
-			foreach ($ids as $id) {
-				$this->discard($this->fetch($id));
-				$deleted++;
-			}
-		}
-
-		$keep = (int) getDolGlobalString('ONBOARDING_ID_RETENTION_DAYS', '0');
-		if ($keep > 0) {
-			$res = $this->db->query("SELECT rowid, id_file FROM ".$this->db->prefix()."onboarding_applicant WHERE entity = ".((int) $conf->entity)." AND id_file IS NOT NULL AND id_file <> '' AND completed_at IS NOT NULL AND completed_at < '".$this->db->idate($now - $keep * 86400)."'");
-			$rows = array();
-			while ($res && ($obj = $this->db->fetch_object($res))) {
-				$rows[] = $obj;
-			}
-			foreach ($rows as $obj) {
-				$src = DOL_DATA_ROOT.'/onboarding/applicant/'.((int) $obj->rowid);
-				@unlink($src.'/'.basename($obj->id_file));
-				// And its copy on the member card.
-				$done = is_readable($src.'/member-copies.json') ? json_decode((string) file_get_contents($src.'/member-copies.json'), true) : null;
-				if (!empty($done['id']['name']) && ($dest = $this->memberDir((int) $done['id']['member'])) !== '') {
-					@unlink($dest.'/'.basename($done['id']['name']));
-				}
-				// The "ID photo uploaded" tick stays: it records that the check was done.
-				$this->save($obj->rowid, array('id_file' => null));
-				$photos++;
-			}
-		}
-		return $deleted.' abandoned signups deleted, '.$photos.' ID photos removed';
 	}
 }

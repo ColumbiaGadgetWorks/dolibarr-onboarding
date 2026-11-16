@@ -41,11 +41,7 @@ if ($which == 'id') {
 		$path = $dir.'/'.basename($app->id_file);
 	}
 } else {
-	foreach (array('pdf', 'txt') as $ext) {
-		if (!$path && is_readable($dir.'/'.$which.'.'.$ext)) {
-			$path = $dir.'/'.$which.'.'.$ext;
-		}
-	}
+	$path = $svc->signedFile($app, $which);
 }
 if (!$path || !is_readable($path)) {
 	http_response_code(404);

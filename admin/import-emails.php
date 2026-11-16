@@ -28,7 +28,7 @@ $text = GETPOST('sheet', 'none');
 $source = GETPOST('source', 'alphanohtml');
 $report = array();
 if (($action == 'check' || $action == 'import') && $text !== '') {
-	$report = $svc->importEmails($text, $source, $action != 'import');
+	$report = $svc->updates()->importEmails($text, $source, $action != 'import');
 }
 
 llxHeader('', 'Import email list');

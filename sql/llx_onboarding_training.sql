@@ -18,6 +18,12 @@ CREATE TABLE llx_onboarding_training(
 	trainer_amount double(24,8) DEFAULT 0,
 	transacted_at datetime,
 	status varchar(20) DEFAULT 'recorded' NOT NULL,
+	source varchar(10) DEFAULT 'paid' NOT NULL,
+	fk_booking integer,
+	fk_tool integer,
+	free_reason varchar(255),
+	fk_user integer,
+	amount_net double(24,8),
 	datec datetime,
 	tms timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=innodb;

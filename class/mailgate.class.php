@@ -19,6 +19,7 @@
 
 require_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+dol_include_once('/onboarding/class/sql.class.php');
 
 /**
  * Hold, show, release and reject emails.
@@ -203,18 +204,29 @@ class OnboardingMailGate
 		global $conf;
 		$p = $this->db->prefix();
 		$token = bin2hex(random_bytes(20));
-		$sql = "INSERT INTO ".$p."onboarding_mail_hold (entity, kind, token, status, mail_from, mail_to, mail_cc, mail_bcc, reply_to, errors_to, subject, body, ishtml, css, trackid, sendcontext, deliveryreceipt, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$this->db->escape($kind)."', '".$token."', 'pending', ";
-		foreach (array($mail->addr_from, $mail->addr_to, $mail->addr_cc, $mail->addr_bcc, $mail->reply_to, $mail->errors_to) as $v) {
-			$sql .= "'".$this->db->escape((string) $v)."', ";
-		}
-		$sql .= "'".$this->db->escape(dol_trunc((string) $mail->subject, 250, 'right', 'UTF-8', 1))."', '".$this->db->escape((string) $mail->msg)."', ".((int) $mail->msgishtml).", ";
-		$sql .= "'".$this->db->escape((string) $mail->css)."', '".$this->db->escape((string) $mail->trackid)."', '".$this->db->escape((string) $mail->sendcontext)."', ".((int) $mail->deliveryreceipt).", ";
-		$sql .= "'".$this->db->idate(dol_now())."')";
-		if (!$this->db->query($sql)) {
+		$id = OnboardingSql::insert($this->db, 'onboarding_mail_hold', array(
+			'entity' => (int) $conf->entity,
+			'kind' => $kind,
+			'token' => $token,
+			'status' => 'pending',
+			'mail_from' => (string) $mail->addr_from,
+			'mail_to' => (string) $mail->addr_to,
+			'mail_cc' => (string) $mail->addr_cc,
+			'mail_bcc' => (string) $mail->addr_bcc,
+			'reply_to' => (string) $mail->reply_to,
+			'errors_to' => (string) $mail->errors_to,
+			'subject' => dol_trunc((string) $mail->subject, 250, 'right', 'UTF-8', 1),
+			'body' => (string) $mail->msg,
+			'ishtml' => (int) $mail->msgishtml,
+			'css' => (string) $mail->css,
+			'trackid' => (string) $mail->trackid,
+			'sendcontext' => (string) $mail->sendcontext,
+			'deliveryreceipt' => (int) $mail->deliveryreceipt,
+			'datec' => $this->db->idate(dol_now()),
+		));
+		if (!$id) {
 			return -1;
 		}
-		$id = (int) $this->db->last_insert_id($p.'onboarding_mail_hold');
 
 		// The originals may be temporary files that are gone by the time it is approved.
 		$files = array();
