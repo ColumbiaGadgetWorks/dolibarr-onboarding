@@ -287,11 +287,7 @@ class OnboardingFreeClass
 	 */
 	private function save($id, $fields)
 	{
-		$set = array();
-		foreach ($fields as $k => $v) {
-			$set[] = $k.' = '.($v === null ? 'NULL' : (is_int($v) ? $v : "'".$this->db->escape((string) $v)."'"));
-		}
-		$this->db->query("UPDATE ".$this->db->prefix()."onboarding_freeclass SET ".implode(', ', $set)." WHERE rowid = ".((int) $id));
+		OnboardingSql::update($this->db, 'onboarding_freeclass', $fields, 'rowid = '.((int) $id));
 	}
 
 	/**
@@ -382,14 +378,10 @@ class OnboardingFreeClass
 			$this->save($id, $fields);
 		} else {
 			$cols = array('entity' => (int) $conf->entity, 'kind' => $kind, 'status' => 'open', 'fk_user' => (int) $by->id, 'datec' => $this->db->idate($now)) + $fields;
-			$vals = array();
-			foreach ($cols as $v) {
-				$vals[] = $v === null ? 'NULL' : (is_int($v) ? $v : "'".$this->db->escape((string) $v)."'");
-			}
-			if (!$this->db->query("INSERT INTO ".$this->db->prefix()."onboarding_freeclass (".implode(', ', array_keys($cols)).") VALUES (".implode(', ', $vals).")")) {
+			$id = OnboardingSql::insert($this->db, 'onboarding_freeclass', $cols);
+			if (!$id) {
 				return array('ok' => false, 'error' => 'The class could not be saved: '.$this->db->lasterror());
 			}
-			$id = (int) $this->db->last_insert_id($this->db->prefix().'onboarding_freeclass');
 		}
 		$c = $this->fetch($id);
 		$moved = $old && $old->start != $c->start;
@@ -528,7 +520,7 @@ class OnboardingFreeClass
 		$who = $this->booking->person($email);
 		$memberId = $who['member'] ? (int) $who['member']->rowid : 0;
 		if ($updates) {
-			$this->svc->subscribe(array('email' => $email, 'name' => $name, 'source' => 'a free class sign-up', 'page' => $class->title));
+			$this->svc->updates()->subscribe(array('email' => $email, 'name' => $name, 'source' => 'a free class sign-up', 'page' => $class->title));
 		} elseif (!$memberId && !$who['contact']) {
 			$pos = strrpos($name, ' ');
 			$contact = new Contact($this->db);

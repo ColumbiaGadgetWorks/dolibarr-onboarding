@@ -232,10 +232,14 @@ class OnboardingDeadlines
 	private function log($taskId, $kind, $userId = 0, $note = '')
 	{
 		global $conf;
-		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_task_notice (entity, fk_task, kind, fk_user, note, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", ".((int) $taskId).", '".$this->db->escape($kind)."', ".($userId > 0 ? (int) $userId : "NULL").", ";
-		$sql .= ($note !== '' ? "'".$this->db->escape(dol_trunc($note, 250, 'right', 'UTF-8', 1))."'" : "NULL").", '".$this->db->idate(OnboardingService::now())."')";
-		$this->db->query($sql);
+		OnboardingSql::insert($this->db, 'onboarding_task_notice', array(
+			'entity' => (int) $conf->entity,
+			'fk_task' => (int) $taskId,
+			'kind' => $kind,
+			'fk_user' => $userId > 0 ? (int) $userId : null,
+			'note' => $note !== '' ? dol_trunc($note, 250, 'right', 'UTF-8', 1) : null,
+			'datec' => $this->db->idate(OnboardingService::now()),
+		));
 	}
 
 	/**

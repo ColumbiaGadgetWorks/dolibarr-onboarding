@@ -18,8 +18,9 @@ and the page at `/membership/join/`).
    on the contact card. When all three are done the contact also becomes a **non-member**:
    a draft member in Dolibarr, waiting to pay. From then on the signed waiver and agreement and the ID
    photo are also copied onto the member card, under **Attached files and documents**
-   (`onboarding-signed-waiver.pdf`, `onboarding-signed-agreement.pdf`,
-   `onboarding-id-photo.jpg`). Anyone who can read member cards can open them there. A copy
+   (`onboarding-signed-waiver-<version>.pdf`, `onboarding-signed-agreement-<version>.pdf`,
+   `onboarding-id-photo.jpg`; the version is the one signed, so someone who signs a newer
+   version keeps the older copy too). Anyone who can read member cards can open them there. A copy
    is made again only when the file changes, so one deleted from the member card stays
    deleted; the originals stay in the module's own folder. The daily job copies them for
    members linked later and for everyone who signed up before this was added.

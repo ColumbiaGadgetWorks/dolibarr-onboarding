@@ -14,7 +14,8 @@
  * Actions: docs, start, subscribe, status, sign, id, cancel, givebutter, trainings,
  * trainingstart, budget, purchase, purchasefile, purchasefinish,
  * catalog, slots, trainee, traineenew, signlink, book, bookingstatus, lookup,
- * closeddays, notifyback, websitereport, classinfo, classjoin, freeclasses, freeclasssignup
+ * closeddays, notifyback, websitereport, classinfo, classjoin, freeclasses, freeclasssignup,
+ * voteresend
  * (Givebutter itself calls public/givebutter.php, not this file.)
  */
 
@@ -98,11 +99,11 @@ if ($action == 'docs') {
 }
 
 if ($action == 'start') {
-	onboarding_reply($svc->start($in));
+	onboarding_reply($svc->signup()->start($in));
 }
 
 if ($action == 'subscribe') {
-	onboarding_reply($svc->subscribe($in, true));
+	onboarding_reply($svc->updates()->subscribe($in, true));
 }
 
 if ($action == 'trainings') {
@@ -121,13 +122,13 @@ if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signli
 	$booking = new OnboardingBooking($db, $svc);
 	if ($action == 'catalog') {
 		// The Worker fetches this every 15 minutes, so from now it holds this version.
-		$cat = $booking->catalog();
-		$booking->websiteHas((int) $cat['version']);
+		$cat = $booking->schedule()->catalog();
+		$booking->schedule()->websiteHas((int) $cat['version']);
 		onboarding_reply(array('ok' => true, 'catalog' => $cat));
 	}
 	if ($action == 'slots') {
-		$tool = isset($in['tool']) ? $booking->toolByRef((string) $in['tool']) : null;
-		$rows = $booking->available($tool ? (int) $tool->rowid : 0);
+		$tool = isset($in['tool']) ? $booking->schedule()->toolByRef((string) $in['tool']) : null;
+		$rows = $booking->schedule()->available($tool ? (int) $tool->rowid : 0);
 		foreach ($rows as &$r) {
 			unset($r['ts']);
 		}
@@ -153,7 +154,7 @@ if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signli
 		onboarding_reply(array('ok' => true) + $booking->lookup(isset($in['email']) ? (string) $in['email'] : ''));
 	}
 	if ($action == 'closeddays') {
-		onboarding_reply($booking->setCalendarClosures(isset($in['days']) && is_array($in['days']) ? $in['days'] : array()));
+		onboarding_reply($booking->schedule()->setCalendarClosures(isset($in['days']) && is_array($in['days']) ? $in['days'] : array()));
 	}
 	if ($action == 'notifyback') {
 		// People who asked, while Dolibarr was down, to hear when booking reopens.
@@ -171,18 +172,18 @@ if (in_array($action, array('catalog', 'slots', 'trainee', 'traineenew', 'signli
 	}
 	if ($action == 'spotstart') {
 		// "I'm a trainer: train someone now". The same answer whoever typed what.
-		onboarding_reply($booking->spotStart(isset($in['email']) ? (string) $in['email'] : ''));
+		onboarding_reply($booking->spots()->spotStart(isset($in['email']) ? (string) $in['email'] : ''));
 	}
 	if ($action == 'spotinfo') {
-		onboarding_reply($booking->spotInfo(isset($in['ref']) ? (string) $in['ref'] : '', isset($in['key']) ? (string) $in['key'] : ''));
+		onboarding_reply($booking->spots()->spotInfo(isset($in['ref']) ? (string) $in['ref'] : '', isset($in['key']) ? (string) $in['key'] : ''));
 	}
 	if ($action == 'spotnew') {
-		onboarding_reply($booking->spotNew($in));
+		onboarding_reply($booking->spots()->spotNew($in));
 	}
 	if ($action == 'classinfo') {
-		onboarding_reply($booking->classInfo(isset($in['code']) ? (string) $in['code'] : ''));
+		onboarding_reply($booking->classes()->classInfo(isset($in['code']) ? (string) $in['code'] : ''));
 	}
-	onboarding_reply($booking->classJoin($in));
+	onboarding_reply($booking->classes()->classJoin($in));
 }
 
 if ($action == 'voteresend') {
@@ -241,10 +242,16 @@ if (in_array($action, array('budget', 'purchase', 'purchasefile', 'purchasefinis
 }
 
 if ($action == 'givebutter') {
+	// Nothing here proves the event came from Givebutter, so it is read back
+	// from Givebutter by id and only Givebutter's copy is applied.
 	$event = isset($in['event']) ? (string) $in['event'] : '';
-	$result = $svc->handleEvent($event, isset($in['data']) ? $in['data'] : null);
-	dol_syslog('Onboarding: Givebutter '.$event.' => '.$result);
-	$svc->noteWebhook($event.': '.$result.' (through the website)');
+	list($checked, $result) = $svc->givebutter()->handleVerifiedEvent($event, isset($in['data']) ? $in['data'] : null);
+	dol_syslog('Onboarding: Givebutter '.$event.' => '.$result, $checked ? LOG_INFO : LOG_WARNING);
+	$svc->givebutter()->noteWebhook($event.': '.$result.' (through the website)', !$checked);
+	if (!$checked) {
+		// Not 2xx, so a real event is delivered again later.
+		onboarding_reply(array('ok' => false, 'error' => 'unverified', 'result' => $result, 'http' => 502));
+	}
 	onboarding_reply(array('ok' => true, 'result' => $result));
 }
 
@@ -255,7 +262,7 @@ if (!$app) {
 }
 
 if ($action == 'status') {
-	onboarding_reply(array('ok' => true) + $svc->status($app));
+	onboarding_reply(array('ok' => true) + $svc->signup()->status($app));
 }
 
 if ($action == 'sign') {
@@ -265,7 +272,7 @@ if ($action == 'sign') {
 			$extra[$k] = (string) $in[$k];
 		}
 	}
-	onboarding_reply($svc->sign(
+	onboarding_reply($svc->signup()->sign(
 		$app,
 		isset($in['doc']) ? (string) $in['doc'] : '',
 		isset($in['name']) ? (string) $in['name'] : '',
@@ -277,7 +284,7 @@ if ($action == 'sign') {
 }
 
 if ($action == 'cancel') {
-	onboarding_reply($svc->cancel($app));
+	onboarding_reply($svc->signup()->cancel($app));
 }
 
 if ($action == 'id') {
@@ -285,7 +292,7 @@ if ($action == 'id') {
 	if ($bytes === false) {
 		onboarding_reply(array('ok' => false, 'error' => 'type', 'http' => 400));
 	}
-	onboarding_reply($svc->uploadId($app, $bytes));
+	onboarding_reply($svc->signup()->uploadId($app, $bytes));
 }
 
 onboarding_reply(array('ok' => false, 'error' => 'unknown action', 'http' => 404));

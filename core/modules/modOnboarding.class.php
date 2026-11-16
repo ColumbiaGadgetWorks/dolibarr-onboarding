@@ -27,7 +27,7 @@ class modOnboarding extends DolibarrModules
 		$this->descriptionlong = $this->description;
 		$this->editor_name = 'Columbia Gadget Works';
 		$this->editor_url = 'https://columbiagadgetworks.org';
-		$this->version = '0.22.3';
+		$this->version = '0.23.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'members';
 		// mail: email approval may hold any email Dolibarr sends (class/actions_onboarding.class.php).
@@ -533,6 +533,14 @@ class modOnboarding extends DolibarrModules
 
 		$result = $this->_load_tables('/onboarding/sql/');
 		if ($result < 0) {
+			return -1;
+		}
+		// Columns added since a table first shipped (see class/migrate.class.php).
+		dol_include_once('/onboarding/class/migrate.class.php');
+		$errors = OnboardingMigrations::run($this->db, $this->version);
+		if ($errors) {
+			$this->error = 'Onboarding schema migration failed: '.implode('; ', $errors);
+			$this->errors = $errors;
 			return -1;
 		}
 

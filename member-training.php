@@ -78,7 +78,7 @@ if (!$n) {
 print '</table>';
 
 if ($memberId) {
-	$slots = $bk->slots(0);
+	$slots = $bk->schedule()->slots(0);
 	$mine = array_filter($slots, function ($s) use ($memberId) {
 		return (int) $s->fk_adherent == $memberId;
 	});
@@ -86,7 +86,7 @@ if ($memberId) {
 	if ($mine) {
 		print '<ul>';
 		foreach ($mine as $s) {
-			$t = $bk->tool((int) $s->fk_tool);
+			$t = $bk->schedule()->tool((int) $s->fk_tool);
 			print '<li>'.dol_escape_htmltag($t ? $t->label : '?').': '.OnboardingBooking::WEEKDAYS[(int) $s->weekday].'s at '.dol_escape_htmltag($s->start_time).'</li>';
 		}
 		print '</ul>';

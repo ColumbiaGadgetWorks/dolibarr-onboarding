@@ -36,36 +36,36 @@ if ($canedit && $action == 'save') {
 	}
 	$in['bookable'] = GETPOST('bookable', 'int');
 	$in['active'] = GETPOST('active', 'int');
-	$r = $bk->saveTool($in, $user, $id);
+	$r = $bk->schedule()->saveTool($in, $user, $id);
 	setEventMessages($r['ok'] ? 'Saved, and sent to the website.' : $r['error'], null, $r['ok'] ? 'mesgs' : 'errors');
 	header('Location: '.$_SERVER['PHP_SELF'].'?action=edit&id='.($r['ok'] ? $r['id'] : $id));
 	exit;
 }
 if ($canedit && $action == 'addslot') {
-	$r = $bk->addSlot($id, (int) GETPOST('trainer', 'int'), (int) GETPOST('weekday', 'int'), trim(GETPOST('time', 'alphanohtml')), (int) GETPOST('minutes', 'int'), (int) GETPOST('seats', 'int'), $user);
+	$r = $bk->schedule()->addSlot($id, (int) GETPOST('trainer', 'int'), (int) GETPOST('weekday', 'int'), trim(GETPOST('time', 'alphanohtml')), (int) GETPOST('minutes', 'int'), (int) GETPOST('seats', 'int'), $user);
 	setEventMessages($r['ok'] ? 'Trainer added.' : $r['error'], null, $r['ok'] ? 'mesgs' : 'errors');
 	header('Location: '.$back);
 	exit;
 }
 if ($canedit && $action == 'delslot') {
-	$bk->removeSlot((int) GETPOST('slot', 'int'), $user);
+	$bk->schedule()->removeSlot((int) GETPOST('slot', 'int'), $user);
 	setEventMessages('Removed. Bookings already made for that time keep their date.', null);
 	header('Location: '.$back);
 	exit;
 }
 if ($canedit && $action == 'close') {
-	setEventMessages($bk->closeDay(GETPOST('day', 'alphanohtml'), GETPOST('reason', 'alphanohtml'), $user), null);
+	setEventMessages($bk->schedule()->closeDay(GETPOST('day', 'alphanohtml'), GETPOST('reason', 'alphanohtml'), $user), null);
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
 if ($canedit && $action == 'open') {
-	$bk->openDay((int) GETPOST('closed', 'int'), $user);
+	$bk->schedule()->openDay((int) GETPOST('closed', 'int'), $user);
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
 }
 if ($canedit && $action == 'push') {
-	$ok = $bk->pushCatalog();
-	$n = $ok ? $bk->pushLookups() : 0;
+	$ok = $bk->schedule()->pushCatalog();
+	$n = $ok ? $bk->schedule()->pushLookups() : 0;
 	setEventMessages($ok ? 'The website has the current catalog, and the lookup copy of '.$n.' people.' : 'The website did not accept it. Check the website address on the setup page and the website\'s DOLIBARR_API_KEY.', null, $ok ? 'mesgs' : 'errors');
 	header('Location: '.$_SERVER['PHP_SELF']);
 	exit;
@@ -77,7 +77,7 @@ print load_fiche_titre('Training tools', $canedit ? '<a class="butAction" href="
 print '<p class="opacitymedium">Tools that need training before solo use. Each has a fee (members get the discount), a zone whose budget gets its share, and trainers with a weekly time people can book on the website. Every change goes to the website straight away.</p>';
 
 // Website sync.
-$version = $bk->version();
+$version = $bk->schedule()->version();
 $has = getDolGlobalInt('ONBOARDING_WEBSITE_VERSION');
 $seen = getDolGlobalInt('ONBOARDING_WEBSITE_SEEN');
 $state = $seen ? ($has >= $version ? '<span class="badge badge-status4">up to date</span>' : '<span class="badge badge-status8">behind</span>') : '<span class="badge badge-status8">never checked in</span>';
@@ -103,10 +103,10 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 
 print '<div class="div-table-responsive"><table class="noborder centpercent">';
 print '<tr class="liste_titre"><td>Zone</td><td>Tool</td><td class="right">Fee</td><td class="right">Members</td><td class="center">Seats</td><td>Trainers and times</td><td class="right">Trained</td><td class="right">Booked</td><td class="right">Fees</td><td></td></tr>';
-$tools = $bk->tools();
+$tools = $bk->schedule()->tools();
 foreach ($tools as $t) {
 	$slots = array();
-	foreach ($bk->slots((int) $t->rowid) as $s) {
+	foreach ($bk->schedule()->slots((int) $t->rowid) as $s) {
 		$slots[] = dol_escape_htmltag(trim($s->firstname.' '.$s->lastname)).' <span class="opacitymedium">'.OnboardingBooking::WEEKDAYS[(int) $s->weekday].' '.dol_escape_htmltag($s->start_time).'</span>';
 	}
 	$st = isset($stats['id'.$t->rowid]) ? $stats['id'.$t->rowid] : (isset($stats['name'.$t->label]) ? $stats['name'.$t->label] : null);
@@ -124,7 +124,7 @@ print '</table></div>';
 
 // The form for one tool.
 if ($action == 'edit') {
-	$t = $id ? $bk->tool($id) : null;
+	$t = $id ? $bk->schedule()->tool($id) : null;
 	$v = function ($k, $default = '') use ($t) {
 		return dol_escape_htmltag($t ? (string) $t->$k : $default);
 	};
@@ -163,7 +163,7 @@ if ($action == 'edit') {
 		print '<br><h3>Trainers and their times</h3>';
 		print '<p class="opacitymedium">A trainer is a current member who is trained on this tool. Each weekly time is one session people can book. Adding someone gives them the "Trainer: '.dol_escape_htmltag($t->label).'" tag; removing their last time takes it away.</p>';
 		print '<div class="div-table-responsive"><table class="noborder centpercent"><tr class="liste_titre"><td>Trainer</td><td>Every</td><td>At</td><td class="right">Minutes</td><td class="right">Seats</td><td></td></tr>';
-		$slots = $bk->slots($id);
+		$slots = $bk->schedule()->slots($id);
 		foreach ($slots as $s) {
 			print '<tr class="oddeven"><td><a href="'.DOL_URL_ROOT.'/adherents/card.php?rowid='.((int) $s->fk_adherent).'">'.dol_escape_htmltag(trim($s->firstname.' '.$s->lastname)).'</a></td><td>'.OnboardingBooking::WEEKDAYS[(int) $s->weekday].'</td><td>'.dol_escape_htmltag($s->start_time).'</td>';
 			print '<td class="right">'.((int) ($s->minutes ?: $t->minutes)).'</td><td class="right">'.((int) ($s->seats ?: $t->seats)).'</td><td class="right">';
@@ -181,7 +181,7 @@ if ($action == 'edit') {
 			print '<select name="trainer" class="minwidth200"><option value="0">Trainer…</option>';
 			foreach ($bk->training->members() as $m) {
 				if ((int) $m->statut == Adherent::STATUS_VALIDATED) {
-					print '<option value="'.((int) $m->rowid).'">'.dol_escape_htmltag(trim($m->firstname.' '.$m->lastname)).($bk->isTrainedOn((int) $m->rowid, $t) ? '' : ' (not trained on it)').'</option>';
+					print '<option value="'.((int) $m->rowid).'">'.dol_escape_htmltag(trim($m->firstname.' '.$m->lastname)).($bk->schedule()->isTrainedOn((int) $m->rowid, $t) ? '' : ' (not trained on it)').'</option>';
 				}
 			}
 			print '</select> every <select name="weekday">';
@@ -198,7 +198,7 @@ if ($action == 'edit') {
 print '<br><h3>Closed days</h3>';
 print '<p class="opacitymedium">No training can be booked on these days. The website adds the days its calendar shows "Open Hack Night cancelled". Closing a day that has bookings asks those people to pick a new date, free.</p>';
 print '<div class="div-table-responsive"><table class="noborder centpercent"><tr class="liste_titre"><td>Day</td><td>Why</td><td>From</td><td></td></tr>';
-$closed = $bk->upcomingClosed();
+$closed = $bk->schedule()->upcomingClosed();
 foreach ($closed as $c) {
 	print '<tr class="oddeven"><td>'.dol_escape_htmltag(OnboardingBooking::fmt(OnboardingBooking::at(substr($c->day, 0, 10), '12:00'), 'l j F Y')).'</td><td>'.dol_escape_htmltag($c->reason).'</td><td>'.($c->source == 'calendar' ? 'the shop calendar' : 'by hand').'</td><td class="right">';
 	if ($canedit && $c->source == 'hand') {
@@ -215,7 +215,7 @@ if ($canedit) {
 }
 
 print '<br><h3>Changes</h3><div class="div-table-responsive"><table class="noborder centpercent"><tr class="liste_titre"><td class="right">Version</td><td>When</td><td>Who</td><td>What</td></tr>';
-foreach ($bk->changes(15) as $c) {
+foreach ($bk->schedule()->changes(15) as $c) {
 	print '<tr class="oddeven"><td class="right">'.((int) $c->rowid).'</td><td>'.dol_print_date($db->jdate($c->datec), 'dayhour').'</td><td>'.dol_escape_htmltag($c->login ?: 'the module').'</td><td>'.dol_escape_htmltag($c->note).'</td></tr>';
 }
 print '</table></div>';

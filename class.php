@@ -30,7 +30,7 @@ $action = GETPOST('action', 'aZ09');
 $id = (int) GETPOST('id', 'int');
 
 if ($canfree && $action == 'create') {
-	$r = $bk->createClass(array(
+	$r = $bk->classes()->createClass(array(
 		'tool' => (int) GETPOST('tool', 'int'), 'trainer' => (int) GETPOST('trainer', 'int'), 'day' => GETPOST('day', 'alphanohtml'), 'time' => GETPOST('time', 'alphanohtml'),
 		'minutes' => (int) GETPOST('minutes', 'int'), 'seats' => (int) GETPOST('seats', 'int'), 'mode' => GETPOST('mode', 'aZ09'), 'note' => GETPOST('note', 'alphanohtml'),
 	), $user);
@@ -38,15 +38,15 @@ if ($canfree && $action == 'create') {
 	header('Location: '.$_SERVER['PHP_SELF'].($r['ok'] ? '?id='.$r['id'] : ''));
 	exit;
 }
-$c = $id ? $bk->klass($id) : null;
+$c = $id ? $bk->classes()->klass($id) : null;
 if ($c && $canwrite && $action == 'add') {
-	setEventMessages($bk->classAdd($c, array('email' => GETPOST('email', 'alphanohtml'), 'firstname' => GETPOST('firstname', 'alphanohtml'), 'lastname' => GETPOST('lastname', 'alphanohtml'), 'paper_waiver' => GETPOST('paper_waiver', 'int')), $user), null);
+	setEventMessages($bk->classes()->classAdd($c, array('email' => GETPOST('email', 'alphanohtml'), 'firstname' => GETPOST('firstname', 'alphanohtml'), 'lastname' => GETPOST('lastname', 'alphanohtml'), 'paper_waiver' => GETPOST('paper_waiver', 'int')), $user), null);
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
 	exit;
 }
 if ($c && $canwrite && $action == 'finish') {
 	$ids = GETPOST('trained', 'array');
-	setEventMessages($bk->classFinish($c, is_array($ids) ? $ids : array(), (int) $user->id), null);
+	setEventMessages($bk->classes()->classFinish($c, is_array($ids) ? $ids : array(), (int) $user->id), null);
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
 	exit;
 }
@@ -62,7 +62,7 @@ llxHeader('', 'Group classes');
 if ($c) {
 	$start = $db->jdate($c->session_start);
 	print load_fiche_titre('Group class: '.dol_escape_htmltag($c->tool), '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'">All classes</a>', 'members');
-	$url = $bk->classUrl($c);
+	$url = $bk->classes()->classUrl($c);
 	print '<div class="fichecenter"><div class="fichehalfleft"><table class="border centpercent">';
 	print '<tr><td class="titlefield">When</td><td>'.dol_escape_htmltag(OnboardingBooking::fmt($start)).' ('.((int) $c->minutes).' minutes)</td></tr>';
 	print '<tr><td>Trainer</td><td>'.dol_escape_htmltag(trim($c->trainer_first.' '.$c->trainer_last)).'</td></tr>';
@@ -126,7 +126,7 @@ print '<p class="opacitymedium">A free class for several people at once. Attende
 if ($canfree) {
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">'.$hidden.'<input type="hidden" name="action" value="create"><table class="border centpercent">';
 	print '<tr><td class="titlefield">Tool</td><td><select name="tool">';
-	foreach ($bk->tools(true) as $t) {
+	foreach ($bk->schedule()->tools(true) as $t) {
 		print '<option value="'.((int) $t->rowid).'">'.dol_escape_htmltag($t->label).'</option>';
 	}
 	print '</select></td></tr><tr><td>Trainer</td><td><select name="trainer"><option value="0">Trainer…</option>';
@@ -143,7 +143,7 @@ if ($canfree) {
 	print '</table><div class="center"><button class="button button-save" type="submit">Create the class</button></div></form><br>';
 }
 print '<div class="div-table-responsive"><table class="noborder centpercent"><tr class="liste_titre"><td>When</td><td>Tool</td><td>Trainer</td><td>Code</td><td class="right">Signed in</td><td>Status</td></tr>';
-$all = $bk->classesWhere('1 = 1');
+$all = $bk->classes()->classesWhere('1 = 1');
 foreach ($all as $k) {
 	print '<tr class="oddeven"><td><a href="'.$_SERVER['PHP_SELF'].'?id='.((int) $k->rowid).'">'.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($k->session_start), 'D j M Y, g:i A')).'</a></td><td>'.dol_escape_htmltag($k->tool).'</td>';
 	print '<td>'.dol_escape_htmltag(trim($k->trainer_first.' '.$k->trainer_last)).'</td><td>'.dol_escape_htmltag($k->code).'</td><td class="right">'.((int) $k->attendees).' / '.((int) $k->seats).'</td><td>'.dol_escape_htmltag($k->status).'</td></tr>';

@@ -37,11 +37,11 @@ $job = isset($argv[1]) ? $argv[1] : '';
 
 if ($job == 'daily') {
 	OnboardingService::$now = dol_now() + ((int) (isset($argv[2]) ? $argv[2] : 0)) * 86400;
-	echo $svc->dunning().'; '.$svc->cleanup()."\n";
+	echo $svc->dues()->dunning().'; '.$svc->signup()->cleanup()."\n";
 } elseif ($job == 'sync') {
-	echo $svc->reconcile()."\n";
+	echo $svc->givebutter()->reconcile()."\n";
 } elseif ($job == 'retry') {
-	echo $svc->retryUnmatched()."\n";
+	echo $svc->givebutter()->retryUnmatched()."\n";
 } elseif ($job == 'dues') {
 	// The dues import's calendar month for a Givebutter payment made DAYS ago.
 	// dues import ID DAYS: subscription "Givebutter <date> Name" from DAYS+27 days
@@ -67,7 +67,7 @@ if ($job == 'daily') {
 		$db->query("INSERT INTO ".$db->prefix()."onboarding_payment (entity, gb_transaction_id, email, firstname, lastname, amount, transacted_at, status, fk_applicant, datec) VALUES (".((int) $conf->entity).", 'repro".mt_rand()."', '".$db->escape($argv[3])."', 'X', 'Y', 50, '".$db->idate(dol_now() - (int) $argv[4] * 86400)."', '".$db->escape($st)."', ".($st == 'matched' && $app ? (int) $app->rowid : 'NULL').", '".$db->idate(dol_now())."')");
 		echo "ok\n";
 	} elseif ($what == 'run') {
-		echo $svc->dunning()."\n";
+		echo $svc->dues()->dunning()."\n";
 	} elseif ($what == 'show') {
 		$adh = new Adherent($db);
 		$adh->fetch((int) $argv[3]);
@@ -230,20 +230,20 @@ if ($job == 'daily') {
 		echo json_encode($r)."\n";
 	}
 } elseif ($job == 'connect') {
-	echo $svc->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
+	echo $svc->givebutter()->connectGivebutter(isset($argv[2]) ? $argv[2] : '')."\n";
 } elseif ($job == 'import') {
 	echo implode("\n", $svc->importLegacy((string) file_get_contents('php://stdin'), !(isset($argv[2]) && $argv[2] == 'go')))."\n";
 } elseif ($job == 'emails') {
-	echo implode("\n", $svc->importEmails((string) file_get_contents('php://stdin'), 'sandbox import', !(isset($argv[2]) && $argv[2] == 'go')))."\n";
+	echo implode("\n", $svc->updates()->importEmails((string) file_get_contents('php://stdin'), 'sandbox import', !(isset($argv[2]) && $argv[2] == 'go')))."\n";
 } elseif ($job == 'contact') {
 	// What the email updates list holds for one address.
 	$id = $svc->contactByEmail(isset($argv[2]) ? $argv[2] : '');
-	$out = array('id' => $id, 'tagged' => false, 'unsubscribed' => $svc->isUnsubscribed(isset($argv[2]) ? $argv[2] : ''), 'contacts' => 0);
+	$out = array('id' => $id, 'tagged' => false, 'unsubscribed' => $svc->updates()->isUnsubscribed(isset($argv[2]) ? $argv[2] : ''), 'contacts' => 0);
 	if ($id) {
 		$c = new Contact($db);
 		$c->fetch($id);
 		$res = $db->query("SELECT COUNT(*) AS n FROM ".$db->prefix()."socpeople WHERE LOWER(email) = '".$db->escape(OnboardingService::cleanEmail($argv[2]))."'");
-		$out = array_merge($out, array('tagged' => $svc->isTaggedForUpdates($id), 'firstname' => $c->firstname, 'lastname' => $c->lastname, 'note' => $c->note_private, 'fields' => $c->array_options, 'contacts' => (int) $db->fetch_object($res)->n));
+		$out = array_merge($out, array('tagged' => $svc->updates()->isTaggedForUpdates($id), 'firstname' => $c->firstname, 'lastname' => $c->lastname, 'note' => $c->note_private, 'fields' => $c->array_options, 'contacts' => (int) $db->fetch_object($res)->n));
 	}
 	echo json_encode($out)."\n";
 } elseif ($job == 'unsubscribe') {
@@ -628,11 +628,11 @@ if ($job == 'daily') {
 	};
 	if ($what == 'tool') {
 		$in = json_decode($argv[3], true);
-		$t = $bk->toolByRef($in['ref']);
-		echo json_encode($bk->saveTool($in, $user, $t ? (int) $t->rowid : 0))."\n";
+		$t = $bk->schedule()->toolByRef($in['ref']);
+		echo json_encode($bk->schedule()->saveTool($in, $user, $t ? (int) $t->rowid : 0))."\n";
 	} elseif ($what == 'slot') {
-		$t = $bk->toolByRef($argv[3]);
-		echo json_encode($bk->addSlot($t ? (int) $t->rowid : 0, (int) $argv[4], (int) $argv[5], $argv[6], 0, isset($argv[7]) ? (int) $argv[7] : 0, $user))."\n";
+		$t = $bk->schedule()->toolByRef($argv[3]);
+		echo json_encode($bk->schedule()->addSlot($t ? (int) $t->rowid : 0, (int) $argv[4], (int) $argv[5], $argv[6], 0, isset($argv[7]) ? (int) $argv[7] : 0, $user))."\n";
 	} elseif ($what == 'show') {
 		echo json_encode($byRef($argv[3]))."\n";
 	} elseif ($what == 'link') {
@@ -643,18 +643,18 @@ if ($job == 'daily') {
 	} elseif ($what == 'free') {
 		echo json_encode($bk->free(json_decode($argv[3], true), $user))."\n";
 	} elseif ($what == 'class') {
-		echo json_encode($bk->createClass(json_decode($argv[3], true), $user))."\n";
+		echo json_encode($bk->classes()->createClass(json_decode($argv[3], true), $user))."\n";
 	} elseif ($what == 'classfinish') {
-		$c = $bk->klass((int) $argv[3]);
+		$c = $bk->classes()->klass((int) $argv[3]);
 		$ids = array();
 		foreach ($bk->bookingsWhere("fk_class = ".((int) $argv[3])." AND status = 'confirmed'") as $b) {
 			$ids[] = (int) $b->rowid;
 		}
-		echo $bk->classFinish($c, $ids, (int) $user->id)."\n";
+		echo $bk->classes()->classFinish($c, $ids, (int) $user->id)."\n";
 	} elseif ($what == 'close') {
-		echo $bk->closeDay($argv[3], 'test', $user)."\n";
+		echo $bk->schedule()->closeDay($argv[3], 'test', $user)."\n";
 	} elseif ($what == 'calendar') {
-		echo json_encode($bk->setCalendarClosures(json_decode($argv[3], true)))."\n";
+		echo json_encode($bk->schedule()->setCalendarClosures(json_decode($argv[3], true)))."\n";
 	} elseif ($what == 'lookup') {
 		echo json_encode($bk->lookup($argv[3]))."\n";
 	} elseif ($what == 'person') {
@@ -664,7 +664,7 @@ if ($job == 'daily') {
 		// The signing token, as the emailed link would carry it.
 		$p = $bk->person($argv[3]);
 		$app = $bk->applicantFor($p);
-		echo ($app ? $svc->issueToken($app, false) : '')."\n";
+		echo ($app ? $svc->signup()->issueToken($app, false) : '')."\n";
 	}
 } elseif ($job == 'dump') {
 	$app = $svc->findByEmail(isset($argv[2]) ? $argv[2] : '');

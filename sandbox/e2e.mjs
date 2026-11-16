@@ -116,21 +116,22 @@ const up = await api('id', { token: t2, data: png().toString('base64') });
 assert.equal(up.id, true, JSON.stringify(up));
 assert.equal(up.stage, 'payment');
 let d = dump();
-assert.ok(d.files.includes('waiver.pdf'), `signed PDF missing: ${d.files}`);
-assert.ok(d.files.includes('agreement.txt') && d.files.includes('id.png'), `files: ${d.files}`);
+// The version signed is in the file names.
+assert.ok(d.files.includes(`waiver-${docs.waiver.version}.pdf`), `signed PDF missing: ${d.files}`);
+assert.ok(d.files.includes(`agreement-${docs.agreement.version}.txt`) && d.files.includes('id.png'), `files: ${d.files}`);
 assert.ok(d.contact_fields.options_waiver_date, 'waiver date mirrored onto the contact');
-assert.ok(d.files.includes('waiver-signature.png'), `drawn signature missing: ${d.files}`);
+assert.ok(d.files.includes(`waiver-${docs.waiver.version}-signature.png`), `drawn signature missing: ${d.files}`);
 assert.equal(d.member.status, -1, 'ready to pay: a non-member (draft member), not yet a member');
 assert.equal(d.member.subscriptions, 0);
 
 step('the signed papers and the ID photo are on the member card');
-assert.deepEqual(d.member_files.map((f) => f.replace(/\.\w+$/, '')).sort(), ['onboarding-id-photo', 'onboarding-signed-agreement', 'onboarding-signed-waiver'], `member files: ${d.member_files}`);
+assert.deepEqual(d.member_files.map((f) => f.replace(/\.\w+$/, '')).sort(), ['onboarding-id-photo', `onboarding-signed-agreement-${docs.agreement.version}`, `onboarding-signed-waiver-${docs.waiver.version}`], `member files: ${d.member_files}`);
 const agreementCopy = d.member_files.find((f) => f.startsWith('onboarding-signed-agreement'));
 tick('memberfiles', email); // anyone left over from an earlier run
 assert.equal(tick('memberfiles', email), '0 files copied to member cards', 'copied once, not every day');
 tick('memberfiles', email, 'drop', agreementCopy);
 assert.ok(!dump().member_files.includes(agreementCopy), 'deleted from the member card stays deleted');
-assert.ok(dump().files.some((f) => f.startsWith('agreement.')), 'the original stays');
+assert.ok(dump().files.some((f) => f.startsWith('agreement-')), 'the original stays');
 assert.equal(tick('memberfiles', email, 'forget'), '3 files copied to member cards', 'members from before: copied by the daily job');
 assert.equal(dump().member_files.length, 3);
 
@@ -251,15 +252,23 @@ step('plan cancelled: reminders, then lapse');
 assert.match((await mock(`/control/plan/${paid.plan.id}/cancel`)).delivery.status, /cancelled/);
 assert.equal(dump().applicant.payment_state, 'cancelled');
 const count = async () => (await mailTo(email)).filter((s) => s.includes('dues need attention')).length;
-console.log(tick('daily', '1'));
+// The reminder clock starts when the paid month runs out, not at the cancellation.
+const paidUntil = dump().member.paid_until;
+assert.ok(paidUntil, 'the payment set a paid-through date');
+const off = Math.ceil((Date.parse(paidUntil + 'T23:59:59Z') - Date.now()) / 86400000);
+assert.ok(off >= 20, `paid through ${paidUntil}, about a month out`);
+const day = (n) => String(off + n);
+console.log(tick('daily', '4'));
+assert.equal(await count(), 0, 'no reminder while the paid month lasts');
+console.log(tick('daily', day(1)));
 assert.equal(await count(), 0, 'no reminder before day 3');
-console.log(tick('daily', '4'));
+console.log(tick('daily', day(4)));
 assert.equal(await count(), 1);
-console.log(tick('daily', '4'));
+console.log(tick('daily', day(4)));
 assert.equal(await count(), 1, 'a reminder is never sent twice');
-console.log(tick('daily', '15'));
+console.log(tick('daily', day(15)));
 assert.equal(await count(), 2, 'days 7 and 14 coming due together send one email');
-console.log(tick('daily', '45'));
+console.log(tick('daily', day(45)));
 d = dump();
 assert.equal(d.applicant.payment_state, 'lapsed');
 assert.equal(d.member.status, 0, 'member terminated');
@@ -297,6 +306,11 @@ assert.match((await mock('/control/pay', { email: email4, amount: 50 })).deliver
 assert.equal(dumpOf(email4).applicant.payment_state, 'active');
 const forged = await fetch(`${DOLI}/custom/onboarding/public/givebutter.php`, { method: 'POST', headers: { Signature: 'forged' }, body: '{"event":"transaction.succeeded","data":{"id":"x"}}' });
 assert.equal(forged.status, 401);
+// Through the website there is no signature: the event is read back from
+// Givebutter, so a made-up transaction finds nothing and is not applied.
+const madeUp = await api('givebutter', { event: 'transaction.succeeded', data: { id: 'tx_made_up', email: email4, amount: 5000, status: 'succeeded' } });
+assert.equal(madeUp.ok, false);
+assert.equal(madeUp.status, 502);
 
 step('legacy import');
 const stamp = Date.now();

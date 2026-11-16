@@ -33,7 +33,7 @@ class OnboardingCron
 	public function reconcile()
 	{
 		$svc = new OnboardingService($this->db);
-		$this->output = $svc->reconcile();
+		$this->output = $svc->givebutter()->reconcile();
 		if (strpos($this->output, 'failed') !== false) {
 			$svc->alert('givebutter-sync', 'The hourly Givebutter sync is failing', 'The hourly sync with Givebutter said: '.$this->output."\n\nPayments still reach Dolibarr by webhook, but a missed one is not caught until this works. Check the Givebutter API key on the module setup page.");
 		} elseif (getDolGlobalString('ONBOARDING_GB_API_KEY') !== '') {
@@ -77,7 +77,7 @@ class OnboardingCron
 		$purchase = new OnboardingPurchase($this->db, $svc);
 		dol_include_once('/onboarding/class/mailgate.class.php');
 		$gate = new OnboardingMailGate($this->db);
-		$this->output = $svc->dunning().'; '.$svc->cleanup().'; '.$svc->copyAllToMembers().'; '.$training->expireRegistrations().'; '.$purchase->purge().'; '.$svc->fetchDocs().'; '.$gate->daily();
+		$this->output = $svc->dues()->dunning().'; '.$svc->signup()->cleanup().'; '.$svc->copyAllToMembers().'; '.$training->expireRegistrations().'; '.$purchase->purge().'; '.$svc->fetchDocs().'; '.$gate->daily();
 		dol_include_once('/onboarding/class/filing.class.php');
 		try {
 			$this->output .= '; '.(new OnboardingFiling($this->db, $svc))->run();

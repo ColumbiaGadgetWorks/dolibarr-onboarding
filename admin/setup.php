@@ -17,6 +17,7 @@ if (!$res) {
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 dol_include_once('/onboarding/class/onboarding.class.php');
+dol_include_once('/onboarding/class/givebutter.class.php');
 dol_include_once('/onboarding/class/home.class.php');
 dol_include_once('/onboarding/class/security.class.php');
 dol_include_once('/onboarding/class/freeclass.class.php');
@@ -55,7 +56,7 @@ $sections = array(
 		'ONBOARDING_CHECKOUT_URL' => array('Dues payment page', 'text', 'Where the signup sends people to pay, for example https://givebutter.com/kxk2FA .'),
 		'ONBOARDING_GB_API_BASE' => array('Givebutter API address', 'text', 'Only change this to point at the sandbox.'),
 		'ONBOARDING_DUES_STANDARD' => array('Standard monthly dues', 'text', ''),
-		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'A payment of at least this much makes the member a Supporter.'),
+		'ONBOARDING_DUES_SUPPORTER' => array('Supporter monthly dues', 'text', 'Paying at least this much a month makes the member a Supporter. A quarterly or yearly payment is divided by its months.'),
 	),
 	'Email approval' => array(
 		'ONBOARDING_MAILGATE_APPROVER' => array('Approver', 'text', 'When set, every email Dolibarr sends (this module\'s, password resets, mass emailings) waits until this address approves it. They get a copy of each with Approve, "Approve, and always allow this kind" and Reject buttons. Empty: emails go out straight away. Waiting emails: Members, Onboarding, Email approval.'),
@@ -290,12 +291,12 @@ if (in_array($action, array('runsync', 'rundaily', 'connect', 'roletags', 'fetch
 		dol_include_once('/onboarding/class/booking.class.php');
 		$out = (new OnboardingBooking($db, $svc))->run();
 	} elseif ($action == 'connect') {
-		$out = $svc->connectGivebutter();
+		$out = $svc->givebutter()->connectGivebutter();
 	} elseif ($action == 'roletags') {
 		dol_include_once('/onboarding/class/purchase.class.php');
 		$out = (new OnboardingPurchase($db, $svc))->installRoleTags();
 	} else {
-		$out = $action == 'runsync' ? $svc->reconcile() : $svc->dunning().'; '.$svc->cleanup();
+		$out = $action == 'runsync' ? $svc->givebutter()->reconcile() : $svc->dues()->dunning().'; '.$svc->signup()->cleanup();
 	}
 	setEventMessages($out, null);
 	header('Location: '.$_SERVER['PHP_SELF']);
@@ -363,11 +364,11 @@ print '<div class="info">The website talks to Dolibarr at <strong>'.dol_escape_h
 
 $connected = getDolGlobalString('ONBOARDING_GB_WEBHOOK_ID') !== '';
 print '<div class="'.($connected ? 'ok' : 'warning').'">';
-print $connected ? 'Givebutter is connected: it reports payments and cancelled plans to <strong>'.dol_escape_htmltag($svc->webhookUrl()).'</strong>. ' : 'Givebutter is not connected yet, so payments are only noticed by the hourly sync. Save the API key below, then press Connect. ';
+print $connected ? 'Givebutter is connected: it reports payments and cancelled plans to <strong>'.dol_escape_htmltag($svc->givebutter()->webhookUrl()).'</strong>. ' : 'Givebutter is not connected yet, so payments are only noticed by the hourly sync. Save the API key below, then press Connect. ';
 print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?action=connect&token='.newToken().'">'.($connected ? 'Reconnect' : 'Connect Givebutter').'</a>';
 if ($connected) {
-	list($when, $what) = OnboardingService::webhookNote('ONBOARDING_GB_WEBHOOK_LAST');
-	list($rwhen, $rwhat) = OnboardingService::webhookNote('ONBOARDING_GB_WEBHOOK_REFUSED');
+	list($when, $what) = OnboardingGivebutter::webhookNote('ONBOARDING_GB_WEBHOOK_LAST');
+	list($rwhen, $rwhat) = OnboardingGivebutter::webhookNote('ONBOARDING_GB_WEBHOOK_REFUSED');
 	print '<br><span class="small">Last webhook received: <strong>'.($when ? dol_print_date($when, 'dayhour').'</strong> ('.dol_escape_htmltag($what).')' : 'none yet</strong>').'.';
 	if ($rwhen) {
 		print ' Last refused: <strong>'.dol_print_date($rwhen, 'dayhour').'</strong> ('.dol_escape_htmltag($rwhat).').';
@@ -375,7 +376,7 @@ if ($connected) {
 	if (getDolGlobalInt('ONBOARDING_GB_MISSED') > 0) {
 		print ' <span class="warning">'.getDolGlobalInt('ONBOARDING_GB_MISSED').' payment(s) since then were found by asking Givebutter instead.</span>';
 	}
-	if (preg_match('#^https?://(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^/]*\.local\b|[^/.:]+(:\d+)?/)#i', $svc->webhookUrl())) {
+	if (preg_match('#^https?://(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^/]*\.local\b|[^/.:]+(:\d+)?/)#i', $svc->givebutter()->webhookUrl())) {
 		print ' <span class="warning">That address looks internal, so Givebutter cannot reach it: set "This Dolibarr\'s public address" below and press Reconnect.</span>';
 	}
 	print ' If payments arrive late, check the delivery log in Givebutter (Settings, Developers, Webhooks).</span>';
@@ -447,7 +448,8 @@ foreach ($sections as $title => $fields) {
 				$shown = OnboardingHome::layoutText();
 				print '<a id="home-layout"></a>';
 			}
-			print '<textarea name="'.$name.'" rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : ($name == 'ONBOARDING_RECONCILE_RULES' ? 20 : 6))).'" class="quatrevingtpercent"'.(in_array($name, array('ONBOARDING_HOME_YAML', 'ONBOARDING_RECONCILE_RULES'), true) ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown, 0, 1).'</textarea>';
+			$builtIn = OnboardingMails::builtIn($name);
+			print '<textarea name="'.$name.'"'.($builtIn !== '' ? ' placeholder="'.dol_escape_htmltag($builtIn, 0, 1).'"' : '').' rows="'.(strpos($name, '_TEXT') ? 14 : ($name == 'ONBOARDING_HOME_YAML' ? 30 : ($name == 'ONBOARDING_RECONCILE_RULES' ? 20 : 6))).'" class="quatrevingtpercent"'.(in_array($name, array('ONBOARDING_HOME_YAML', 'ONBOARDING_RECONCILE_RULES'), true) ? ' style="font-family:monospace" spellcheck="false"' : '').'>'.dol_escape_htmltag($shown, 0, 1).'</textarea>';
 		} elseif ($def[1] == 'gcalseries') {
 			$gcal = new OnboardingGcal();
 			$list = OnboardingGcal::configured() ? $gcal->series() : null;
@@ -463,7 +465,8 @@ foreach ($sections as $title => $fields) {
 		} elseif ($def[1] == 'secret') {
 			print '<input type="password" name="'.$name.'" value="" class="minwidth400" autocomplete="new-password" placeholder="'.($value !== '' ? 'Saved. Type a new one to replace it.' : 'Not set').'">';
 		} else {
-			print '<input type="text" name="'.$name.'" value="'.dol_escape_htmltag($value).'" class="minwidth400">';
+			$builtIn = OnboardingMails::builtIn($name);
+			print '<input type="text" name="'.$name.'" value="'.dol_escape_htmltag($value).'" class="minwidth400"'.($builtIn !== '' ? ' placeholder="'.dol_escape_htmltag($builtIn).'"' : '').'>';
 		}
 		if ($def[2] !== '') {
 			print '<br><span class="opacitymedium small">'.dol_escape_htmltag($def[2]).'</span>';

@@ -5,8 +5,8 @@
 //      transaction and a monthly plan and fires the same webhook Givebutter would.
 //   2. Serves a control page at / to charge a plan again, fail it, cancel it or
 //      resume it, each firing its webhook.
-//   3. Answers the two API calls the module makes: GET /v1/transactions and
-//      GET /v1/plans/{id}.
+//   3. Answers the API calls the module makes: GET /v1/transactions,
+//      GET /v1/transactions/{id} and GET /v1/plans/{id}.
 //   4. /control/pay also takes a campaign (training fees) and a fee (what
 //      Givebutter keeps; 0 unless given).
 //   5. Stands in for GitHub: serves the waiver and agreement at /legal/*.md,
@@ -331,6 +331,11 @@ http.createServer(async (req, res) => {
         return json(res, 201, registered);
       }
       if (/^\/v1\/webhooks\/[^/]+$/.test(path) && req.method === 'DELETE') { registered = null; return json(res, 200, {}); }
+      const tm = path.match(/^\/v1\/transactions\/([^/]+)$/);
+      if (tm) {
+        const t = transactions.find((x) => x.id === tm[1]);
+        return t ? json(res, 200, t) : json(res, 404, { message: 'Not found.' });
+      }
       const m = path.match(/^\/v1\/plans\/([^/]+)$/);
       if (m) return plans.has(m[1]) ? json(res, 200, plans.get(m[1])) : json(res, 404, { message: 'Not found.' });
       return json(res, 404, { message: 'Not found.' });

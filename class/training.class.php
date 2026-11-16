@@ -143,15 +143,28 @@ class OnboardingTraining
 			return dol_trunc((string) (isset($t[$k]) ? $t[$k] : ''), $max, 'right', 'UTF-8', 1);
 		};
 
-		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, trainer_name, amount, amount_net, zone_amount, trainer_amount, transacted_at, status, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$this->db->escape($txid)."', '".$this->db->escape($email)."', '".$this->db->escape($trunc('first_name', 100))."', '".$this->db->escape($trunc('last_name', 100))."', ";
 		$trainee = $this->memberByEmail($email);
-		$sql .= ($trainee ? (int) $trainee : 'NULL').", '', '', '', ".price2num($amount).", ".price2num($net).", 0, 0, ";
-		$sql .= "'".$this->db->idate($when ? $when : OnboardingService::now())."', 'unregistered', '".$this->db->idate(OnboardingService::now())."')";
-		if (!$this->db->query($sql)) {
+		$id = OnboardingSql::insert($this->db, 'onboarding_training', array(
+			'entity' => (int) $conf->entity,
+			'gb_transaction_id' => $txid,
+			'email' => $email,
+			'firstname' => $trunc('first_name', 100),
+			'lastname' => $trunc('last_name', 100),
+			'fk_adherent' => $trainee ? (int) $trainee : null,
+			'zone' => '',
+			'tool' => '',
+			'trainer_name' => '',
+			'amount' => (float) price2num($amount),
+			'amount_net' => (float) price2num($net),
+			'zone_amount' => 0,
+			'trainer_amount' => 0,
+			'transacted_at' => $this->db->idate($when ? $when : OnboardingService::now()),
+			'status' => 'unregistered',
+			'datec' => $this->db->idate(OnboardingService::now()),
+		));
+		if (!$id) {
 			return 'duplicate'; // Lost a race with another delivery.
 		}
-		$id = (int) $this->db->last_insert_id($table);
 
 		$reg = $this->findRegistration($email, $amount);
 		if (!$reg) {
@@ -200,27 +213,43 @@ class OnboardingTraining
 	public function insertRecord($in)
 	{
 		global $conf;
-		$table = $this->db->prefix().'onboarding_training';
 		$get = function ($k, $max) use ($in) {
-			return $this->db->escape(dol_trunc((string) (isset($in[$k]) ? $in[$k] : ''), $max, 'right', 'UTF-8', 1));
+			return dol_trunc((string) (isset($in[$k]) ? $in[$k] : ''), $max, 'right', 'UTF-8', 1);
 		};
 		$int = function ($k) use ($in) {
-			return !empty($in[$k]) ? (int) $in[$k] : 'NULL';
+			return !empty($in[$k]) ? (int) $in[$k] : null;
 		};
 		$trainerAmount = (float) (isset($in['trainer_amount']) ? $in['trainer_amount'] : 0);
 		$zoneAmount = (float) (isset($in['zone_amount']) ? $in['zone_amount'] : 0);
 		$status = isset($in['status']) ? (string) $in['status'] : 'recorded';
-		$sql = "INSERT INTO ".$table." (entity, gb_transaction_id, email, firstname, lastname, fk_adherent, zone, tool, fk_tool, trainer_name, fk_trainer, amount, amount_net, zone_amount, trainer_amount, transacted_at, status, source, fk_booking, free_reason, fk_user, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$get('tx', 64)."', '".$this->db->escape(OnboardingService::cleanEmail(isset($in['email']) ? $in['email'] : ''))."', '".$get('firstname', 100)."', '".$get('lastname', 100)."', ".$int('fk_adherent').", ";
-		$sql .= "'".$get('zone', 100)."', '".$get('tool', 150)."', ".$int('fk_tool').", '".$get('trainer_name', 150)."', ".$int('fk_trainer').", ";
-		$sql .= price2num((float) (isset($in['amount']) ? $in['amount'] : 0)).", ".price2num($trainerAmount + $zoneAmount).", ".price2num($zoneAmount).", ".price2num($trainerAmount).", ";
-		$sql .= "'".$this->db->idate(!empty($in['when']) ? (int) $in['when'] : OnboardingService::now())."', '".$this->db->escape($status)."', '".$get('source', 10)."', ".$int('fk_booking').", ";
-		$sql .= (isset($in['free_reason']) && $in['free_reason'] !== '' ? "'".$get('free_reason', 255)."'" : 'NULL').", ".$int('fk_user').", '".$this->db->idate(OnboardingService::now())."')";
-		if (!$this->db->query($sql)) {
+		$id = OnboardingSql::insert($this->db, 'onboarding_training', array(
+			'entity' => (int) $conf->entity,
+			'gb_transaction_id' => $get('tx', 64),
+			'email' => OnboardingService::cleanEmail(isset($in['email']) ? $in['email'] : ''),
+			'firstname' => $get('firstname', 100),
+			'lastname' => $get('lastname', 100),
+			'fk_adherent' => $int('fk_adherent'),
+			'zone' => $get('zone', 100),
+			'tool' => $get('tool', 150),
+			'fk_tool' => $int('fk_tool'),
+			'trainer_name' => $get('trainer_name', 150),
+			'fk_trainer' => $int('fk_trainer'),
+			'amount' => (float) price2num((float) (isset($in['amount']) ? $in['amount'] : 0)),
+			'amount_net' => (float) price2num($trainerAmount + $zoneAmount),
+			'zone_amount' => (float) price2num($zoneAmount),
+			'trainer_amount' => (float) price2num($trainerAmount),
+			'transacted_at' => $this->db->idate(!empty($in['when']) ? (int) $in['when'] : OnboardingService::now()),
+			'status' => $status,
+			'source' => $get('source', 10),
+			'fk_booking' => $int('fk_booking'),
+			'free_reason' => isset($in['free_reason']) && $in['free_reason'] !== '' ? $get('free_reason', 255) : null,
+			'fk_user' => $int('fk_user'),
+			'datec' => $this->db->idate(OnboardingService::now()),
+		));
+		if (!$id) {
 			dol_syslog('Onboarding: training insert failed: '.$this->db->lasterror(), LOG_ERR);
 			return 0;
 		}
-		$id = (int) $this->db->last_insert_id($table);
 		$tool = isset($in['tool']) ? (string) $in['tool'] : '';
 		$this->post('zone', isset($in['zone']) ? (string) $in['zone'] : '', $zoneAmount, 'training', $id, ($status == 'no_show' ? 'Training fee kept (no-show), ' : 'Training fee, ').$tool);
 		if (!empty($in['fk_trainer'])) {
@@ -309,8 +338,8 @@ class OnboardingTraining
 		}
 		$this->svc->mail(
 			$tr->email,
-			strtr(getDolGlobalString('ONBOARDING_MAIL_TRAINED_SUBJECT', 'You are trained on the {tool}'), array('{tool}' => $tool)),
-			strtr(getDolGlobalString('ONBOARDING_MAIL_TRAINED_BODY', "Hi {firstname},\n\nThanks for your training fee. You are now on record as trained to use the {tool} ({zone}).\n\nYou can check what you are trained on at any time: {lookup_url}"), array(
+			strtr(OnboardingMails::text('ONBOARDING_MAIL_TRAINED_SUBJECT'), array('{tool}' => $tool)),
+			strtr(OnboardingMails::text('ONBOARDING_MAIL_TRAINED_BODY'), array(
 				'{firstname}' => $first !== '' ? $first : 'there',
 				'{tool}' => $tool,
 				'{zone}' => $zone,
@@ -341,10 +370,18 @@ class OnboardingTraining
 		if (abs((float) $amount) < 0.005 && $kind == 'training') {
 			return false;
 		}
-		$sql = "INSERT INTO ".$this->db->prefix()."onboarding_ledger (entity, account_type, account_key, amount, kind, fk_training, fk_credit, note, fk_user, datec) VALUES (";
-		$sql .= ((int) $conf->entity).", '".$this->db->escape($type)."', '".$this->db->escape((string) $key)."', ".price2num((float) $amount).", '".$this->db->escape($kind)."', ";
-		$sql .= ($trainingId ? (int) $trainingId : 'NULL').", ".($creditId ? (int) $creditId : 'NULL').", '".$this->db->escape(dol_trunc($note, 255, 'right', 'UTF-8', 1))."', ".($userId ? (int) $userId : 'NULL').", '".$this->db->idate(OnboardingService::now())."')";
-		return (bool) $this->db->query($sql);
+		return (bool) OnboardingSql::insert($this->db, 'onboarding_ledger', array(
+			'entity' => (int) $conf->entity,
+			'account_type' => $type,
+			'account_key' => (string) $key,
+			'amount' => (float) price2num((float) $amount),
+			'kind' => $kind,
+			'fk_training' => $trainingId ? (int) $trainingId : null,
+			'fk_credit' => $creditId ? (int) $creditId : null,
+			'note' => dol_trunc($note, 255, 'right', 'UTF-8', 1),
+			'fk_user' => $userId ? (int) $userId : null,
+			'datec' => $this->db->idate(OnboardingService::now()),
+		));
 	}
 
 	/**
@@ -709,20 +746,16 @@ class OnboardingTraining
 			return array('ok' => false, 'error' => 'invalid', 'http' => 400);
 		}
 		$fee = isset($in['fee']) && is_numeric($in['fee']) ? (float) $in['fee'] : 0;
-		$table = $this->db->prefix().'onboarding_training_reg';
-		$cols = array('email' => $email);
+		$cols = array('entity' => (int) $conf->entity, 'email' => $email);
 		foreach (array('firstname' => 100, 'lastname' => 100, 'tool_id' => 100, 'tool' => 150, 'zone' => 100, 'trainer_id' => 100, 'trainer_name' => 150, 'trainer_member' => 64, 'ip' => 64) as $k => $max) {
 			$cols[$k] = $get($k, $max);
 		}
-		$sql = "INSERT INTO ".$table." (entity, ".implode(', ', array_keys($cols)).", fee, status, datec) VALUES (".((int) $conf->entity);
-		foreach ($cols as $v) {
-			$sql .= ", '".$this->db->escape($v)."'";
-		}
-		$sql .= ", ".price2num($fee).", 'waiting', '".$this->db->idate(OnboardingService::now())."')";
-		if (!$this->db->query($sql)) {
+		$cols += array('fee' => (float) price2num($fee), 'status' => 'waiting', 'datec' => $this->db->idate(OnboardingService::now()));
+		$id = OnboardingSql::insert($this->db, 'onboarding_training_reg', $cols);
+		if (!$id) {
 			return array('ok' => false, 'error' => 'save', 'http' => 500);
 		}
-		return array('ok' => true, 'id' => (int) $this->db->last_insert_id($table));
+		return array('ok' => true, 'id' => $id);
 	}
 
 	/**

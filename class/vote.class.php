@@ -701,7 +701,8 @@ class OnboardingVote
 		$p = $this->db->prefix();
 		$roll = $this->voters($now, $v);
 		$this->db->begin();
-		if (!$this->db->query("UPDATE ".$p."onboarding_vote SET status = 'open', opened_at = '".$this->db->idate($now)."', closes_at = '".$this->db->idate($now + self::days() * 86400)."', voters = ".count($roll)." WHERE rowid = ".((int) $v->rowid)." AND status = 'noticed'") || $this->db->affected_rows(null) < 1) {
+		$r = $this->db->query("UPDATE ".$p."onboarding_vote SET status = 'open', opened_at = '".$this->db->idate($now)."', closes_at = '".$this->db->idate($now + self::days() * 86400)."', voters = ".count($roll)." WHERE rowid = ".((int) $v->rowid)." AND status = 'noticed'");
+		if (!$r || $this->db->affected_rows($r) < 1) {
 			$this->db->rollback();
 			return 'Voting has already opened.';
 		}
@@ -789,7 +790,7 @@ class OnboardingVote
 		$p = $this->db->prefix();
 		$this->db->begin();
 		$ok = $this->db->query("UPDATE ".$p."onboarding_vote_roll SET voted_on = '".$this->db->escape(self::day($now))."' WHERE fk_vote = ".((int) $v->rowid)." AND fk_adherent = ".((int) $memberId)." AND voted_on IS NULL");
-		if (!$ok || $this->db->affected_rows(null) < 1) {
+		if (!$ok || $this->db->affected_rows($ok) < 1) {
 			$this->db->rollback();
 			return array('ok' => false, 'msg' => 'You have already voted, or you are not on the roll for this vote.');
 		}
@@ -1274,8 +1275,8 @@ class OnboardingVote
 		$votes = array();
 		foreach ($rows as $row) {
 			// Claim the row first so two runs at once do not both send it.
-			$this->db->query("UPDATE ".$p."onboarding_vote_mail SET tries = tries + 1 WHERE rowid = ".((int) $row->rowid)." AND tries = ".((int) $row->tries));
-			if ($this->db->affected_rows(null) < 1) {
+			$r = $this->db->query("UPDATE ".$p."onboarding_vote_mail SET tries = tries + 1 WHERE rowid = ".((int) $row->rowid)." AND tries = ".((int) $row->tries));
+			if (!$r || $this->db->affected_rows($r) < 1) {
 				continue;
 			}
 			if (!isset($votes[$row->fk_vote])) {
