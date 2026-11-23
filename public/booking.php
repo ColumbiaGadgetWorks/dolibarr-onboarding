@@ -169,7 +169,7 @@ if ($classId > 0) {
 		onboarding_booking_page('Link not valid', '<p>This link is not valid. Ask the secretary to confirm the class in Dolibarr.</p>', 403);
 	}
 	$hidden = array('c' => (string) $classId, 'k' => $key);
-	$facts = '<div class="facts"><strong>'.dol_escape_htmltag($c->tool).'</strong> group class<br>'.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($c->session_start))).' &middot; code '.dol_escape_htmltag($c->code).'</div>';
+	$facts = '<div class="facts"><strong>'.dol_escape_htmltag($c->tool).'</strong> training class<br>'.dol_escape_htmltag(OnboardingBooking::fmt($db->jdate($c->session_start))).' &middot; code '.dol_escape_htmltag($c->code).'</div>';
 	if ($post && $do == 'finish') {
 		$ids = GETPOST('trained', 'array');
 		$msg = $bk->classes()->classFinish($c, is_array($ids) ? $ids : array());

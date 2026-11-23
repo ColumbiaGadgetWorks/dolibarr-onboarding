@@ -120,7 +120,7 @@ class modOnboarding extends DolibarrModules
 				'objectname' => 'OnboardingCron',
 				'method' => 'bookings',
 				'parameters' => '',
-				'comment' => 'Lets go of unpaid seats, asks trainers to confirm and cancels unconfirmed sessions, sends day-of reminders and the questions after each training, sends group class lists, checks the website has the current training catalog, and runs member votes (reminders to the Secretary and President, ballot emails, closing and counting).',
+				'comment' => 'Lets go of unpaid seats, asks trainers to confirm and cancels unconfirmed sessions, sends day-of reminders and the questions after each training, sends tool training class lists, checks the website has the current training catalog, and runs member votes (reminders to the Secretary and President, ballot emails, closing and counting).',
 				'frequency' => 15,
 				'unitfrequency' => 60,
 				'status' => 1,
@@ -167,7 +167,7 @@ class modOnboarding extends DolibarrModules
 		$this->rights[$r][5] = 'write';
 		$r++;
 		$this->rights[$r][0] = $this->numero.'07';
-		$this->rights[$r][1] = 'Record free trainings and create group classes (give it to the board)';
+		$this->rights[$r][1] = 'Record free trainings and create tool training classes (give it to the board)';
 		$this->rights[$r][4] = 'training';
 		$this->rights[$r][5] = 'free';
 		$r++;
@@ -317,7 +317,7 @@ class modOnboarding extends DolibarrModules
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
 			'type' => 'left',
-			'titre' => 'Group classes',
+			'titre' => 'Tool training classes',
 			'mainmenu' => 'members',
 			'leftmenu' => 'onboarding_classes',
 			'url' => '/onboarding/class.php',
@@ -325,6 +325,20 @@ class modOnboarding extends DolibarrModules
 			'position' => 1000 + $r,
 			'enabled' => 'isModEnabled("onboarding")',
 			'perms' => '$user->hasRight("onboarding", "training", "read")',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=members,fk_leftmenu=onboarding',
+			'type' => 'left',
+			'titre' => 'Free classes',
+			'mainmenu' => 'members',
+			'leftmenu' => 'onboarding_freeclasses',
+			'url' => '/onboarding/freeclasses.php',
+			'langs' => 'onboarding@onboarding',
+			'position' => 1000 + $r,
+			'enabled' => 'isModEnabled("onboarding")',
+			'perms' => '$user->admin || $user->hasRight("onboarding", "freeclass", "write")',
 			'target' => '',
 			'user' => 0,
 		);
@@ -441,22 +455,6 @@ class modOnboarding extends DolibarrModules
 			'target' => '',
 			'user' => 0,
 		);
-		// Its own entry under Members: the classes lead may not see Onboarding.
-		$this->menu[$r++] = array(
-			'fk_menu' => 'fk_mainmenu=members',
-			'type' => 'left',
-			'titre' => 'Free classes',
-			'prefix' => img_picto('', 'calendar', 'class="pictofixedwidth valignmiddle"'),
-			'mainmenu' => 'members',
-			'leftmenu' => 'onboarding_freeclasses',
-			'url' => '/onboarding/freeclasses.php',
-			'langs' => 'onboarding@onboarding',
-			'position' => 1000 + $r,
-			'enabled' => 'isModEnabled("onboarding")',
-			'perms' => '$user->admin || $user->hasRight("onboarding", "freeclass", "write")',
-			'target' => '',
-			'user' => 0,
-		);
 		$this->menu[$r++] = array(
 			'fk_menu' => 'fk_mainmenu=project',
 			'type' => 'left',
@@ -499,7 +497,6 @@ class modOnboarding extends DolibarrModules
 				$cgw[] = array('cgw_'.$m['leftmenu'], 'cgw_onboarding', $m['titre'], $m['url'].$sep.'mainmenu=cgw&leftmenu=cgw_onboarding', $m['perms'], '');
 			}
 		}
-		$cgw[] = array('cgw_freeclasses', '', 'Free classes', '/onboarding/freeclasses.php?mainmenu=cgw&leftmenu=cgw_freeclasses', '$user->admin || $user->hasRight("onboarding", "freeclass", "write")', '<i class="fa fa-chalkboard-teacher fa-fw paddingright pictofixedwidth"></i>');
 		$cgw[] = array('cgw_deadlines', 'cgw_onboarding', 'Deadline reminders', '/onboarding/deadlines.php?mainmenu=cgw&leftmenu=cgw_onboarding', 'isModEnabled("project") && $user->hasRight("projet", "lire")', '');
 		$cgw[] = array('cgw_onboarding_setup', 'cgw_onboarding', 'Onboarding setup', '/onboarding/admin/setup.php?mainmenu=cgw&leftmenu=cgw_onboarding', '$user->admin', '');
 		foreach ($cgw as $c) {

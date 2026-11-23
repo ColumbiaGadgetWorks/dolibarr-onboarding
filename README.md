@@ -244,7 +244,7 @@ cannot refund), then **Mark refunded** on the booking. Every time above is a set
 Members, Onboarding, **Trainings** lists bookings that need someone (comments, refunds to
 make, people still to pick a date, sessions the trainer has not answered), upcoming
 sessions, payments that matched no booking (link them to the booking), and every training
-recorded with how (paid, no fee, imported, group class).
+recorded with how (paid, no fee, imported, training class).
 
 ### On the spot
 
@@ -270,16 +270,18 @@ A trainer with someone in front of them, ready to train now:
 Members, Onboarding, Trainings lists them under **On the spot** (the last 30 days, and any
 still open), marked "on the spot" wherever they appear.
 
-### Free trainings and group classes
+### Free trainings and tool training classes
 
-Dolibarr only, for the board (permission "Record free trainings and create group
+Dolibarr only, for the board (permission "Record free trainings and create tool training
 classes"); the secretary manages them and gets every request.
 
 - **Mark trained (no fee)** on the Trainings page: email (and a name, for someone new, who
   becomes a non-member), tool, trainer, date, reason. No money moves.
 - **Import a list** of people already trained: one email per line, or email, first name,
   last name. Check first, then Import.
-- **Group classes** (Members, Onboarding, Group classes): tool, trainer, date, seats. The
+- **Tool training classes** (Members, Onboarding, Tool training classes; called Group
+  classes before 0.23.0): tool, trainer, date, seats. Not the same as **Free classes**,
+  which the public signs up for on the website. The
   class gets a code (`PRINT-7K2Q`), a sign-in link and a QR code to show or print. The
   code works from 30 minutes before to 3 hours after the class. Attendees sign in on their
   phones at /training/class/; new people become non-members and sign the waiver there (a
@@ -422,7 +424,7 @@ reports how long it lasted, and Dolibarr emails that too. The website sends no e
 
 1. Update the module and disable and enable **Member onboarding** once (new tables, fields,
    permissions, and the 15-minute job "Onboarding: training bookings").
-2. Give the Board user group "Record free trainings and create group classes", the secretary
+2. Give the Board user group "Record free trainings and create tool training classes", the secretary
    the training permissions and "Edit training tools", and check someone holds `secretary`.
 3. On the setup page set **Website** (`https://columbiagadgetworks.org`) and **Alerts go to**.
 4. Training tools: add Adam to 3D printers, Thursdays 17:00.
@@ -432,8 +434,8 @@ reports how long it lasted, and Dolibarr emails that too. The website sends no e
 
 ## Free classes
 
-Free classes people sign up for on the website's **/classes/** page. Members, **Free classes**
-(also under CGW) lists them; it needs the permission "Make and manage free classes" (give it
+Free classes people sign up for on the website's **/classes/** page. Onboarding, **Free classes**
+(under CGW and under Members) lists them; it needs the permission "Make and manage free classes" (give it
 to the classes lead and the officers) or an administrator.
 
 **New free class** asks which kind:
@@ -456,7 +458,8 @@ again**.
 **Signing up** on the website takes a name, an email and an "email me about CGW events" tick.
 The email is matched to a member card or contact (shown on the class's page); someone new
 becomes a contact; the tick adds them to email updates the same way as the signup box. The
-page never says whether an email is known. Seats are counted one at a time, so a full class
+page never says whether an email is known. Sign-ups stay open until the class ends, so
+latecomers can still sign up at the door. Seats are counted one at a time, so a full class
 takes nobody more; signing up again with the same email keeps the one seat. Everyone gets a
 confirmation with a link to give up their seat, which frees it for someone else.
 

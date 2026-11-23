@@ -57,11 +57,11 @@ if ($c && $canfree && ($action == 'cancel' || $action == 'reopen')) {
 }
 
 $hidden = '<input type="hidden" name="token" value="'.newToken().'">';
-llxHeader('', 'Group classes');
+llxHeader('', 'Tool training classes');
 
 if ($c) {
 	$start = $db->jdate($c->session_start);
-	print load_fiche_titre('Group class: '.dol_escape_htmltag($c->tool), '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'">All classes</a>', 'members');
+	print load_fiche_titre('Tool training class: '.dol_escape_htmltag($c->tool), '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'">All classes</a>', 'members');
 	$url = $bk->classes()->classUrl($c);
 	print '<div class="fichecenter"><div class="fichehalfleft"><table class="border centpercent">';
 	print '<tr><td class="titlefield">When</td><td>'.dol_escape_htmltag(OnboardingBooking::fmt($start)).' ('.((int) $c->minutes).' minutes)</td></tr>';
@@ -121,8 +121,8 @@ if ($c) {
 	exit;
 }
 
-print load_fiche_titre('Group classes', '', 'members');
-print '<p class="opacitymedium">A free class for several people at once. Attendees sign themselves in on their phones with the class code, people new to Dolibarr become non-members, anyone without a waiver signs it on the spot, and the trainer confirms who was trained.</p>';
+print load_fiche_titre('Tool training classes', '', 'members');
+print '<p class="opacitymedium">Training on one tool for several people at once, with no fee. For classes the public signs up for on the website, use <a href="'.dol_buildpath('/onboarding/freeclasses.php', 1).'">Free classes</a>. Attendees sign themselves in on their phones with the class code, people new to Dolibarr become non-members, anyone without a waiver signs it on the spot, and the trainer confirms who was trained.</p>';
 if ($canfree) {
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'">'.$hidden.'<input type="hidden" name="action" value="create"><table class="border centpercent">';
 	print '<tr><td class="titlefield">Tool</td><td><select name="tool">';
@@ -136,8 +136,8 @@ if ($canfree) {
 		}
 	}
 	print '</select></td></tr>';
-	print '<tr><td>When</td><td><input type="date" name="day" required> <input name="time" class="width50" value="17:00"> for <input name="minutes" class="width50" value="60"> minutes</td></tr>';
-	print '<tr><td>Seats</td><td><input name="seats" class="width50" value="10"></td></tr>';
+	print '<tr><td>When</td><td><input type="date" name="day" required> <input type="time" name="time" value="17:00" required> for <input type="number" name="minutes" min="15" max="600" step="15" class="width50" value="60" required> minutes</td></tr>';
+	print '<tr><td>Seats</td><td><input type="number" name="seats" min="1" class="width50" value="20" required></td></tr>';
 	print '<tr><td>Marked trained</td><td><label><input type="radio" name="mode" value="confirm" checked> when the trainer confirms the list afterwards (recommended)</label><br><label><input type="radio" name="mode" value="auto"> as soon as each person signs in</label></td></tr>';
 	print '<tr><td>Note</td><td><input name="note" class="minwidth400" placeholder="Optional, e.g. City grant class"></td></tr>';
 	print '</table><div class="center"><button class="button button-save" type="submit">Create the class</button></div></form><br>';
