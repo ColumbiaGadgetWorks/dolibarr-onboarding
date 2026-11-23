@@ -400,7 +400,7 @@ assert.equal((await api('classjoin', { code: klass.code, email: kid })).done, tr
 assert.equal((await api('classjoin', { code: klass.code, email: nina })).done, true, 'already known and signed');
 assert.equal((await api('classinfo', { code: klass.code })).seats_left, 1);
 tick('bookings', '61');
-assert.ok(await heard(trainerEmail, `Group class list to confirm: ${toolName}`));
+assert.ok(await heard(trainerEmail, `Training class list to confirm: ${toolName}`));
 assert.match(bk('classfinish', String(klass.id)), /^2 marked trained/);
 assert.deepEqual((await api('lookup', { email: kid })).trainings.map((t) => t.tool), [toolName]);
 assert.equal(sql(`SELECT source FROM llx_onboarding_training WHERE email = '${kid}'`), 'class');

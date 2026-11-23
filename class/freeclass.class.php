@@ -110,7 +110,19 @@ class OnboardingFreeClass
 	}
 
 	/**
-	 * What the website lists: open classes still to come, and nothing personal.
+	 * When a class ends. Sign-ups stay open until then.
+	 *
+	 * @param int        $start   Start (timestamp)
+	 * @param int|string $minutes Length in minutes
+	 * @return int
+	 */
+	public static function endsAt($start, $minutes)
+	{
+		return (int) $start + max(0, (int) $minutes) * 60;
+	}
+
+	/**
+	 * What the website lists: open classes that have not ended yet, and nothing personal.
 	 *
 	 * @return array<int,array<string,mixed>>
 	 */
@@ -118,7 +130,11 @@ class OnboardingFreeClass
 	{
 		$now = OnboardingService::now();
 		$out = array();
-		foreach ($this->where("c.status = 'open' AND c.session_start > '".$this->db->idate($now)."' AND c.session_start < '".$this->db->idate($now + self::LIST_DAYS * 86400)."'") as $c) {
+		// Listed until the class ends, so people can still sign up once it has started.
+		foreach ($this->where("c.status = 'open' AND c.session_start > '".$this->db->idate($now - 86400)."' AND c.session_start < '".$this->db->idate($now + self::LIST_DAYS * 86400)."'") as $c) {
+			if (self::endsAt($this->db->jdate($c->session_start), $c->minutes) <= $now) {
+				continue;
+			}
 			$left = max(0, (int) $c->seats - (int) $c->signed);
 			$out[] = array(
 				'id' => (int) $c->rowid,
@@ -463,9 +479,9 @@ class OnboardingFreeClass
 
 		// One seat at a time: the class row is locked while the seats are counted.
 		$this->db->begin();
-		$res = $this->db->query("SELECT rowid, seats, status, session_start FROM ".$p."onboarding_freeclass WHERE rowid = ".$id." AND entity = ".((int) $conf->entity)." FOR UPDATE");
+		$res = $this->db->query("SELECT rowid, seats, status, session_start, minutes FROM ".$p."onboarding_freeclass WHERE rowid = ".$id." AND entity = ".((int) $conf->entity)." FOR UPDATE");
 		$c = $res ? $this->db->fetch_object($res) : null;
-		if (!$c || $c->status != 'open' || $this->db->jdate($c->session_start) <= $now) {
+		if (!$c || $c->status != 'open' || self::endsAt($this->db->jdate($c->session_start), $c->minutes) <= $now) {
 			$this->db->rollback();
 			return array('ok' => false, 'error' => 'closed', 'http' => 409);
 		}

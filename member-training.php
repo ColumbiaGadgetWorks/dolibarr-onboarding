@@ -68,7 +68,7 @@ print '<h3>Trained on</h3><table class="noborder centpercent"><tr class="liste_t
 $n = 0;
 while ($res && ($o = $db->fetch_object($res))) {
 	$n++;
-	$how = array('paid' => 'paid', 'free' => 'no fee: '.$o->free_reason, 'import' => 'imported', 'class' => 'group class');
+	$how = array('paid' => 'paid', 'free' => 'no fee: '.$o->free_reason, 'import' => 'imported', 'class' => 'training class');
 	$state = $o->status == 'ignored' ? ' <span class="badge badge-status8">voided</span>' : ($o->status == 'no_show' ? ' <span class="badge badge-status8">no-show, not trained</span>' : '');
 	print '<tr class="oddeven"><td>'.dol_print_date($db->jdate($o->transacted_at), 'day').'</td><td>'.dol_escape_htmltag($o->tool).$state.'</td><td>'.dol_escape_htmltag($o->zone).'</td><td>'.dol_escape_htmltag($o->trainer_name).'</td><td class="right">'.price($o->amount).'</td><td>'.dol_escape_htmltag(isset($how[$o->source]) ? $how[$o->source] : $o->source).'</td></tr>';
 }

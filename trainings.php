@@ -309,7 +309,7 @@ while ($resql && ($o = $db->fetch_object($resql))) {
 	print '<td>'.dol_escape_htmltag($o->zone).'</td><td>'.($o->status == 'unregistered' ? '<span class="opacitymedium">no registration</span>' : dol_escape_htmltag($o->tool)).($void ? ' <span class="badge badge-status8">voided</span>' : '').'</td>';
 	print '<td>'.($o->fk_trainer && isset($names[(int) $o->fk_trainer]) ? dol_escape_htmltag(preg_replace('/ \(.*$/', '', $names[(int) $o->fk_trainer])) : '<span class="opacitymedium">'.dol_escape_htmltag($o->trainer_name).' (not matched)</span>').'</td>';
 	print '<td class="right">'.price($o->amount).'</td><td class="right">'.price($o->zone_amount).'</td><td class="right">'.price($o->trainer_amount).'</td>';
-	$how = array('paid' => 'Givebutter '.$o->gb_transaction_id, 'free' => 'No fee: '.$o->free_reason, 'import' => 'Imported', 'class' => 'Group class');
+	$how = array('paid' => 'Givebutter '.$o->gb_transaction_id, 'free' => 'No fee: '.$o->free_reason, 'import' => 'Imported', 'class' => 'Training class');
 	print '<td class="small">'.dol_escape_htmltag(isset($how[$o->source]) ? $how[$o->source] : $o->gb_transaction_id).($o->status == 'no_show' ? ' <span class="badge badge-status8">no-show, fee kept</span>' : '').'</td><td class="right">';
 	if ($canwrite && !$void) {
 		print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'" class="inline-block">';
